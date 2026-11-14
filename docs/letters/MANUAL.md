@@ -45,6 +45,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | MOTION2 | 1.9.0 | `tactics-zones-motion2` | - | pending merge (section 11a) |
 | FIN-ENGINE (FXI-ENGINE merged onto MOTION2; `plan.contactMs` / `L.contactAt`, per-word `flash: false`, impact `blowAt` / `keep` / `series`, sizes from the subject, series scheduled ahead all play) | 1.9.1 | API-CONTRACT 1.9.1 | `tactics-zones-fin-engine` | pending merge (sections 4, 21a) |
 | MODE (the invincible motion type as the GM's table setting `movement`; stepped grid on the shared clock, `L.gridClock`) | 1.9.2 | API-CONTRACT 1.9.2 (v12) | `tactics-zones-mode` | pending merge (sections 11a, 15) |
+| LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.4 | API-CONTRACT 1.9.4 (v13) | `tactics-zones-look3` | pending merge (section 13) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -618,10 +619,30 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
   - **Accent**: upright letters (word tilt at most 0.05 rad), one baseline, one size peak per word, neighbour ratio at least 0.85,
     no letter under `INV_FLOOR` (0.82) of the word's biggest (a long tail would read as lower case), "!" as tall as the letter
     before it (P8).
+  - **First letter and case look-alikes** (LOOK3 1.9.3, `check-look3.mjs`): the letters before the peak are as tall as the peak
+    (`RISE.flat` = 1: the attack is as loud as the peak; before, "cRUSH!", "wHAM!", "sKREE-" read as mixed case); a rising sound
+    (`swell`) still grows by steps of at most `RISE.swell` (0.93) with its first letter as tall as the second; after the peak the
+    word falls by `RISE.fall` (0.93) a letter (a fading sound, `shrink`, keeps 0.85); a C, O, S, U, V, W, X or Z never steps
+    under its bigger neighbour (CRUNcH). Measured over the vocabulary and the dice splash's words: first/second ratio 1.00 in every
+    word (1.9.1: down to 0.85), no case look-alike a step under its neighbour (1.9.1: 612 of 1919).
+  - **No hole before the last letter** (LOOK3): two causes, both fixed. (1) A source above or below (`from` 90 / -90, which the dice
+    splash sends) turned the invincible baseline into a fan or a sag; its leaning letters failed the reader, which straightened them
+    and pushed the pair apart ("CRUS H!", "SMAS H!", 0.09-0.18 cap). The invincible hand now keeps its straight baseline for those
+    directions (a source to the side still swells or shrinks the word). (2) In the union-keyline hand a pair the reader cannot read
+    (a W's arm touching an H's stem reads N) parts in steps of at most 0.008 cap and never more than 0.04 cap in all
+    (`UNION_PART`; 1.9.1: steps of 0.03, up to 0.2 cap). Measured: the space the reader pass opens in the last pair over the word's
+    median is at most 0.03 cap (1.9.1: up to 0.18); in a caller's own curve (`hand: { env: "fan" }`) no pair parts more than
+    0.04 cap (1.9.1: 0.18).
   - **Vertical**: `arrange: "vertical"` stacks one letter per row, rows tucked by `TUCK` (0.14 of a row), the hyphen dropped, marks
     beside the last letter (P9).
   - **Joined OO**: a run of O / 0 becomes linked ovals made from the face's own O (`ovalRing`), all the same size, overlapping by one
     stroke plus a gap, drawn over-under so each ring passes over and under its neighbour; the block keeps the counters open (P10).
+    LOOK3 (1.9.3, the owner's rulings of 2026-11-14): linked O's stand off the line by `LINK.rise` (0.07) of their size each, the
+    first up, the second down, a third up again (0.14 cap between neighbours; the pair's middle stays on the word's line, the block
+    and keyline follow the letters); the over/under switch lies half way between the two rings' middles. Two O always interlock;
+    a run of three only on `LINK.three` (20 %, the owner's «20 procent», 1.9.4) of the seeds (the hand's own generator, the same on every client); four or more
+    never (plain O's in the word's pair spacing). A number's zeros stay level. In stepped motion linked rings shake as one piece;
+    in the vertical column the rings stay on the column's axis (no stagger).
   - **Colour**: 11 flat palettes chosen from the sound (`hand.invPal`: yellow, orange, red, white, steel, cyan, blue, air, green,
     violet, stone; `invPalette(mood, character, traits)`); no palette serves more than a quarter of the kinds (P11).
   - **Spacing by letter pair**: `kernOptical` measures each pair's gap row by row over their common height and sets the mean gap to
@@ -657,6 +678,7 @@ tex counters capFont shadow prefix link arrange backdrop treat`. [R]
 - **Palettes**: `L.palettes()` [V]; `palette: "<name>"` per call (same on every client); `colors` overrides.
 
 Not done in LOOK2: joining other doubles (EE, UU) like OO; smooth interpolated motion in the invincible style (P16, MOTION2).
+LOOK3 open questions (owner): how a run of three or more that does not interlock is set (today: plain O's), and whether a source above or below should still curve an invincible word (combat-questions LOOK3-2..7; LOOK3-1 ruled: 20 %).
 
 ## 14. The owner's binding rulings
 Status: stable list, append-only. Every new ruling is added here with its date in the same turn it is given (and to the agent skill's
@@ -682,6 +704,9 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | The light/white outline never covers neighbouring letters inside a word; only around the whole word | - | one keyline round the word's union, letters clipped: done in `invincible` (LOOK2 1.8.0); `expressive` / `comic` keep per-letter outlines by the freeze (OUTL) |
 | 2026-11-13 | Keep the look from before the Invincible pass (today's `comic`) as the legacy style `expressive` | may pick `style: "expressive"` (1.8.0) | keep it identical to `comic` for the same options (`check-look2.mjs` P17) |
 | 2026-11-13 | Interlocked OO must meet properly and look artistically joined | - | done in `invincible` (LOOK2 P10: linked ovals from the face's own O) |
+| 2026-11-14 | The OO joins: the two letters are shifted apart vertically a little, the first one up, the second one down; a third O goes up again | - | done in `invincible` (LOOK3 1.9.3: `LINK.rise` 0.07 of the size each; `check-look3.mjs`) |
+| 2026-11-14 | Three O should interlock only rarely; four and more never | write the word as it sounds: the engine decides the join | done (LOOK3: three on 20 % of the seeds, four+ plain) |
+| 2026-11-14 | How rare a linked three is: «20 procent» | - | done (LOOK3 1.9.4: `LINK.three` 0.2; `check-look3.mjs` measures 1000 seeds) |
 | 2026-11-13 | Letter spacing in `invincible` is too loose and must depend on the letter pair | - | optical kerning by pair: done (LOOK2 P18, `kernOptical`) |
 | 2026-11-13 | Animation must fit the sound: a motion table from the sound, not random picks | - | MOTION2 (SPEC-MOTION) |
 | 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
@@ -918,6 +943,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   table, API index, lessons (18).
 - 2026-11-14 (MODE, 1.9.2, `tactics-zones-mode`): the motion type as the GM's table setting `movement` (15), who wins and the
   same-instant shared grid (11a), the owner's ruling (14), reduced-on-stepped limit (18), API index, stage table.
+- 2026-11-14 (LOOK3 1.9.4): a linked three on 20 % of the seeds (owner's ruling), section 13 and 14.
+- 2026-11-14 (LOOK3, 1.9.3, `tactics-zones-look3`): section 13 (staggered interlocked O, the 2/3/4+ rule, first letter and case
+  look-alikes, the hole before the last letter and its two causes), owner's rulings on the OO joins (14), stage table, API index.
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
 

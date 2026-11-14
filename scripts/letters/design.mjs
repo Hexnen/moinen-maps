@@ -262,6 +262,12 @@ export const STYLES = ["comic", "invincible", "expressive"];
 const RINGS = new Set(["O", "0"]);
 const CASELIKE = /[COSUVWXZĆÓŚŹŻ]/u;   // capitals whose lower case is the same shape, smaller
 export const RING_W = 0.94;   // a ring's width in cap heights (a circle a little under the cap height wide)
+/* LOOK3 (the owner, 2026-11-14: «litery muszą być trochę rozjechane w pionie. Pierwsze do góry drugie w dół», «Trzecie znowu do
+   góry»): interlocked O's of the invincible hand stand off their line by `rise` of their own size, the first up, the second down,
+   a third up again (a stagger round the baseline: the pair's middle stays on the line). `three` = share of seeds whose run of three
+   O interlocks (the owner: rarely, «20 procent», 2026-11-14); `most` = the longest run that interlocks (four and more never). Digits (a number's 00) stay
+   level: a number is even. */
+export const LINK = { rise: 0.07, three: 0.2, most: 3 };
 /* ---------- LOOK: the look says the sound (the user: «napisy pasowały wyglądem do dźwięków które opisują») ----------
    One deliberate mapping from the sound's CHARACTER to the lettering. The character is WORD's (words.mjs characterOf: hard, heavy, wet,
    metal, electric, heat, material, texture, contour per kind; L.word(...).play.character carries it); plain text gets its mood's. The
@@ -362,7 +368,7 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   hand.track = 0;
   hand.kern = { gap: T.short ? 0.04 : T.sustained ? 0.06 : 0.05 };
   hand.stack = "stack"; hand.order = "left";
-  hand.tiltKind = "calm"; hand.tilt = 0; hand.bob = 0; hand.upright = true; void R3;
+  hand.tiltKind = "calm"; hand.tilt = 0; hand.bob = 0; hand.upright = true;
   /* loud = a big contrast between the body and its lead-in */
   hand.contrast = 1.2 + 0.6 * sound.loud;
   /* LOOK2 (P7): every hyphen lead-in is a small prefix (about a third of the body), set on the body's top line; a loud body gets an
@@ -374,6 +380,9 @@ export function styleHand(hand, style, mood, sound, word, seed, T = traitsOf(moo
   hand.warp2 = null; hand.profile2 = null;
   hand.counters = "none"; hand.capFont = null; hand.multi = "sweep";
   hand.link = true;
+  /* LOOK3 (the owner, 2026-11-14: «3 litery powinny być rzadko splecione. A cztery i więcej nigdy»): two O interlock; a run of three
+     only rarely (LINK.three of the seeds, decided on this hand's own generator); four or more never */
+  hand.link3 = R3.chance(LINK.three);
   hand.backPick = mood === "boom" || mood === "fire" ? "cloud" : mood === "impact" || mood === "crack" ? "star" : "plate";
   hand.style = "invincible";
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
@@ -602,11 +611,23 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
   /* LOOK: interlocked rings: in a run of the same round letter each one passes through the one before it (paint.mjs draws the
      over-under); sizes alternate so the rings read as two, not as one blot */
   const linkTo = chars.map((c, i) => (look && hand.link && i > 0 && c === chars[i - 1] && RINGS.has(c) && !(i < pre) ? i - 1 : -1));
+  /* LOOK3: in the book's hand only short runs interlock (two always, three when the hand says so, four and more never: those O's
+     are set as plain letters); `runPos` = a linked ring's place in its run (0 = the first, it stands up) */
+  const runPos = chars.map(() => -1);
+  if ( inv ) for ( let a = 0; a < n; ) {
+    let b = a; while ( b + 1 < n && linkTo[b + 1] >= 0 ) b++;
+    const len = b - a + 1;
+    if ( len >= 2 ) {
+      const keep = len === 2 || (len <= LINK.most && hand.link3);
+      for ( let k = a; k <= b; k++ ) { if ( !keep ) linkTo[k] = -1; else runPos[k] = k - a; }
+    }
+    a = b + 1;
+  }
   /* LOOK2 (P10): in the book's hand linked rings are one size (the run's biggest); then (P8) the word's sizes rise to one peak and fall,
      no neighbour under 0.85 of the other; then (P7) the prefix is a fixed share of the body as it finally is */
   if ( inv ) {
     for ( let i = 0; i < n; i++ ) { if ( linkTo[i] < 0 ) continue; let a = i - 1; while ( a > 0 && linkTo[a] >= 0 ) a--; let b = i; while ( b + 1 < n && linkTo[b + 1] >= 0 ) b++; const m = Math.max(...sizes.slice(a, b + 1)); for ( let k = a; k <= b; k++ ) sizes[k] = m; }
-    if ( !hand.number && !partSized ) monotoneSizes(chars, sizes, pre);
+    if ( !hand.number && !partSized ) monotoneSizes(chars, sizes, pre, { rise: hand.env === "swell" ? RISE.swell : RISE.flat, fall: hand.env === "shrink" ? 0.85 : RISE.fall, cases: true });
     if ( pre ) { const body = Math.max(...sizes.slice(pre)); for ( let i = 0; i < pre; i++ ) sizes[i] = body * hand.prefix; }
   } else for ( let i = 0, r = 0; i < n; i++ ) { r = linkTo[i] >= 0 ? r + 1 : 0; if ( r % 2 ) sizes[i] = 0.8 * Math.min(sizes[i], sizes[i - 1]); }   // against its neighbour: an accent or a growing line never evens them out
   if ( linkTo.some((v) => v >= 0) && hand.stack === "merge" ) hand.stack = "stack";   // rings need each its own outline
@@ -637,6 +658,7 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
       /* LOOK2 (P8): upright letters standing on one straight baseline; the prefix hangs from the body's top line (P7) */
       rot = 0;
       dy = i < pre ? 0.5 - sizes[pre] + 0.5 * s : 0.5 * (1 - s);   // the prefix top = the first body letter's top
+      if ( runPos[i] >= 0 && /\p{L}/u.test(chars[i]) ) dy += (runPos[i] % 2 ? 1 : -1) * LINK.rise * s;   // LOOK3: first up, second down, third up
     }
     if ( hand.env === "stairUp" ) dy -= i * 0.22;
     if ( hand.env === "stairDown" ) dy += i * 0.16;
@@ -691,16 +713,23 @@ export function layoutPlan(chars, widths, mood, sound, hand, R, R2 = null, accen
    the letter before it, a hyphen as its smaller neighbour. The prefix (indices < pre) is apart. */
 /* LOOK2 (P8): no letter of an invincible word under this share of the word's biggest letter */
 export const INV_FLOOR = 0.82;
-export function monotoneSizes(chars, sizes, pre = 0) {
+/* LOOK3 (`o.rise`): the letters BEFORE the peak keep at least this share of the next one, and the word's first letter is as tall as
+   its neighbour: a first letter a step smaller reads as lower case ("cRUSH!", "wHAM!", "sKREE-"). The book's attack is as loud as its
+   peak: rise 1 (flat up to the peak); a rising sound (swell) still grows, by gentle steps; after the peak the word falls by gentle
+   steps too (`o.fall`; a fading sound, shrink, keeps 0.85) and a case look-alike never steps down (`o.cases`). Without `o` the LOOK2 rule (0.85). */
+export const RISE = { flat: 1, swell: 0.93, fall: 0.93 };
+export function monotoneSizes(chars, sizes, pre = 0, o = null) {
   const n = chars.length, ink = (i) => /[\p{L}\p{N}]/u.test(chars[i]);
+  const rise = o?.rise ?? 0.85, fall = o?.fall ?? 0.85, keep = (i) => !!o?.cases && CASELIKE.test(chars[i]);   // LOOK3: a C, O, S, U, V, W, X, Z keeps its neighbour's size (a step smaller reads as lower case: CRUNcH)
   let from = pre;
   for ( let i = pre; i <= n; i++ ) {
     if ( i < n && chars[i] !== " " && chars[i] !== "\n" ) continue;
     const idx = []; for ( let k = from; k < i; k++ ) if ( ink(k) ) idx.push(k);
     if ( idx.length ) {
       let p = 0; for ( let k = 1; k < idx.length; k++ ) if ( sizes[idx[k]] > sizes[idx[p]] + 1e-9 ) p = k;
-      for ( let k = p - 1; k >= 0; k-- ) { const a = idx[k], b = idx[k + 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
-      for ( let k = p + 1; k < idx.length; k++ ) { const a = idx[k], b = idx[k - 1]; sizes[a] = Math.max(0.85 * sizes[b], Math.min(sizes[a], sizes[b])); }
+      for ( let k = p - 1; k >= 0; k-- ) { const a = idx[k], b = idx[k + 1]; sizes[a] = Math.max((keep(a) ? 1 : rise) * sizes[b], Math.min(sizes[a], sizes[b])); }
+      if ( o && p > 0 && idx.length > 1 ) sizes[idx[0]] = Math.max(sizes[idx[0]], sizes[idx[1]]);
+      for ( let k = p + 1; k < idx.length; k++ ) { const a = idx[k], b = idx[k - 1]; sizes[a] = Math.max((keep(a) ? 1 : fall) * sizes[b], Math.min(sizes[a], sizes[b])); }
       /* a floor under the whole word: a long tail ramped by 0.85 a step reads as lower case (THWApp, HFaaaah); clamping keeps it monotone */
       const top = sizes[idx[p]]; for ( const k of idx ) sizes[k] = Math.max(sizes[k], INV_FLOOR * top);
       for ( let k = from; k < i; k++ ) if ( !ink(k) ) {
@@ -1082,7 +1111,11 @@ function trackTimeline(n, m, R, o = {}) {
   }
   const cracked = m.family === "break" && m.out === "shards" && m.in === "crackIn";
   hold.push(cracked ? P(2, "crack", { shards: { t: 0, seed: m.shardSeed, from: o.from ?? null } }) : P(2, "base"));
-  letterDrawings(m, n).forEach((letters, k) => { const p = P(m.rate, `L${k}`); p.letters = letters; hold.push(p); });
+  letterDrawings(m, n).forEach((letters, k) => {
+    /* LOOK3: interlocked rings shake as ONE piece (each its own jitter pulled the strokes of a crossing together or apart) */
+    if ( o.links ) for ( let i = 0; i < n; i++ ) { let h = i; while ( o.links[h] != null ) h = o.links[h]; if ( h !== i && letters[h] && letters[i] ) letters[i] = { ...letters[h] }; }
+    const p = P(m.rate, `L${k}`); p.letters = letters; hold.push(p);
+  });
   if ( m.out === "shards" && !o.reduced ) {
     const sd = m.shardSeed ??= R.seed(); let tt = 0;
     for ( let j = 0; j < 6; j++ ) { tt += 2 * TICK / 1000 / tempo; const p = P(2, `x${j}`, { shards: { t: tt, seed: sd, from: o.from ?? null, last: j === 5 } }); p.dissolve = j >= 4 ? (j === 4 ? 0.35 : 0.7) : 0; exit.push(p); }
@@ -1145,7 +1178,10 @@ export function makePlan(text, opts, fonts, memory) {
   /* where the sound comes from: the word grows away from it (Comicraft: letters grow as they move away from the source) */
   if ( Number.isFinite(opts.from) ) {
     const a = opts.from * Math.PI / 180, cx = Math.cos(a), sy = Math.sin(a);
-    hand.env = cx < -0.35 ? "swell" : cx > 0.35 ? "shrink" : (sy > 0 ? "fan" : "sag");
+    /* LOOK3: the book's hand keeps its straight baseline (LOOK2 P8): a source to the side still grows or shrinks the word, one above
+       or below no longer bends it into a fan or a sag (live, the dice splash's from: 90 fanned CRUSH!: its letters leaned, the reader
+       straightened and parted them, "CRUS H!") */
+    hand.env = cx < -0.35 ? "swell" : cx > 0.35 ? "shrink" : hand.style === "invincible" ? hand.env : (sy > 0 ? "fan" : "sag");
     hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   }
   applyLook(hand, opts);
@@ -1184,6 +1220,7 @@ export function makePlan(text, opts, fonts, memory) {
       topts.contact = k[contactKey(full, k)][0] + (full.flash && full.in !== "choreo" ? TICK / tp : 0);
     }
   }
+  if ( track && lay.letters.some((l) => l.link != null) ) topts.links = lay.letters.map((l) => l.link ?? null);   // LOOK3
   const tl = track ? trackTimeline(chars.length, motion, R, topts) : buildTimeline(chars.length, mood, sound, hand, R, topts);
   /* legacy style: flash: false keeps the timing, the accent picture shows the word (like the photosensitivity guard's unflash) */
   if ( !track && opts.flash === false ) for ( const p of [...tl.ent, ...tl.hold, ...tl.exit] ) if ( p.impact ) p.impact = false;

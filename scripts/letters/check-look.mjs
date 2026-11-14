@@ -153,10 +153,12 @@ export function checkLook(ok, bank) {
   }
   /* L12. interlocked rings: a run of O's links as rings of alternating size, overlapping; the reader does not count the crossing */
   {
-    const p = plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible" } }), L = p.layout.letters;
+    /* LOOK3 (the owner, 2026-11-14): two O interlock, four and more never: the invincible run under test is WHOOM's pair */
+    const p = plan("WHOOM", { mood: "whoosh", seed: 4, look: { style: "invincible" } }), L = p.layout.letters;
     settleCenter(p, bank);   // LOOK2: the Invincible rings are set by the optical spacing pass (shape.mjs kernOptical)
     const os = L.map((l, i) => [l, i]).filter(([l]) => l.ring);
-    ok(os.length === 4 && L[3].link === 2 && L[3].x < L[2].x + L[2].w, `rings: WHOOOOM links its O's (${os.length})`);
+    ok(os.length === 2 && L[3].link === 2 && L[3].x < L[2].x + L[2].w, `rings: WHOOM links its O's (${os.length})`);
+    ok(!plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "invincible" } }).layout.letters.some((l) => l.ring), "rings: four O never interlock in the Invincible hand (LOOK3)");
     ok(Math.abs(L[2].s - L[3].s) < 1e-9, "rings: one size in the Invincible hand (LOOK2 P10)");
     const pe = plan("WHOOOOM", { mood: "whoosh", seed: 4, look: { style: "expressive", link: true } }), Le = pe.layout.letters;
     ok(Math.abs(Le[2].s - Le[3].s) > 0.05, "rings: alternating size in the expressive hand (legacy)");

@@ -221,7 +221,8 @@ export function checkLook2(ok, bank) {
       for ( let i = pre; i < L.length; i++ ) { if ( ch[i] === " " || ch[i] === "\n" ) { if ( cur.length ) words.push(cur); cur = []; } else if ( ink(ch[i]) ) cur.push(i); }
       if ( cur.length ) words.push(cur);
       if ( p.hand.env === "flat" || p.hand.env === "swell" || p.hand.env === "shrink" ) {
-        const bottoms = idx.filter((i) => !(p.layout.lines?.length > 1)).map((i) => -0.5 + L[i].dy + 0.5 * L[i].s);
+        /* LOOK3: interlocked O's stand off the line on purpose (up, down: check-look3 measures that stagger); the rest share one line */
+        const bottoms = idx.filter((i) => !(p.layout.lines?.length > 1) && !(L[i].ring && /\p{L}/u.test(ch[i]))).map((i) => -0.5 + L[i].dy + 0.5 * L[i].s);
         if ( bottoms.length && Math.max(...bottoms) - Math.min(...bottoms) > 1e-6 ) { base++; if ( ex.length < 3 ) ex.push(`base ${p.word}`); }
       }
       for ( const wd of words ) {
@@ -265,7 +266,7 @@ export function checkLook2(ok, bank) {
     const O = bank.glyph("anton", "O"), R = ovalRing("anton", bank), ob = bbox(O.contours), rb = bbox(R.contours);
     ok(rb.y0 === ob.y0 && rb.y1 === ob.y1 && rb.x1 - rb.x0 >= 3 * R.stroke + 2 * R.gap - 1e-9, `rings: the face's O widened to hold a stroke (${(rb.x1 - rb.x0).toFixed(3)} >= ${(3 * R.stroke + 2 * R.gap).toFixed(3)})`);
     ok(R.link > R.stroke && R.link < (rb.x1 - rb.x0) - 2 * R.stroke + 1e-9, "rings: the link leaves air on both sides of each crossing stroke");
-    for ( const [t, m] of [["WHOOOOM", "whoosh"], ["KA-THOOM!", "boom"], ["BOOM!", "boom"]] ) {
+    for ( const [t, m] of [["WHOOM", "whoosh"], ["KA-THOOM!", "boom"], ["BOOM!", "boom"]] ) {   // LOOK3: a pair (four O never link)
       const p = inv(t, { mood: m, seed: `r${t}` }); settleCenter(p, bank);
       const L = p.layout.letters, rs = [...L.keys()].filter((i) => L[i].ring);
       ok(rs.length >= 2 && new Set(rs.map((i) => L[i].s.toFixed(6))).size === 1, `rings ${t}: linked, one size`);
