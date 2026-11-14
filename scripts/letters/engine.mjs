@@ -9,8 +9,9 @@ import { onOf, stepT, easeOf, orientAngle, pathSpec, pathPoints, pathAt, orbitAt
 import { rng, hash } from "./rng.mjs";
 import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
+import { MOTION_MODES, DEFAULT_MOTION, playOpts, trackPose, trackReach, holdEnergy, gridQ, gridAge, gridCeil } from "./motion.mjs";
 
-export const VERSION = "1.8.1";   // 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.9.0";   // 1.9.0 = MOTION2 (contract v10): invincible motion as per-frame tracks from a sound-family table (motion.mjs), pictures shared by key, smooth|stepped switch (look.motion, L.motionMode), reduced exit = fade. 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -98,12 +99,17 @@ export function createEngine(base) {
      "comic"): "invincible" in a world of the Invincible system (the book's own lettering), "comic" elsewhere; L.lookStyle(name)
      changes it for this client */
   let defLook = globalThis.game?.system?.id === "invincible" ? "invincible" : "comic";
+  /* MOTION2: how the invincible style moves on this client: "smooth" (default) or "stepped" (A/B for the owner, MOTION2-1); a call's
+     look.motion wins */
+  let defMotion = DEFAULT_MOTION;
+  const withMotion = (o) => (o.look.style === "invincible" && !MOTION_MODES.includes(o.look.motion) ? { ...o, look: { ...o.look, motion: defMotion } } : o);
   const mk = (t, o, f, m) => {
-    if ( o?.look?.style ) return makePlan(t, o, f, m);
+    if ( o?.look?.style ) return makePlan(t, withMotion(o), f, m);
     const ls = typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook;   // TOOL's built-in style names too
-    return makePlan(t, { ...o, look: { ...(o?.look ?? {}), style: ls } }, f, m);
+    return makePlan(t, withMotion({ ...o, look: { ...(o?.look ?? {}), style: ls } }), f, m);
   };
   const lookStyle = (name) => { if ( STYLES.includes(name) ) defLook = name; return defLook; };
+  const motionMode = (name) => { if ( MOTION_MODES.includes(name) ) defMotion = name; return defMotion; };
 
   /* ---------- placement ---------- */
   /* a token reference: a Token, a TokenDocument or a token id (a string is always read as a token id) */
@@ -355,6 +361,9 @@ export function createEngine(base) {
       if ( h.pixel ) r.canvas.style.imageRendering = "pixelated";
     }
     h.cache[idx] = r;
+    /* MOTION2: every picture of the same key is this painting (one painting, one texture upload) */
+    const key = h.keyIdx ? keyOf(p) : null;
+    if ( key != null ) for ( const j of h.keyIdx.get(key) ?? [] ) h.cache[j] = r;
     stats.rendered++; stats.ms += r.ms; if ( r.ms > stats.maxMs ) stats.maxMs = r.ms;
     return r;
   }
@@ -378,9 +387,38 @@ export function createEngine(base) {
     h.cycle = cycle;
     h.holdMs = Math.max(cycle, h.plan.holdMs);
     h.exitMs = tl.exit.reduce((a, p) => a + p.ticks * TICK, 0);
+    /* MOTION2: a track word (invincible style): pictures with the same key are one painting; the motion is a pose per frame */
+    h.track = h.plan.motion ?? null;
+    if ( h.track ) {
+      h.keyIdx = new Map();
+      pics.forEach((p, i) => { const k = keyOf(p); if ( k == null ) return; if ( !h.keyIdx.has(k) ) h.keyIdx.set(k, []); h.keyIdx.get(k).push(i); });
+      h.gridQ = gridQ(h.plan.on || 2);
+    }
+  }
+  /* a picture's sharing key: an impact accent the flash guard turned off looks like the word itself */
+  const keyOf = (p) => (p.key == null ? null : p.key === "impact" && !p.impact ? "base" : p.key);
+  /* MOTION2: which picture a track word shows at age t: the entrance and exit by their ticks, the hold picture, and in stepped mode the
+     letters' drawings on the shared grid while the hold's motion still has energy */
+  function trackPicAt(h, t) {
+    const tl = h.plan.timeline;
+    const exitStart = h.exitAt ?? (h.loop ? Infinity : h.entMs + h.holdMs);
+    if ( t < exitStart ) {
+      if ( t < h.entMs ) { let a = 0; for ( let i = 0; i < h.eN; i++ ) { a += tl.ent[i].ticks * TICK; if ( t < a ) return i; } }
+      if ( h.hN > 1 ) {
+        const ht = t - h.entMs, m = h.track;
+        if ( holdEnergy(m, ht, h.holdMs) >= 0.25 ) {
+          const q = (m.rate || 2) * TICK, ga = gridAge((h.t0 ?? 0) + (h.lag || 0), t, q) - h.entMs;
+          return h.eN + 1 + (Math.floor(Math.max(0, ga) / q) % (h.hN - 1));
+        }
+      }
+      return h.eN;
+    }
+    let a = exitStart; for ( let i = 0; i < tl.exit.length; i++ ) { a += tl.exit[i].ticks * TICK; if ( t < a ) return h.eN + h.hN + i; }
+    return -1;
   }
   /* which picture is up at time t (ms since start); -1 = finished */
   function picAt(h, t) {
+    if ( h.track ) return trackPicAt(h, t);
     const tl = h.plan.timeline;
     const exitStart = h.exitAt ?? (h.loop ? Infinity : h.entMs + h.holdMs);
     if ( t < exitStart ) {
@@ -404,7 +442,7 @@ export function createEngine(base) {
   function pictureNow(h, t) {
     let age = ageOf(h, t), idx = picAt(h, age);
     const last = h.lastIdx, x0 = h.eN + h.hN, xN = x0 + h.plan.timeline.exit.length;
-    if ( last != null && !h.quick ) {
+    if ( last != null && !h.quick && !h.track ) {   // MOTION2: a track word's clock never waits (its pictures are few and shared)
       let want = null;
       if ( last < h.eN - 1 && (idx > last + 1 || idx < 0) && h.exitAt == null ) want = last + 1;                  // inside the entrance
       else if ( (idx < 0 || idx > x0) && last < xN - 1 ) {                                                    // inside the exit
@@ -422,10 +460,16 @@ export function createEngine(base) {
     h.shown = c;
     /* F2: free what will not be shown again: the replaced (stale) picture, the entrance once the hold runs, everything before the
        current picture once the exit runs (the hold cycle stays cached: it loops) */
-    if ( h.retired ) { for ( const o of h.retired ) if ( o !== c ) dropPic(o); h.retired = null; }
+    if ( h.retired ) { for ( const o of h.retired ) if ( o !== c && !h.cache.includes(o) ) dropPic(o); h.retired = null; }
     const i = c.idx ?? -1, exitFrom = h.eN + h.hN;
-    const upTo = i >= exitFrom ? i : Math.min(i, h.eN);   // entrance pictures go as soon as they are passed
-    for ( let j = 0; j < upTo; j++ ) { const o = h.cache[j]; if ( o && o !== c && (j < h.eN || i >= exitFrom) ) { dropPic(o); h.cache[j] = null; } }
+    if ( h.keyIdx ) {
+      /* MOTION2: shared pictures: free a painting only when no drawing still to come uses it (the index shown, not the one painted) */
+      const at = h.atIdx ?? i, keep = new Set(h.cache.slice(Math.max(0, at)).filter(Boolean)); keep.add(c);
+      for ( let j = 0; j < at; j++ ) { const o = h.cache[j]; if ( o && !keep.has(o) && (j < h.eN || at >= exitFrom) ) { dropPic(o); for ( let k = 0; k < h.cache.length; k++ ) if ( h.cache[k] === o ) h.cache[k] = null; } }
+    } else {
+      const upTo = i >= exitFrom ? i : Math.min(i, h.eN);   // entrance pictures go as soon as they are passed
+      for ( let j = 0; j < upTo; j++ ) { const o = h.cache[j]; if ( o && o !== c && (j < h.eN || i >= exitFrom) ) { dropPic(o); h.cache[j] = null; } }
+    }
     if ( h.space === "world" ) {
       h.sprite.texture = c.tex;
       h.sprite.anchor.set(c.ax / c.canvas.width, c.ay / c.canvas.height);
@@ -474,7 +518,7 @@ export function createEngine(base) {
         h.offset = { x: h.plan._center[0] - h.plan.layout.W / 2, y: h.plan._center[1] + 0.5 };
       }
       if ( Number.isFinite(spec.turns) && spec.turns > 0 && !h.loop ) h.holdMs = Math.max(h.holdMs, spec.turns * tr.period - h.entMs);
-      if ( spec.trail !== false && !h.reducedMotion ) addTrail(h.plan, "orbit", 1, () => R.seed());
+      if ( spec.trail !== false && !h.reducedMotion && !h.track ) addTrail(h.plan, "orbit", 1, () => R.seed());   // MOTION2: no lines popping beside a track word
     } else {
       tr.dur = Math.max(50, spec.duration ?? (h.entMs + h.holdMs));
       tr.loop = !!spec.loop;
@@ -483,13 +527,13 @@ export function createEngine(base) {
       tr.spin = Number.isFinite(spec.spin) ? spec.spin : 0;
       const P = pathPoints(spec, (a) => pointOf(h.space, a)), q = P || spec.fn ? pathAt(P, 0.02, spec) : null;
       const a0 = q ? q.a : 0, r0 = orientAngle(a0, tr.orient);
-      if ( spec.trail !== false && !h.reducedMotion && !tr.spin ) addTrail(h.plan, "path", Math.cos(a0 - r0) >= 0 ? 1 : -1, () => R.seed());
+      if ( spec.trail !== false && !h.reducedMotion && !tr.spin && !h.track ) addTrail(h.plan, "path", Math.cos(a0 - r0) >= 0 ? 1 : -1, () => R.seed());
     }
   }
   /* where a travelling word is at t ms of its life: { x, y, rot } (null: its path or centre is gone and it never had a place) */
   function travelPose(h, t) {
     const tr = h.travel;
-    const tt = h.reducedMotion ? 0 : stepT(Math.max(0, t), tr.on);
+    const tt = h.reducedMotion ? 0 : h.track ? Math.max(0, t) : stepT(Math.max(0, t), tr.on);   // MOTION2: a track word travels at the display rate
     if ( tr.kind === "orbit" ) {
       const c = pointOf(h.space, tr.center) ?? tr.lastC ?? (h.space === "world" ? worldPoint({ at: null }) : screenPoint({ at: null }));
       tr.lastC = c;
@@ -509,7 +553,7 @@ export function createEngine(base) {
   function knockOf(h, t) {
     let x = 0, y = 0, r = 0, s = 1;
     for ( const k of h.knocks ) {
-      const u = Math.min(1, stepT(t - k.t0, h.plan.on || 2) / k.dur);
+      const u = Math.min(1, (h.track ? t - k.t0 : stepT(t - k.t0, h.plan.on || 2)) / k.dur);
       const e = (1 - (1 - u) ** 3) * (1 + 0.22 * Math.sin(Math.PI * u));   // out fast, overshoot, settle (follow-through)
       x += k.dx * e; y += k.dy * e; r += k.dr * e;
       if ( u < 1 ) s *= 1 + 0.16 * (1 - u) * Math.sin(Math.PI * Math.min(1, u * 2.5));   // the blow squashes it bigger for a moment
@@ -523,6 +567,8 @@ export function createEngine(base) {
   let viewInset = { top: 8, right: 8, bottom: 8, left: 8 };
   function reachOf(h) {
     const hb = h.plan._holdBox ?? { w: 3, h: 1 }, tl = h.plan.timeline;
+    /* MOTION2: a track word's reach = its entrance poses around the hold box (the first entrance frame inside the view, FXLD2-4) */
+    if ( h.track ) { const e = trackReach(h.track, hb.w, hb.h), pad = 0.18; return { l: e.l + pad, r: e.r + pad, u: e.u + pad, d: e.d + pad }; }
     let l = hb.w / 2, r = hb.w / 2, u = hb.h / 2, d = hb.h / 2;
     const take = (p, cap) => {
       const g = p.g ?? {}, sc = Math.min(1.5, Math.abs((g.s ?? 1) * Math.max(g.sx ?? 1, g.sy ?? 1)));
@@ -578,11 +624,21 @@ export function createEngine(base) {
     const vs = viewShift(h, X, Y, h.rot + trot);
     if ( vs ) { X += vs.dx; Y += vs.dy; }
     h.lastPos = { x: X, y: Y }; h.lastRot = h.rot + trot;
-    let kr = 0, ks = 1;
+    let kr = 0, ks = 1, ksx = 1, ksy = 1, alpha = 1, dark = 0;
     if ( h.knocks?.length ) { const q = knockOf(h, t); X += q.x; Y += q.y; kr = q.r; ks = q.s; }
+    /* MOTION2: a track word's pose (motion.mjs): smooth per display frame; stepped mode reads its drawn channels on the shared grid */
+    if ( h.track && h.t0 != null ) {
+      const age = ageOf(h, t), hb = h.plan._holdBox ?? { w: 3, h: 1 };
+      /* stepped: the entrance on ones (the contact needs every drawing), the hold and exit on the shared grid of twos */
+      const tq = h.track.mode === "stepped" ? gridAge(h.t0 + (h.lag || 0), age, age < h.entMs ? TICK : h.gridQ) : age;
+      const P = trackPose(h.track, Math.max(0, age), h.entMs, h.holdMs, h.exitAt, { W: hb.w, H: hb.h }, Math.max(0, tq));
+      const r0 = h.rot + trot, cr = Math.cos(r0), sr = Math.sin(r0);
+      X += (P.x * cr - P.y * sr) * k; Y += (P.x * sr + P.y * cr) * k;
+      kr += P.r; ks *= P.s; ksx = P.sx; ksy = P.sy; alpha = P.a; dark = P.d;
+    }
     /* ADVT 8 / ADVD 6: a held word keeps breathing: a slow sway, swell and bob over its whole hold (on the drawing grid), on top of
        its hold drawings, so a 2-3 s hold is never a still picture at viewing size; not for reduced motion, travel or pixel words */
-    if ( !h.reducedMotion && !h.travel && !h.pixel && h.t0 != null && h.entMs != null ) {
+    if ( !h.reducedMotion && !h.travel && !h.pixel && !h.track && h.t0 != null && h.entMs != null ) {
       const ag = ageOf(h, t) - h.entMs;
       if ( ag > 0 ) {
         const u = stepT(ag, h.plan.on || 2) / 1000, ph = (h.plan.seed % 628) / 100, f = Math.min(1, ag / 300) * (0.7 + 0.6 * (h.plan.sound?.loud ?? 0.5));
@@ -594,12 +650,22 @@ export function createEngine(base) {
       h.sprite.visible = seen;
       h.sprite.position.set(X, Y);
       h.sprite.rotation = rot;
-      if ( h.shown ) h.sprite.scale.set((1 / h.shown.rs) * (h.size / h.shown.size0) * ks);
+      if ( h.shown ) { const b = (1 / h.shown.rs) * (h.size / h.shown.size0) * ks; h.sprite.scale.set(b * ksx, b * ksy); }
+      if ( h.track ) {
+        h.sprite.alpha = Math.max(0, Math.min(1, alpha)) * (h.opts.hollow ? 0.85 : 1);
+        const g = Math.round(255 * (1 - 0.75 * Math.max(0, Math.min(1, dark)))); h.sprite.tint = (g << 16) | (g << 8) | g;
+      }
       if ( h.glow ) { placeGlow(h, X, Y, rot, ks, t); h.glow.bloom.visible = seen; if ( h.glow.light ) h.glow.light.visible = seen; }
     } else {
       const vis = seen ? "" : "hidden";
       if ( h.box.style.visibility !== vis ) h.box.style.visibility = vis;
       const f = (h.shown ? h.size / h.shown.size0 : 1) * ks;
+      if ( h.track ) {
+        h.box.style.transform = `translate(${X.toFixed(1)}px,${Y.toFixed(1)}px) rotate(${rot.toFixed(4)}rad) scale(${(f * ksx).toFixed(4)},${(f * ksy).toFixed(4)})`;
+        const op = (Math.max(0, Math.min(1, alpha)) * (h.opts.hollow ? 0.85 : 1)).toFixed(3);
+        if ( h.box.style.opacity !== op ) h.box.style.opacity = op;
+        if ( !h.glow && !h.opts.glow ) { const fl = dark > 0.01 ? `brightness(${(1 - 0.75 * Math.min(1, dark)).toFixed(3)})` : ""; if ( h.box.style.filter !== fl ) h.box.style.filter = fl; }
+      } else
       h.box.style.transform = `translate(${X.toFixed(1)}px,${Y.toFixed(1)}px) rotate(${rot.toFixed(4)}rad)${Math.abs(f - 1) > 1e-3 ? ` scale(${f.toFixed(4)})` : ""}`;
     }
   }
@@ -767,7 +833,7 @@ export function createEngine(base) {
     h.alive = false;
     clips.delete(h); pending.delete(h);
     if ( h.timer ) { clearTimeout(h.timer); h.timer = 0; }
-    for ( const c of h.cache ) if ( c ) dropPic(c);
+    for ( const c of new Set(h.cache) ) if ( c ) dropPic(c);   // MOTION2: a shared painting is freed once
     h.cache.length = 0;
     if ( h.retired ) { for ( const c of h.retired ) dropPic(c); h.retired = null; }
     dropGlow(h);
@@ -841,6 +907,8 @@ export function createEngine(base) {
     clips.add(h);
     /* startAt: a performance.now() time on this page's clock (an effect's own t0): the word joins its timeline there */
     h.t0 = Number.isFinite(opts.startAt) ? opts.startAt : null;
+    /* MOTION2 (stepped): a word starts on the shared drawing grid, so every word's drawings change on the same instants */
+    if ( h.t0 == null && h.track?.mode === "stepped" ) h.t0 = gridCeil(now(), h.gridQ);
   }
 
   /* ---------- the one animation loop ---------- */
@@ -875,7 +943,7 @@ export function createEngine(base) {
           const c = picture(h, idx, true);
           first -= now() - t1; painted++;
           if ( h.t0 == null ) h.t0 = now();
-          show(h, c); place(h); h.lastIdx = idx;
+          h.atIdx = idx; show(h, c); place(h); h.lastIdx = idx;
           if ( !h.isReady ) { h.isReady = true; h._ready(true); for ( const f of ext.start ) { try { f(h); } catch ( e ) { console.warn("LETR | start hook", e); } } }
           continue;
         }
@@ -893,14 +961,15 @@ export function createEngine(base) {
            drawn anyway, two per frame at most: holding the previous one would stretch the wind-up or freeze the exit) */
         if ( !c && (budget > 0 || (timed && forced < 2)) ) { if ( budget <= 0 ) forced++; const t1 = now(); c = picture(h, idx, true); budget -= now() - t1; }
         if ( c ) {
+          h.atIdx = idx;
           const was = h.shown; show(h, c); if ( was !== h.shown ) place(h);
-          if ( was !== h.shown && timed && idx !== h.lastIdx ) {
+          if ( was !== h.shown && timed && idx !== h.lastIdx && !h.track ) {
             /* a late drawing starts from its beginning (a frame of slack): the next one is not cut short */
             const late = age - picStart(h, idx);
             if ( late > TICK ) h.lag = (h.lag || 0) + late - TICK / 2;
           }
           h.lastIdx = idx;
-        } else if ( timed && idx !== h.lastIdx && h.lastIdx != null ) h.lag = (h.lag || 0) + (age - picStart(h, idx));   // waiting: the clock waits too
+        } else if ( timed && idx !== h.lastIdx && h.lastIdx != null && !h.track ) h.lag = (h.lag || 0) + (age - picStart(h, idx));   // waiting: the clock waits too
         /* move: a blast pushes its neighbours at its contact, echoes answer after the landing, a self-lit word gets its glow */
         if ( h.pushT != null && age >= h.pushT && h.lastPos ) { h.pushT = null; push({ ...h.lastPos }, { ...h.pushCfg, space: h.space, except: h }); }
         if ( h.echo && h.echo.k <= h.echo.n && !h.stopWhy && age >= h.entMs + h.echo.first + (h.echo.k - 1) * h.echo.every ) { spawnEcho(h, h.echo.k); h.echo.k++; }
@@ -1083,8 +1152,10 @@ export function createEngine(base) {
           orbitR ??= Number.isFinite(ob.radius) && ob.radius > 0 ? ob.radius : (Number.isFinite(o.span) && o.span > 0 ? o.span * 0.85 : areaOf(o.area) || unit * 3.4);
           travel2 = { orbit: { ...ob, center: ob.center ?? o.at, radius: orbitR, phase: (Number.isFinite(ob.phase) ? ob.phase : -90) + (dir * 360 * tb) / period } };
         } else if ( o.path ) travel2 = { path: o.path };
+        /* MOTION2: an invincible stream's syllables take their motion from the kind (motion.mjs, syllable rows): no forced slam / shake */
+        const inv = handOf()?.style === "invincible";
         const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, ceilK: o.ceilK ?? 0.55, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
-          in: o.in ?? "slam", out: o.out ?? "pop", holdKind: "shake", hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
+          in: inv ? o.in : o.in ?? "slam", out: inv ? o.out : o.out ?? "pop", holdKind: inv ? o.holdKind : "shake", kind: inv ? o.kind : undefined, look: inv ? o.look : undefined, hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
           zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation,
           on: o.on, fps: o.fps, glow: o.glow, ...travel2 });
         emitted++;
@@ -1144,7 +1215,7 @@ export function createEngine(base) {
     settleCenter(plan, bank);
     const dpr = opts.dpr ?? (globalThis.devicePixelRatio || 1);
     const S = Math.max(4, (opts.size ?? 72) * plan.sizeK * dpr);
-    const p = plan.timeline.hold[0];
+    const p = plan.motion ? { ...plan.timeline.hold[0], shards: null } : plan.timeline.hold[0];   // MOTION2: a break's still is the whole word
     return paintPicture(plan, bank, opts.picture ? opts.picture(plan) : p, S, makeCanvas).canvas;
   }
 
@@ -1197,7 +1268,7 @@ export function createEngine(base) {
   function sfx(kind, opts = {}) {
     const w = vocab.word(kind, opts);
     const rest = Object.fromEntries(Object.entries(opts).filter(([k]) => !VOCAB_KEYS.includes(k)));
-    const h = play(w.text, { ...w.play, ...rest, sound: { ...w.play.sound, ...(opts.sound ?? {}) }, magnitude: opts.magnitude ?? w.play.magnitude });
+    const h = play(w.text, { ...playOpts(w), ...rest, sound: { ...w.play.sound, ...(opts.sound ?? {}) }, magnitude: opts.magnitude ?? w.play.magnitude });
     h.word = w;
     return h;
   }
@@ -1212,7 +1283,7 @@ export function createEngine(base) {
     const handles = steps.map((s) => {
       const at = opts.places?.[s.place] ?? rest.at;
       const when = t0 != null ? { startAt: t0 + s.t } : (d0 + s.t > 0 ? { delay: d0 + s.t } : {});
-      const h = play(s.word.text, { ...s.word.play, ...rest, ...s.play, ...(at !== undefined ? { at } : {}), ...(opts.seed != null ? { seed: `${opts.seed}|${s.i}` } : {}), ...when });
+      const h = play(s.word.text, { ...playOpts(s.word), ...rest, ...s.play, ...(at !== undefined ? { at } : {}), ...(opts.seed != null ? { seed: `${opts.seed}|${s.i}` } : {}), ...when });
       h.word = s.word; h.step = s;
       return h;
     });
@@ -1221,12 +1292,13 @@ export function createEngine(base) {
 
   /* continuous sounds (sustain.mjs, README "Motion: continuous sounds"): a phrase score over play(); stopAll and a scene change stop
      them like streams */
-  const sustain = makeSustain({ play, now, streams, vocab: () => vocab, pointOf, syllablesOf,
+  const styleOf = (o) => (STYLES.includes(o?.look?.style) ? o.look.style : typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook);
+  const sustain = makeSustain({ play, now, streams, vocab: () => vocab, pointOf, syllablesOf, styleOf,
     inView: (space, p, pad = 0) => { const v = viewRect({ space }); return !v || !p || (p.x >= v.x0 - pad && p.x <= v.x1 + pad && p.y >= v.y0 - pad && p.y <= v.y1 + pad); } });
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(),
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(),
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow, chain,
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */
@@ -1238,5 +1310,8 @@ export function createEngine(base) {
     _ext: ext, _settle: (plan) => settleCenter(plan, bank),
     _bank: bank, _plan: (t, o = {}) => mk(t, o, fontsApi, []), _paint: (plan, p, S) => { settleCenter(plan, bank); return paintPicture(plan, bank, p, S, makeCanvas); }
   };
+  /* MOTION2: L.word's play options name the kind (the invincible motion table) and keep the vocabulary's own motion picks for the
+     legacy style (vocabMotion), so `L.play(w.text, w.play)` moves like `L.sfx` */
+  api.word = (kind, o) => { const w = vocab.word(kind, o); w.play = playOpts(w); return w; };
   return api;
 }

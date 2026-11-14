@@ -64,6 +64,7 @@ export function damp(plan, k) {
     for ( const l of p.letters ) { l.x = z(l.x); l.y = z(l.y); l.r = z(l.r); l.s = s(l.s); l.sx = s(l.sx); l.sy = s(l.sy); }
     p.smear = null;
   }
+  if ( plan.motion ) plan.motion.damp = k;   // MOTION2: a track word's pose is damped the same way
   return plan;
 }
 /* the reduced flag a word gets: the strongest reduction wins (the caller's own Motion setting, this client's engine setting, the OS) */

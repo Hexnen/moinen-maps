@@ -40,7 +40,8 @@ Keep the section titles stable: other documents and the agent skill link to them
 | LOOK (styles, sound -> look, lines, backdrops, accent, legibility, rings) | 1.6.0 | v8 | `tactics-zones` | changing (SPEC-LOOK P1-P17) |
 | LM (MOVE + LOOK merged) | 1.7.0 | v7+v8 | `tactics-zones-lm` (in progress, not on origin yet) | pending merge |
 | LOOK2 (invincible rebuilt: SPEC-LOOK P1-P15, P17, P18; legacy look frozen as `expressive`) | 1.8.0 | v9 | `tactics-zones-look2` | pending merge |
-| MOTION2, WORD2, OUTL | - | - | - | planned (see "What is about to change") |
+| MOTION2 | 1.9.0 | `tactics-zones-motion2` | - | pending merge (section 11a) |
+| WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
 1. What LETR is
@@ -443,8 +444,9 @@ travelling along `dir` or toward `to`, one hand for the whole stream.
   syllables, `s.emitted` counts all [V]. A stream whose source token goes away stops. `L.stopAll()` and (world) a scene change stop
   it.
 
-## 11. Motion (core)
-Status: changing (SPEC-MOTION, ordered: MOTION2). [R] unless marked.
+## 11. Motion (core): the legacy styles `comic` / `expressive`
+Status: stable and frozen for `comic` / `expressive` (their plans and drawings are proved unchanged by MOTION2: 2052 fingerprints).
+The `invincible` style moves differently from 1.9.0: section 11a. [R] unless marked.
 
 - One clock of 24 ticks a second; drawings on twos (about 12 a second), heavy words on threes; smears, flash and snap frames on
   ones; a landed key pose is held 4-6 ticks. Every hold picture is a fresh drawing (the line "boils").
@@ -461,7 +463,44 @@ Status: changing (SPEC-MOTION, ordered: MOTION2). [R] unless marked.
 Known faults this section will lose (SPEC-MOTION, seen in frames): motions are random picks per word, not chosen from the sound;
 `buzz` adds sparks to non-electric sounds; `crackIn` assembles pieces (breaking played backwards); impact lines re-flash through the
 whole hold; a boom leaves by a second explosion; the wind-up shows the finished word before the sound; holds are 3 ticks (not on
-twos) and words do not share a beat, which reads as judder; the hold amplitude is constant. See section 19.
+twos) and words do not share a beat, which reads as judder; the hold amplitude is constant. These stay in `comic` / `expressive`
+(frozen); the `invincible` style lost them in 1.9.0 (section 11a).
+
+### 11a. Motion of the `invincible` style (1.9.0 MOTION2)
+Status: pending merge (`tactics-zones-motion2`). [V] = node checks (`check-motion2.mjs`) and seen on 60 fps films of lane 5.
+
+- **From the sound, not dice** [V]. `motion.mjs` holds 18 families (sharp dry hit, heavy hit, ringing metal, break, boom, fly-by,
+  wind, electric, power, fire, steady hiss, water, engine, siren, bursts in series, animal voice, human voice, small device) and a
+  row for every vocabulary kind (`KIND_MOTION`): entrance, hold envelope, exit, hold length from the sound's duration, drawing rate,
+  which letters move, travel. Pass `kind` (`L.sfx` does it for you); plain text uses its mood's typical kind; a registered mood moves
+  like the mood it extends. The seed varies only phases, never the row. `in` / `holdKind` / `out` still win when named; legacy names
+  map (shake -> rattle, shatter -> shards, dissolve -> trailOff, exit pop/burst -> release).
+- **Names.** Entrances `slam pop burstIn swell drop dropSlow squash grow roarIn rise ignite zip drag stretch crackIn falseStart
+  squeeze sputterIn fade`; holds `still recoil rattle ring throb roll pass sway swirl buzz climb flicker crackle shiver snake purr
+  wobble rate chop pulse beat lubdub walk growl roarPeak arc deflate tremble bend shudder sputter`; exits `cut ringOut trailOff
+  smokeOff blowAway runDown powerDown sputterOut flickerOut fall droop rise shrink zipout release fade shards crumble`.
+- **One painting, moved** [V]. The word is painted once (its hold picture) and the sprite / box is moved, turned, scaled, squashed,
+  faded and darkened every display frame. New pictures only where the drawing changes: the impact accent (first tick of a loud sharp
+  contact or a loud boom), a smear (stepped slam / burst-in), the cracked word, the vibrating letters (stepped), the pieces of a
+  shards / crumble exit. A word paints 1-3 pictures (fake browser), so big world words no longer upload a texture per drawing:
+  lane 5, magnitude-2 boom, worst frame 76-130 ms on 1.8.1 against 27-37 ms on 1.9.0 (34-50 paintings against 5-9; the rest are
+  size-drift repaints, see 18).
+- **Two modes** `look.motion: "smooth" | "stepped"`, default `L.motionMode()` (`L.motionMode("stepped")` switches it; provisional
+  default smooth, MOTION2-1: the owner decides on the A/B film). smooth: every channel interpolated. stepped: scale, squash, turn and
+  the moving letters change on ONE grid of the page clock (entrance on ones, hold and exit on twos; a word without `startAt` starts
+  on the grid), translation and alpha stay smooth; slams and booms get a smear at contact.
+- **Rules the checks hold** [V]: slam biggest on its first shown frame (no wind-up showing the word); pop at least half size at once
+  and 0.8 by 50 ms (it never stands small, then jumps); neighbouring frames differ in scale by 1.4x at most outside a contact picture;
+  a crack lands whole, then cracks; a boom leaves as smoke (darkens, lifts, thins), never a second burst; hits decay, swells rise,
+  steady sounds stay within 15 %; a rumble holds 3x+ a punch; siren, heartbeat, rotor repeat at their own period; in hiss / growl /
+  engine / ring only the sustained run moves (others under 20 %); reduced motion = fade in, still, 350 ms fade out; no sparks,
+  krackle, impact or speed lines, no misregistration drawn into an invincible picture.
+- **Streams and sustain** [V]: an invincible stream's syllables take the kind's row (a hiss grows, never slams; syllables never
+  flash); `L.sustain({ kind })` picks treatments by flow style (steady: breath / stretch only; cycle: split; crackle may accent).
+- **`L.word`**: `w.play` now carries `kind` and `vocabMotion` (the vocabulary's random picks, used only by the legacy styles), not
+  `in` / `holdKind` / `out`. `L.play(w.text, w.play)` moves like `L.sfx`.
+- Not done: scatter emitters (rain, hail), orbit travel for the tornado (it swirls in place), doppler on a pass, the throttled-CPU
+  entrance timing run (SPEC-MOTION 6.10).
 
 ## 12. Motion 1.5.0: travel, choreography, rates, escalation, sustain
 Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then changing (SPEC-MOTION).
@@ -708,6 +747,8 @@ Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest t
 ## 18. Known limits
 Status: stable list; edit as items close.
 
+- Size drift repaints: a world word's size follows zoom and the number of world words alive (`alive` in the size model); a drift
+  over 15 % repaints its pictures. On lane 5 this was most of a 1.9.0 word's 5-9 paintings. [V live]
 - Performance: a burst of 48 words still gives some 50-170 ms frames from cost outside the engine's paint budget (likely GPU upload of
   new pictures; unverified). Queued (PERF).
 - No sound (deferred by the owner).
@@ -742,7 +783,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 |---|---|---|
 | LM merge (1.7.0) | MOVE 1.5.0 into `tactics-zones`; GM-only and 87 kinds kept | 1 (files), 4 (options), 11, 12 (status -> stable/changing), 10 (stream options), 20, stage table |
 | LOOK2 rest / OUTL | LOOK2 1.8.0 did P1-P15, P17, P18 (section 13). Left: joining other doubles (EE, UU) like OO; OUTL (one keyline round the word in `comic`); P16 smooth motion in the invincible style goes to MOTION2 | 13 |
-| MOTION2 | one shared drawing grid on twos; a deterministic motion table per sound family (no dice); hold envelopes (decay, rise, arc, pulse, steady); contradictions removed; exits by cut-off (cut, ring-out, trail-off, smoke-off, blow-away, power-down, sputter, crumble); a rhythm primitive (siren, heartbeat, rotor, beeps, mech steps); letter roles (only the sustained run moves); default travel per kind, scatter and walk emitters; streams and sustain take motion from the kind; boom burst-in entrance | 11 (all), 12, 10, 4 (`in`/`holdKind`/`out` names), 5 (timing advice may simplify) |
+| MOTION2 (done in 1.9.0, pending merge: 11a) | one shared drawing grid on twos; a deterministic motion table per sound family (no dice); hold envelopes (decay, rise, arc, pulse, steady); contradictions removed; exits by cut-off (cut, ring-out, trail-off, smoke-off, blow-away, power-down, sputter, crumble); a rhythm primitive (siren, heartbeat, rotor, beeps, mech steps); letter roles (only the sustained run moves); default travel per kind, scatter and walk emitters; streams and sustain take motion from the kind; boom burst-in entrance | 11 (all), 12, 10, 4 (`in`/`holdKind`/`out` names), 5 (timing advice may simplify) |
 | WORD2 (SPEC-WORDS) | dictionary leaks and near-words removed (PTAAK, PLOSK, DOIING, BRUUNCH ...); near-word check (one letter off, stuck-on letter, K respelling); no Polish diacritics (a check that fails on them); English as the master spelling, Polish derived; PH stretch bug; W not a lasting letter in English; percussive kinds lengthen by hits or echo, not vowels; "!" capped per kind; every lead-in from `PREFIXES`; sayable words; longer runs for steady sounds; roar stretches the vowel; siren as one morphing word; laser pistol attack-led (ZARK, TZAK); ICONIC ruling (candidates BLAM, BEEP, VROOM, HA, GRR, SZSZ). Owner's ruling overrides the review's "never share words" | 9, 14 |
 | SPEC-KINDS (being written) | missing kinds and dimensions: material of what is hit, phase (what follows what), source and impact of shots, distance, space/echo, approach-pass-recede, medium, wet/dry, size of source, cause-then-result combinations, tempo, silence, number of sources; kinds to split or merge | 9, 5 |
 | SPEC-EFFECTS (being written) | each map effect analysed separately: which words, which phases, which motion | 5 |
@@ -762,6 +803,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `prefs`, `settings`, `registerMood`, `registerPalette`, `registerFont`, `registerStyle`, `unregisterStyle`, `styles`, `style`, `saveStyle`, `deleteStyle`, `palettes`, `motionNames`, `net` (`play burst stream stop sharedNow local lead`), `letterNow`, `designer`, `openSettings`, `planFor` | v6 (1.4.x) | added by `tools.mjs` at setup; absent if the tools did not install [V] |
 | `push`, `escalation`, `viewInset`, `sustain`, `ambientMax` | v7 (1.5.0) | pending merge [V on its branch] |
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
+| `motionMode`, `motionModes`; play options `kind`, `look.motion`; `w.play.vocabMotion` | 1.9.0 MOTION2 | pending merge, section 11a [V node] |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
@@ -785,3 +827,6 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   unlocated sounds, muzzle clearance); section 18 frame time and the missing kinds.
 - 2026-11-14 (FXLM2): section 5 - phases vs a caller's echo filter, `keepInView: false` for off-screen sustains, the 1.7.0 gun /
   grenade / rocket kinds (no `gunshot`).
+- 2026-11-14 (MOTION2, 1.9.0, `tactics-zones-motion2`): section 11 limited to the frozen legacy styles; new 11a (invincible motion
+  from the sound table, one painting moved per frame, smooth / stepped switch, rules the checks hold, streams and sustain, what is
+  not done); size-drift repaints (18); stage table, 19, API index.
