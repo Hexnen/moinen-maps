@@ -285,7 +285,9 @@ export function createImpact(L, tools = null) {
     if ( h.lastT != null && h.idx >= 0 ) { const d = t - h.lastT; if ( d > h.frameMax ) h.frameMax = d; }
     h.lastT = t;
     if ( h.t0 == null ) { paint(h, 0); h.t0 = now(); }   // no shared start: the clock starts when the first drawing is ready
-    const el = Math.max(t, h.t0 === h.spec.startAt ? t : h.t0) - h.t0;
+    /* FIN-ENGINE: a shared start (startAt, or blowAt - peakMs) waits; before, blowAt alone was taken for an own start and drawing 0
+       stood on screen from the call to the blow (live: seconds of a full-view drawing) */
+    const el = Math.max(t, h.shared ? t : h.t0) - h.t0;
     if ( el < 0 ) {   // waiting for a shared start: paint ahead, one drawing per frame, inside the frame's shared budget
       const n = h.plan.frames.findIndex((f) => f.cv === undefined);
       const fk = ts ?? Math.floor(now() / 8); if ( fk !== aheadTs ) { aheadTs = fk; aheadUsed = 0; aheadN = 0; }
@@ -325,7 +327,7 @@ export function createImpact(L, tools = null) {
     safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: t, t0: startAt ?? t });
     if ( !plan.frames.length ) return ended(plan, "off");
     let done, rdy;
-    const h = { id: `imp${++seq}`, spec, plan, mode: plan.mode, alive: true, isReady: false, idx: -1, t0: startAt, paintMs: 0, frameMax: 0,
+    const h = { id: `imp${++seq}`, spec, plan, mode: plan.mode, alive: true, isReady: false, idx: -1, t0: startAt, shared: startAt != null, paintMs: 0, frameMax: 0,
       ready: new Promise((r) => (rdy = r)), finished: new Promise((r) => (done = r)), stop: () => finish(h, "stopped") };
     h._done = done; h._ready = rdy;
     h.env = envOf(spec, plan, sub);

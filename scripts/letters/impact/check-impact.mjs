@@ -508,7 +508,11 @@ async function life(ok) {
   await E.tick(1500);
   { const at = performance.now() + 300;
     h = I.play({ kind: "hit", magnitude: 1.5, seed: 21, blowAt: at, subject: { x: 300, y: 300 } });
-    ok(h.alive && h.plan.peakMs > 0 && Math.abs(h.t0 - (at - h.plan.peakMs)) < 1e-6, `impact life: blowAt starts the impact ${h.plan.peakMs} ms before the blow`); h.stop(); }
+    ok(h.alive && h.plan.peakMs > 0 && Math.abs(h.t0 - (at - h.plan.peakMs)) < 1e-6, `impact life: blowAt starts the impact ${h.plan.peakMs} ms before the blow`);
+    /* seen live: with blowAt alone drawing 0 stood on screen from the call until the blow */
+    let early = -1; while ( performance.now() < h.t0 - 20 ) { await E.tick(16); if ( h.idx >= 0 ) { early = performance.now(); break; } }
+    ok(early < 0, `impact life: nothing shows before a blowAt impact's start (shown ${early < 0 ? "never" : Math.round(h.t0 - early) + " ms early"})`);
+    await E.tick(60); ok(h.idx >= 0, "impact life: then it shows"); h.stop(); }
   /* FIN-ENGINE (FXIS-E3): keep a rectangle readable: every drawing and the scene's change get a hole there, following it */
   await E.tick(1500);
   { const box = { x: 700, y: 400, w: 200, h: 80 };
