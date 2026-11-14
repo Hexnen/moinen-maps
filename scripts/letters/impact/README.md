@@ -160,6 +160,10 @@ Measured 2026-11-13 on the test machine (GTX 1080 class, 1600x900, one GM seat, 
 | `I.prepare` of the strongest critical | 15.7 ms once, then 0 ms of painting while it plays |
 | left behind | 0 elements, 0 canvases, `#board` style empty, ticker running |
 
+1.8.2 (FXI-ENGINE) was not re-measured live: the new painters (`smear` with 14 swept copies, `ring`, `fade`, the figure cut-out of
+a round portrait, cached once per token picture at 256 px) were only rendered offline. Re-measure with `I.stats` on a lane before
+relying on the numbers above for them.
+
 ## Integration recipes
 
 - **Dice-roll splash (critical).** `I.play({ kind: "crit", magnitude: 1.7, subject: splashPanelElement, over: "ui", seed: message.id,
