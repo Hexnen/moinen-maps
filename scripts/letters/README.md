@@ -184,7 +184,9 @@ is drawn big. Screen words follow window resizes the same way.
 timeline of `comic` / `expressive`). A sound-family table (18 families, a row per kind: entrance, hold envelope, exit by cut-off,
 hold length from the sound's duration, rate, moving letters, travel) gives each word a pose track; the word is painted once and the
 sprite / box is moved every display frame (`look.motion: "smooth"`, default) or its drawn channels step on one shared grid of the
-page clock (`"stepped"`; `L.motionMode(name)` sets the default). Pictures carry a `key`; same key = one painting. Rules and numbers:
+shared clock (`"stepped"`). The default is the GM's table setting `movement` (1.9.2 MODE: world scope, smooth by default, it drives
+`L.motionMode(name)`); the stepped grid runs on the world's clock (`L.gridClock`) so every seat strikes on the same instant; a call's
+`look.motion` beats the setting, reduced motion beats both. Pictures carry a `key`; same key = one painting. Rules and numbers:
 manual 11a; checks: `check-motion2.mjs`.
 
 ### What the sources say (digest, with sources)
@@ -543,6 +545,7 @@ the host module's settings tab opens the engine's own window; host = moinen-maps
 | `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set, no green, no red-green pair (a caller's own `colors` stay) |
 | `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+| `movement` (WORLD, the GM's) | smooth / stepped | the invincible style's motion type on every seat (1.9.2 MODE); a player sees it as text |
 World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
 
 Authoring (any client, this session; `L.saveStyle` also stores a style in the world):

@@ -12,7 +12,7 @@
    - keybinding "Letter this now" (GM, Shift+L, editable) and the designer button in the token controls: under the host module.
    Engine API added here (README "Tools"): L.prefs, L.settings(), L.registerMood/Palette/Font/Style, L.styles, L.saveStyle,
    L.deleteStyle, L.net.{play,burst,stream,stop,sharedNow,local}, L.letterNow, L.designer(), L.openSettings(), L.planFor. */
-import { SETTINGS, DEFAULTS, cleanAll, resolveOpts, filterPlan } from "./prefs.mjs";
+import { SETTINGS, DEFAULTS, cleanAll, resolveOpts, filterPlan, scopeOf } from "./prefs.mjs";
 import { STRINGS } from "./strings.mjs";
 import * as A from "./author.mjs";
 import * as N from "./net.mjs";
@@ -55,6 +55,8 @@ export function install(L, base) {
     return stream0({ ...rest, ...o, style: undefined });
   };
   applyLimits();
+  /* MODE: the stepped grid on the world's shared clock (every seat draws on the same instants) */
+  L.gridClock?.(gridOffset);
   Object.defineProperty(L, "moods", { configurable: true, enumerable: true, get: () => MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound }, custom: !!MOODS[id].custom })) });
   Object.defineProperty(L, "prefs", { configurable: true, enumerable: true, get: () => ({ ...state.prefs }) });
   Object.assign(L, {
@@ -71,7 +73,15 @@ export function install(L, base) {
   });
   return L;
 }
-function applyLimits() { const L = state.engine; if ( !L ) return; L.limits.screen = state.prefs.limitScreen; L.limits.world = state.prefs.limitWorld; }
+function applyLimits() { applyPrefs(state.engine, state.prefs); }
+/* the preferences the engine holds itself: word limits, and (MODE) the table's motion type for the invincible style. Read on every
+   change of a setting (Foundry's onChange on each client), so a GM's switch reaches every seat's next word without a reload; words
+   already playing keep the motion they started with. */
+export function applyPrefs(L, prefs) {
+  if ( !L ) return;
+  L.limits.screen = prefs.limitScreen; L.limits.world = prefs.limitWorld;
+  if ( prefs.movement && typeof L.motionMode === "function" ) L.motionMode(prefs.movement);
+}
 
 /* the plan this client would show for a call (designer preview): style, preferences and filters, without touching the flash budget */
 export function planFor(L, text, opts = {}) {
@@ -90,13 +100,16 @@ function readPrefs() {
   applyLimits();
 }
 export async function setPrefs(values) {
-  for ( const [k, v] of Object.entries(cleanAll({ ...state.prefs, ...values })) ) if ( game.settings.get(NS, k) !== v ) await game.settings.set(NS, k, v);
+  for ( const [k, v] of Object.entries(cleanAll({ ...state.prefs, ...values })) ) {
+    if ( scopeOf(k) === "world" && !game.user?.isGM ) continue;   // MODE: the table's settings are the GM's
+    if ( game.settings.get(NS, k) !== v ) await game.settings.set(NS, k, v);
+  }
   readPrefs();
 }
 function registerSettings() {
   const type = { bool: Boolean, num: Number, pick: String };
   for ( const [k, d] of Object.entries(SETTINGS) ) {
-    game.settings.register(NS, k, { name: `LETR.Settings.${k}.Name`, hint: `LETR.Settings.${k}.Hint`, scope: "client", config: false,
+    game.settings.register(NS, k, { name: `LETR.Settings.${k}.Name`, hint: `LETR.Settings.${k}.Hint`, scope: scopeOf(k), config: false,
       type: type[d.type], default: d.default, onChange: () => readPrefs() });
   }
   game.settings.register(NS, "styles", { scope: "world", config: false, type: Object, default: {}, onChange: () => syncStyles() });
@@ -160,6 +173,14 @@ function announce(h) {
 
 /* ---------- networking ---------- */
 const sharedNow = () => { const s = game.time?.serverTime; return Number.isFinite(s) ? s : Date.now(); };
+/* MODE: shared clock minus this page's clock, for the stepped grid. Date.now() / serverTime tick in whole ms, so the raw difference
+   jitters by about 1 ms from call to call: keep the last value until it drifts by more than 4 ms (a clock re-sync) */
+let gridOff0 = null;
+function gridOffset() {
+  const v = sharedNow() - performance.now();
+  if ( gridOff0 == null || Math.abs(v - gridOff0) > 4 ) gridOff0 = v;
+  return gridOff0;
+}
 function warnOnce(key) { if ( state.warned.has(key) ) return; state.warned.add(key); console.warn(`${LOG} net: "${key}" cannot travel to other clients (a function, a Promise or an element); it is left out there`); }
 const sceneId = () => globalThis.canvas?.scene?.id ?? null;
 function findToken(id) { return globalThis.canvas?.tokens?.get?.(id)?.document ?? null; }

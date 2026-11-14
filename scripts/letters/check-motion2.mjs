@@ -343,6 +343,75 @@ async function engineChecks() {
     E.restoreWarn();
   });
 
+  /* MODE (1.9.2): the table's setting (tools applyPrefs, run on every onChange) switches the next word without a reload; a word
+     already playing keeps its motion; a call's look.motion beats the setting; reduced motion beats both; the legacy styles ignore it */
+  await block(async () => {
+    const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+    const { applyPrefs } = await import("./tools.mjs"); const { DEFAULTS } = await import("./prefs.mjs");
+    applyPrefs(L, { ...DEFAULTS });
+    const at = { x: 2000, y: 1500 }, base = { kind: "punch", magnitude: 1.2, space: "world", at };
+    const a = L.play("BLAM!", { ...base, seed: "md1" });
+    await E.tick(120);
+    applyPrefs(L, { ...DEFAULTS, movement: "stepped" });
+    const b = L.play("BLAM!", { ...base, seed: "md2" });
+    const c = L.play("BLAM!", { ...base, seed: "md3", look: { style: "invincible", motion: "smooth" } });
+    const r = L.play("BLAM!", { ...base, seed: "md4", reduced: true });
+    const x = L.play("BLAM!", { ...base, seed: "md5", look: { style: "expressive" } });
+    const y = L.play("BLAM!", { ...base, seed: "md6", look: { style: "comic" } });
+    await E.tick(200);
+    ok(a.plan?.motion?.mode === "smooth" && a.alive, `mode engine: the word started before the switch keeps smooth (${a.plan?.motion?.mode})`);
+    ok(b.plan?.motion?.mode === "stepped", `mode engine: the next word after the table's switch is stepped (${b.plan?.motion?.mode}), no reload`);
+    ok(c.plan?.motion?.mode === "smooth", "mode engine: a call's look.motion beats the table's setting");
+    ok(r.plan?.motion?.in === "fade" && r.plan.timeline.hold.length === 1 && !r.plan.timeline.ent.some((p) => p.smear), "mode engine: reduced motion beats the setting (a fade, no smear, no letter drawings)");
+    ok(x.plan && !x.plan.motion && y.plan && !y.plan.motion, "mode engine: expressive and comic carry no track (own frozen timeline)");
+    applyPrefs(L, { ...DEFAULTS });
+    const d = L.play("BLAM!", { ...base, seed: "md7" });
+    await E.tick(50);
+    ok(d.plan?.motion?.mode === "smooth", "mode engine: switched back to smooth for the next word");
+    L.stopAll?.(); await E.tick(3000);
+    E.restoreWarn();
+  });
+
+  /* MODE (1.9.2): two seats with different page clocks share a start S on the world's clock. Without the shared grid a stepped
+     contact fell on each page's own 24 Hz grid (0..41.7 ms apart); with L.gridClock (shared - local) every seat strikes on the same
+     instant. Smooth seats always agree. Two page origins whose phases differ by a fraction of a tick. */
+  await block(async () => {
+    const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+    const seats = [1.2e9 + 3.7, 1.2e9 + 29.1];   // shared = local + offset
+    let worstOld = 0, worstNew = 0, worstSmooth = 0, n = 0;
+    for ( const kind of ["punch", "boom", "thud", "slam", "crack", "clang", "zap", "whoosh"] ) for ( let i = 0; i < 6; i++ ) {
+      const S = 1.2e9 + 5000 + i * 37.3;
+      for ( const mode of ["smooth", "stepped"] ) {
+        const plan = L._plan("BLAM!", { kind, seed: `cs${kind}${i}`, magnitude: 1, look: { style: "invincible", motion: mode } });
+        if ( !Number.isFinite(plan.contactMs) || plan.motion?.in === "fade" ) continue;
+        const shared = (useClock) => seats.map((off) => { L.gridClock(useClock ? () => off : null); return L.contactAt(plan, S - off) + off; });
+        const o = shared(false), w = shared(true);
+        n++;
+        if ( mode === "smooth" ) worstSmooth = Math.max(worstSmooth, Math.abs(o[0] - o[1]), Math.abs(w[0] - w[1]));
+        else { worstOld = Math.max(worstOld, Math.abs(o[0] - o[1])); worstNew = Math.max(worstNew, Math.abs(w[0] - w[1])); }
+      }
+    }
+    L.gridClock(null);
+    if ( process.env.LETR_VERBOSE ) console.log(`mode contact spread: ${n} plans, smooth ${worstSmooth.toFixed(3)} ms, stepped page grid ${worstOld.toFixed(3)} ms, stepped shared grid ${worstNew.toFixed(3)} ms`);
+    ok(n > 10 && worstSmooth < 1e-3, `mode engine: smooth seats strike together (${worstSmooth.toFixed(3)} ms)`);
+    ok(worstOld > 5, `mode engine: on page grids two stepped seats strike apart (${worstOld.toFixed(1)} ms: the test material shows the old fault)`);
+    ok(worstNew < 1e-3, `mode engine: on the shared grid two stepped seats strike together (${worstNew.toFixed(3)} ms)`);
+    /* on screen: with a grid clock the stepped word's squash shows at contactAt and its drawings change on the SHARED grid */
+    const off = 1.2e9 + 17.9; L.gridClock(() => off);
+    const st = E.now() + 150.2;
+    const h = L.play("BLAM!", { kind: "punch", seed: "cg", magnitude: 1.2, space: "world", at: { x: 2000, y: 1500 }, startAt: st, look: { style: "invincible", motion: "stepped" } });
+    const c = L.contactAt(h);
+    ok(Math.abs(((c + off) / TICK) - Math.round((c + off) / TICK)) < 1e-6, `mode engine: contactAt lies on the shared grid (${((c + off) % TICK).toFixed(4)} ms off)`);
+    let best = Infinity, bestT = null;
+    for ( let t = 0; t < 900 && h.alive; t += 1000 / 60 ) { await E.tick(1000 / 60, 1000 / 60); if ( h.sprite && h.shown && E.now() >= st ) { const q = h.sprite.scale.y / h.sprite.scale.x; if ( q < best - 1e-9 ) { best = q; bestT = E.now(); } } }
+    ok(bestT != null && bestT >= c - 1e-6 && bestT < c + 1000 / 60 + 1e-6, `mode engine: squash on screen at ${bestT?.toFixed(1)}, contactAt ${c.toFixed(1)} (shared grid)`);
+    const g = L.play("BLAM!", { kind: "punch", seed: "cg2", magnitude: 1.2, space: "world", at: { x: 2100, y: 1500 }, look: { style: "invincible", motion: "stepped" } });
+    await E.tick(300);
+    ok(Number.isFinite(g.t0) && Math.abs(((g.t0 + off) / (2 * TICK)) - Math.round((g.t0 + off) / (2 * TICK))) < 1e-6, "mode engine: a stepped word without startAt starts on the shared grid");
+    L.gridClock(null); L.stopAll?.(); await E.tick(3000);
+    E.restoreWarn();
+  });
+
   /* streams and sustain follow the kind: a hiss stream never slams; a steady sustain never accents (60 s of phrases) */
   await block(async () => {
     const E = await setup(); const L = E.engine; L.lookStyle("invincible");

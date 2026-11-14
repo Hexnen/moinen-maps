@@ -13,7 +13,14 @@
                   cvd (colour-blind safe: the colour families remapped to the Okabe-Ito set, no red-green pairs)
      impact       impact frames (L.impact, impact/README.md): full | local (only inside a panel round the subject) | off
      announce     the lettered word is read to screen readers (a polite live region; the layers stay aria-hidden)
-     limitScreen, limitWorld   words alive at once per space */
+     limitScreen, limitWorld   words alive at once per space
+   One WORLD setting (MODE 1.9.2; the owner: "the GM sets it for the table"):
+     movement     how the "invincible" style moves on every seat: smooth (default) | stepped (drawings on the shared 24 Hz grid,
+                  translation and alpha smooth). One value for the table so every seat sees a hit on the same instant. The legacy
+                  styles ("expressive" / "comic") keep their own frozen timeline; a call's look.motion beats it; reduced motion on a
+                  seat beats both (the reduced fade lands on the same contact). */
+
+import { MOTION_MODES, DEFAULT_MOTION } from "./motion.mjs";
 
 export const SETTINGS = {
   enabled:     { type: "bool", default: true },
@@ -25,8 +32,12 @@ export const SETTINGS = {
   palette:     { type: "pick", default: "mood", choices: ["mood", "contrast", "cvd"] },
   announce:    { type: "bool", default: true },
   limitScreen: { type: "num", default: 16, min: 1, max: 32, step: 1 },
-  limitWorld:  { type: "num", default: 48, min: 4, max: 96, step: 1 }
+  limitWorld:  { type: "num", default: 48, min: 4, max: 96, step: 1 },
+  movement:    { type: "pick", default: DEFAULT_MOTION, choices: MOTION_MODES.slice(), scope: "world" }   // MODE: the GM's, for the table
 };
+/* the settings a GM sets for the whole table (scope "world"); every other one is this computer's own */
+export const WORLD_KEYS = Object.keys(SETTINGS).filter((k) => SETTINGS[k].scope === "world");
+export const scopeOf = (k) => SETTINGS[k]?.scope ?? "client";
 export const DEFAULTS = Object.fromEntries(Object.entries(SETTINGS).map(([k, v]) => [k, v.default]));
 
 /* a value as the setting allows it (a stored value from an older build or a hand-edited one never breaks a word) */

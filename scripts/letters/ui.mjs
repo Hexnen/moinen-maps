@@ -4,7 +4,7 @@
    - Settings (everyone): the engine-wide client settings of prefs.mjs.
    - Letter this now (GM, Shift+L): a small box at the cursor; Enter shows the word to everyone at the selected tokens or the cursor. */
 import { setPrefs, cursorPoint } from "./tools.mjs";
-import { SETTINGS, DEFAULTS, STYLE_NAME } from "./prefs.mjs";
+import { SETTINGS, DEFAULTS, STYLE_NAME, scopeOf } from "./prefs.mjs";
 import { MOODS, MOOD_IDS, FONTS, COLORS, TICK } from "./design.mjs";
 
 const { ApplicationV2, DialogV2 } = foundry.applications.api;
@@ -434,10 +434,19 @@ class Settings extends ApplicationV2 {
       else { input = document.createElement("range-picker"); input.name = k; input.setAttribute("min", d.min); input.setAttribute("max", d.max); input.setAttribute("step", d.step); input.setAttribute("value", v[k]); }
       return f.createFormGroup({ label: T(`Settings.${k}.Name`), hint: T(`Settings.${k}.Hint`), input }).outerHTML;
     };
+    /* MODE: a table setting (scope world) is the GM's; a player sees what the GM chose as text, not a control they cannot use */
+    const table = (k) => {
+      if ( game.user?.isGM ) return group(k);
+      const out = document.createElement("output");
+      out.className = "letr-s-ro"; out.textContent = T(`Settings.${k}.${v[k]}`);
+      return f.createFormGroup({ label: T(`Settings.${k}.Name`), hint: `${T(`Settings.${k}.ByGM`)} ${T(`Settings.${k}.Hint`)}`, input: out }).outerHTML;
+    };
+    const tableKeys = Object.keys(SETTINGS).filter((k) => scopeOf(k) === "world");
     const root = document.createElement("div");
     root.className = "letr-s";
     root.innerHTML = `
       <fieldset><legend>${esc(T("Settings.Groups.Show"))}</legend>${["enabled", "scale", "motion"].map(group).join("")}</fieldset>
+      <fieldset class="letr-s-table"><legend>${esc(T("Settings.Groups.Table"))}</legend>${tableKeys.map(table).join("")}</fieldset>
       <fieldset><legend>${esc(T("Settings.Groups.Access"))}</legend>${["flashes", "photosafe", "impact", "palette", "announce"].map(group).join("")}</fieldset>
       <fieldset><legend>${esc(T("Settings.Groups.Limits"))}</legend>${["limitScreen", "limitWorld"].map(group).join("")}</fieldset>
       <footer class="form-footer">
@@ -450,11 +459,12 @@ class Settings extends ApplicationV2 {
   _replaceHTML(result, content) { content.replaceChildren(result); }
   values() {
     const fd = new foundry.applications.ux.FormDataExtended(this.element).object;
-    const o = {}; for ( const k of Object.keys(SETTINGS) ) if ( k in fd ) o[k] = fd[k];
+    const o = {}; for ( const k of Object.keys(SETTINGS) ) if ( k in fd && (scopeOf(k) !== "world" || game.user?.isGM) ) o[k] = fd[k];
     return o;
   }
   static async #save() { await setPrefs(this.values()); }
-  static #reset() { this.v = { ...DEFAULTS }; this.render(); }
+  /* a player's Defaults leave the table's settings alone (they are the GM's) */
+  static #reset() { const keep = game.user?.isGM ? {} : Object.fromEntries(Object.keys(SETTINGS).filter((k) => scopeOf(k) === "world").map((k) => [k, this.v[k]])); this.v = { ...DEFAULTS, ...keep }; this.render(); }
   /* a sample with the values in the window (saved first: the sample is what the settings will do) */
   static async #try() {
     await setPrefs(this.values());

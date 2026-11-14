@@ -213,6 +213,42 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(missing.length === 0, `tools: strings missing: ${missing.join(", ")}`);
     for ( const m of MOOD_IDS.filter((x) => !MOODS[x].custom) ) ok(`LETR.Mood.${m}` in STRINGS.pl, `tools: mood ${m} has a Polish name`);
     for ( const k of Object.keys(SETTINGS) ) ok(`LETR.Settings.${k}.Name` in STRINGS.en && `LETR.Settings.${k}.Hint` in STRINGS.pl, `tools: setting ${k} has words`);
+    /* every choice of a pick setting has a label in both languages (the window builds the keys from a template) */
+    for ( const [k, d] of Object.entries(SETTINGS) ) if ( d.type === "pick" ) for ( const c of d.choices )
+      ok(`LETR.Settings.${k}.${c}` in STRINGS.en && `LETR.Settings.${k}.${c}` in STRINGS.pl, `tools: setting ${k} choice ${c} has words`);
+  }
+
+  /* MODE (1.9.2): the invincible style's motion type is ONE setting the GM sets for the table (owner: the GM sets it for the table);
+     smooth by default; a player cannot write it; the switch reaches the engine without a reload (applyPrefs on every onChange) */
+  {
+    const { MOTION_MODES, DEFAULT_MOTION } = await import("./motion.mjs");
+    const pm = await import("./prefs.mjs");
+    const d = SETTINGS.movement;
+    ok(!!d && d.type === "pick" && d.default === "smooth" && DEFAULT_MOTION === "smooth" && d.choices.join() === MOTION_MODES.join(), "mode: setting movement = smooth | stepped, default smooth");
+    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: movement is the table's (world scope); every other setting stays this computer's");
+    ok(clean("movement", "bogus") === "smooth" && clean("movement", "stepped") === "stepped" && cleanAll({}).movement === "smooth", "mode: a stored value outside the choices falls back to smooth");
+    ok("LETR.Settings.movement.ByGM" in STRINGS.en && "LETR.Settings.movement.ByGM" in STRINGS.pl && "LETR.Settings.Groups.Table" in STRINGS.pl, "mode: words for the player's read-only row and the table group");
+    const T = await import("./tools.mjs");
+    /* applyPrefs: limits and the motion type go to the engine */
+    const modes = []; const fakeL = { limits: {}, motionMode: (m) => { if ( m ) modes.push(m); return m; } };
+    T.applyPrefs(fakeL, cleanAll({ movement: "stepped", limitScreen: 5 }));
+    ok(modes.join() === "stepped" && fakeL.limits.screen === 5, `mode: applyPrefs hands the table's motion type to the engine (${modes.join()})`);
+    /* setPrefs: a player's save never writes the table's setting; a GM's does */
+    const saved = globalThis.game, store = new Map(), sets = [];
+    const fakeGame = (isGM) => ({ user: { isGM }, settings: { get: (ns, k) => (store.has(k) ? store.get(k) : DEFAULTS[k]), set: async (ns, k, v) => { sets.push(k); store.set(k, v); } } });
+    const keepEngine = T.state.engine;
+    try {
+      T.state.engine = null;
+      globalThis.game = fakeGame(false);
+      await T.setPrefs({ movement: "stepped", scale: 1.5 });
+      ok(!sets.includes("movement") && sets.includes("scale"), `mode: a player's save leaves the table's motion type alone (wrote ${sets.join(",")})`);
+      globalThis.game = fakeGame(true); sets.length = 0;
+      await T.setPrefs({ movement: "stepped" });
+      ok(sets.includes("movement") && T.state.prefs.movement === "stepped", "mode: the GM's save writes it and this client reads it back");
+    } finally { globalThis.game = saved; T.state.prefs = { ...DEFAULTS }; T.state.engine = keepEngine; }
+    const tsrc = fs.readFileSync(new URL("./tools.mjs", import.meta.url), "utf8"), usrc = fs.readFileSync(new URL("./ui.mjs", import.meta.url), "utf8");
+    ok(/scope: scopeOf\(k\)/.test(tsrc) && /onChange: \(\) => readPrefs\(\)/.test(tsrc) && /L\.gridClock\?\.\(gridOffset\)/.test(tsrc), "mode: settings registered with their scope, re-read on change, stepped grid on the shared clock");
+    ok(/game\.user\?\.isGM \) return group\(k\)/.test(usrc) && /letr-s-ro/.test(usrc), "mode: the window gives the GM the control and a player the GM's choice as text");
   }
 
   /* the engine's tool hooks are in place (source pins: the filters must run in play, start and still) */

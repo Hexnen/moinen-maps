@@ -44,6 +44,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | FXI-ENGINE (impact frames: guard counts every scene change, six strengths, red-safe, `gentle`, settings row, drawings) | 1.8.2 | API-CONTRACT 1.8.2 | `tactics-zones-fxi-engine` | pending merge |
 | MOTION2 | 1.9.0 | `tactics-zones-motion2` | - | pending merge (section 11a) |
 | FIN-ENGINE (FXI-ENGINE merged onto MOTION2; `plan.contactMs` / `L.contactAt`, per-word `flash: false`, impact `blowAt` / `keep` / `series`, sizes from the subject, series scheduled ahead all play) | 1.9.1 | API-CONTRACT 1.9.1 | `tactics-zones-fin-engine` | pending merge (sections 4, 21a) |
+| MODE (the invincible motion type as the GM's table setting `movement`; stepped grid on the shared clock, `L.gridClock`) | 1.9.2 | API-CONTRACT 1.9.2 (v12) | `tactics-zones-mode` | pending merge (sections 11a, 15) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -528,10 +529,22 @@ Status: pending merge (`tactics-zones-motion2`). [V] = node checks (`check-motio
   shards / crumble exit. A word paints 1-3 pictures (fake browser), so big world words no longer upload a texture per drawing:
   lane 5, magnitude-2 boom, worst frame 76-130 ms on 1.8.1 against 27-37 ms on 1.9.0 (34-50 paintings against 5-9; the rest are
   size-drift repaints, see 18).
-- **Two modes** `look.motion: "smooth" | "stepped"`, default `L.motionMode()` (`L.motionMode("stepped")` switches it; provisional
-  default smooth, MOTION2-1: the owner decides on the A/B film). smooth: every channel interpolated. stepped: scale, squash, turn and
-  the moving letters change on ONE grid of the page clock (entrance on ones, hold and exit on twos; a word without `startAt` starts
-  on the grid), translation and alpha stay smooth; slams and booms get a smear at contact.
+- **Two modes** `look.motion: "smooth" | "stepped"`, default `L.motionMode()`. Since 1.9.2 (MODE) the default is the GM's table
+  setting `movement` (section 15; owner: keep both types to choose from, the GM sets it for the table; default smooth); the setting
+  drives `L.motionMode`, so a script's own `L.motionMode(x)` holds only until the setting changes. smooth: every channel
+  interpolated. stepped: scale, squash, turn and the moving letters change on ONE grid (entrance on ones, hold and exit on twos; a
+  word without `startAt` starts on the grid, up to 83 ms after the call), translation and alpha stay smooth; slams and booms get a
+  smear at contact.
+- **Who wins** (1.9.2) [V node]: reduced motion on a seat (OS, the client's `motion` setting, `reduced: true`: a fade that lands on
+  the full contact) > a call's `look.motion` > the table setting > smooth. The legacy styles `expressive` / `comic` ignore all of it
+  (own frozen timeline, section 11).
+- **Same instant on every seat** (1.9.2) [V node]: the stepped grid runs on the world's shared clock (`L.gridClock`, set by the
+  tools to `game.time.serverTime - performance.now()`). Before, each page used its own grid and two stepped seats sharing a `startAt`
+  struck 0..41.7 ms apart (25.4 ms measured for two page phases 25.4 ms apart; 0.000 ms after). For one start, a stepped contact
+  (`L.contactAt`) lands 0..41.7 ms (mean 20.7, 4800 starts x 12 kinds) after the smooth one: one table setting keeps every seat on
+  the same mode, so callers that share a start (dice splash, token reactions, impact frames with `blowAt: L.contactAt(h)`) strike
+  together. A reduced seat on a stepped table still lands on the unrounded (smooth) contact: up to 41.7 ms before the others
+  (section 18).
 - **Rules the checks hold** [V]: slam biggest on its first shown frame (no wind-up showing the word); pop at least half size at once
   and 0.8 by 50 ms (it never stands small, then jumps); neighbouring frames differ in scale by 1.4x at most outside a contact picture;
   a crack lands whole, then cracks; a boom leaves as smoke (darkens, lifts, thins), never a second burst; hits decay, swells rise,
@@ -674,6 +687,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
 | 2026-11-13 | Provisional (orchestrator, the owner may overrule): the invincible style moves smoothly (interpolated), stepped motion stays in `expressive` | - | LOOK2 P16 |
 | 2026-11-13 | Implement every point of SPEC-LOOK and SPEC-MOTION, plus the vocabulary review | - | section 19 |
+| 2026-11-14 | After the A/B film: keep both motion types of the invincible style, to choose from; the GM sets it for the table (one choice for every seat, no player override); default smooth | leave `look.motion` out unless the event needs one type (the table's choice then applies on every seat) | setting `movement` (world scope), section 15; MODE 1.9.2 |
 | 2026-11-13 | Destruction lettering covers presets, combinations, painting (brush), directional and all-at-once destruction | letter every path; test each | - |
 | 2026-11-13 | Effects have phases; lettering follows them: blast -> debris falling -> fire of varying intensity; shock waves are lettered; the ground or material changes the sound | one word per phase, timed to the phase, kind/material chosen from what is hit | kinds by material, shock wave, debris (WORD2 / SPEC-KINDS) |
 | 2026-11-13 | Shots have two sources: the muzzle at the shooting token AND the impact where the bullets land | letter both ends | - |
@@ -702,6 +716,12 @@ window; `L.prefs` / `L.settings()` read them [V]):
 | `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
 | `announce` | on / off | screen readers read each word (or `alt`) through one polite live region |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+
+**Table setting** (1.9.2 MODE; scope WORLD, written by the GM, same on every seat; group "Table (GM)" / "Stół (MG)" in the window):
+
+| key | values | effect |
+|---|---|---|
+| `movement` | smooth (default) / stepped | the invincible style's motion type ("Motion type" / "Rodzaj ruchu": "Smooth" / "Płynny", "Stepped" / "Skokowy"); the next word on every seat follows it without a reload (onChange -> `applyPrefs` -> `L.motionMode`), words already playing keep theirs; a player's window shows the GM's choice as text with "Set by the GM for the table", and a player's Save / Defaults never write it [V node] |
 
 World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.
 
@@ -828,6 +848,9 @@ Status: stable list; edit as items close.
 - Frame time (FIN-ENGINE, lane 5, film clock off, 2026-11-14): five invincible words planned in one call (each with its own
   `startAt`, 1.7 s apart) gave one 62 ms frame about 0.35 s before the first word and 33-35 ms frames at the two loudest words; the
   impacts of the same ladder alone stay under 18.5 ms. Word side, not fixed (FINE-6).
+- Stepped table, reduced seat (1.9.2): the reduced fade ends on the unrounded contact, the stepped seats strike on the next shared
+  grid instant: up to 41.7 ms apart (MODE-4). Two stepped seats agree only as well as `game.time.serverTime` agrees between machines;
+  near a grid instant a clock error of a few ms can move one seat's contact by a whole tick (41.7 ms).
 - `plan.contactMs` of the legacy styles under reduced motion is the legacy reduced entrance's own (frozen look): a reduced legacy
   seat's contact is not aligned with a full one (FINE-3).
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
@@ -864,6 +887,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
+| `gridClock(fn \| null)`; setting `movement` (world); tools `applyPrefs` | 1.9.2 MODE | pending merge; sections 11a and 15 [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -892,6 +916,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-14 (FIN-ENGINE, 1.9.1, `tactics-zones-fin-engine`): FXI-ENGINE merged onto MOTION2; section 4 (contact instant, `flash:
   false`), 21a (word + blow recipe, `blowAt`, `keep`, `series`, sizes, series scheduled ahead, cost, film-verified guard), stage
   table, API index, lessons (18).
+- 2026-11-14 (MODE, 1.9.2, `tactics-zones-mode`): the motion type as the GM's table setting `movement` (15), who wins and the
+  same-instant shared grid (11a), the owner's ruling (14), reduced-on-stepped limit (18), API index, stage table.
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
 

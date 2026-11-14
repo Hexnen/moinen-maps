@@ -11,7 +11,7 @@ import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
 import { MOTION_MODES, DEFAULT_MOTION, playOpts, trackPose, trackReach, holdEnergy, gridQ, gridAge, gridCeil } from "./motion.mjs";
 
-export const VERSION = "1.9.1";   // 1.9.1 = FIN-ENGINE: FXI-ENGINE 1.8.2 (impact frames: every scene change counted by the guard, six-step ladder, red-safe, gentle per call, settings row) merged onto MOTION2 1.9.0; plan.contactMs, per-word flash:false, impact size from the subject, impact keep rect. 1.9.0 = MOTION2 (contract v10): invincible motion as per-frame tracks from a sound-family table (motion.mjs), pictures shared by key, smooth|stepped switch (look.motion, L.motionMode), reduced exit = fade. 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
+export const VERSION = "1.9.2";   // 1.9.2 = MODE: the invincible motion type (smooth | stepped) is a table setting the GM sets (world scope, default smooth, live without reload); the stepped grid runs on the shared clock (L.gridClock) so every seat strikes on the same instant. 1.9.1 = FIN-ENGINE: FXI-ENGINE 1.8.2 (impact frames: every scene change counted by the guard, six-step ladder, red-safe, gentle per call, settings row) merged onto MOTION2 1.9.0; plan.contactMs, per-word flash:false, impact size from the subject, impact keep rect. 1.9.0 = MOTION2 (contract v10): invincible motion as per-frame tracks from a sound-family table (motion.mjs), pictures shared by key, smooth|stepped switch (look.motion, L.motionMode), reduced exit = fade. 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
    primary = the scene's own sorted group (lit and darkened by the scene's lighting like tokens are); sortLayer: Foundry's tiles 500,
    drawings 600, tokens 700, core weather 1000; moinen-maps: water 240, roads 245, destruction 247-248, districts 250, fire ground 256,
@@ -110,6 +110,17 @@ export function createEngine(base) {
   };
   const lookStyle = (name) => { if ( STYLES.includes(name) ) defLook = name; return defLook; };
   const motionMode = (name) => { if ( MOTION_MODES.includes(name) ) defMotion = name; return defMotion; };
+  /* MODE (1.9.2): the stepped grid's clock. Without it the grid sits on this page's performance.now(), whose origin differs on every
+     seat, so a stepped word's drawings (and its contact, L.contactAt) fell 0..41.7 ms apart between seats that share a start. The
+     tools hand in `() => sharedNow - performance.now()` (the world's shared clock): every seat then draws on the SAME instants.
+     The offset is taken modulo 250 ms (the common multiple of the grids on ones, twos and threes) and fixed per word at its start. */
+  let gridClockFn = null;
+  const GRID_LCM = 6 * TICK;
+  const gridOff = () => {
+    if ( !gridClockFn ) return 0;
+    try { const v = gridClockFn(); return Number.isFinite(v) ? ((v % GRID_LCM) + GRID_LCM) % GRID_LCM : 0; } catch { return 0; }
+  };
+  const gridClock = (fn) => { if ( fn === null || typeof fn === "function" ) gridClockFn = fn; return gridOff(); };
 
   /* ---------- placement ---------- */
   /* a token reference: a Token, a TokenDocument or a token id (a string is always read as a token id) */
@@ -407,7 +418,7 @@ export function createEngine(base) {
       if ( h.hN > 1 ) {
         const ht = t - h.entMs, m = h.track;
         if ( holdEnergy(m, ht, h.holdMs) >= 0.25 ) {
-          const q = (m.rate || 2) * TICK, ga = gridAge((h.t0 ?? 0) + (h.lag || 0), t, q) - h.entMs;
+          const q = (m.rate || 2) * TICK, ga = gridAge((h.t0 ?? 0) + (h.lag || 0) + (h.goff || 0), t, q) - h.entMs;
           return h.eN + 1 + (Math.floor(Math.max(0, ga) / q) % (h.hN - 1));
         }
       }
@@ -630,7 +641,7 @@ export function createEngine(base) {
     if ( h.track && h.t0 != null ) {
       const age = ageOf(h, t), hb = h.plan._holdBox ?? { w: 3, h: 1 };
       /* stepped: the entrance on ones (the contact needs every drawing), the hold and exit on the shared grid of twos */
-      const tq = h.track.mode === "stepped" ? gridAge(h.t0 + (h.lag || 0), age, age < h.entMs ? TICK : h.gridQ) : age;
+      const tq = h.track.mode === "stepped" ? gridAge(h.t0 + (h.lag || 0) + (h.goff || 0), age, age < h.entMs ? TICK : h.gridQ) : age;
       const P = trackPose(h.track, Math.max(0, age), h.entMs, h.holdMs, h.exitAt, { W: hb.w, H: hb.h }, Math.max(0, tq));
       const r0 = h.rot + trot, cr = Math.cos(r0), sr = Math.sin(r0);
       X += (P.x * cr - P.y * sr) * k; Y += (P.x * sr + P.y * cr) * k;
@@ -908,7 +919,10 @@ export function createEngine(base) {
     /* startAt: a performance.now() time on this page's clock (an effect's own t0): the word joins its timeline there */
     h.t0 = Number.isFinite(opts.startAt) ? opts.startAt : null;
     /* MOTION2 (stepped): a word starts on the shared drawing grid, so every word's drawings change on the same instants */
-    if ( h.t0 == null && h.track?.mode === "stepped" ) h.t0 = gridCeil(now(), h.gridQ);
+    if ( h.track?.mode === "stepped" ) {
+      h.goff = gridOff();   // MODE: the shared grid's phase on this page, fixed for the word's life
+      if ( h.t0 == null ) h.t0 = gridCeil(now() + h.goff, h.gridQ) - h.goff;
+    }
   }
 
   /* ---------- the one animation loop ---------- */
@@ -1079,7 +1093,9 @@ export function createEngine(base) {
     const t0 = Number.isFinite(startAt) ? startAt : x?.plan && Number.isFinite(x.t0) ? x.t0 + (x.lag || 0) : Number.isFinite(x?.opts?.startAt) ? x.opts.startAt : null;
     if ( t0 == null ) return null;
     const t = t0 + plan.contactMs;
-    return plan.motion?.mode === "stepped" && plan.motion.in !== "fade" ? Math.ceil(t / TICK - 1e-9) * TICK : t;
+    if ( !(plan.motion?.mode === "stepped" && plan.motion.in !== "fade") ) return t;
+    const g = Number.isFinite(x?.goff) ? x.goff : gridOff();   // MODE: the shared grid (same instant on every seat)
+    return Math.ceil((t + g) / TICK - 1e-9) * TICK - g;
   }
   /* lettering is off on this client (tools: the master switch): a handle that is already over */
   function offHandle(text, opts) {
@@ -1311,7 +1327,7 @@ export function createEngine(base) {
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,
     moods: MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound } })),
-    ready, play, stream, burst, still, design, stopAll, count, sizeOf, contactAt, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(),
+    ready, play, stream, burst, still, design, stopAll, count, sizeOf, contactAt, sizeModel: SIZE, lookStyle, lookStyles: STYLES.slice(), motionMode, motionModes: MOTION_MODES.slice(), gridClock,
     vocab, word: vocab.word, sfx, number: vocab.number, range: vocab.range, flow: vocab.flow, chain,
     /* v6 (MOVE): push words aside, the escalation memory, the parts of the view words keep clear of (px from each edge: a letterbox,
        a bar; or a function (space) => insets; null = the default 8 px) */

@@ -150,6 +150,7 @@
 .letr-s legend { padding: 0 0.3rem; font-weight: 700; }
 .letr-s .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
 .letr-s range-picker { accent-color: var(--letr-accent); }
+.letr-s .letr-s-ro { font-weight: 600; }
 
 /* ---------------------------------------------------------------- letter this now */
 .letr-now .window-content { padding: 0.6rem; }
