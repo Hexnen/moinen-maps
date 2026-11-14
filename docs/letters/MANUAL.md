@@ -44,7 +44,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | FXI-ENGINE (impact frames: guard counts every scene change, six strengths, red-safe, `gentle`, settings row, drawings) | 1.8.2 | API-CONTRACT 1.8.2 | `tactics-zones-fxi-engine` | pending merge |
 | MOTION2 | 1.9.0 | `tactics-zones-motion2` | - | pending merge (section 11a) |
 | FIN-ENGINE (FXI-ENGINE merged onto MOTION2; `plan.contactMs` / `L.contactAt`, per-word `flash: false`, impact `blowAt` / `keep` / `series`, sizes from the subject, series scheduled ahead all play) | 1.9.1 | API-CONTRACT 1.9.1 | `tactics-zones-fin-engine` | pending merge (sections 4, 21a) |
-| LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.3 | API-CONTRACT 1.9.3 (v13) | `tactics-zones-look3` | pending merge (section 13) |
+| LOOK3 (invincible: staggered interlocked O, two always / three rarely / four never; first letter as tall as its neighbour; no hole before the last letter; a source above or below no longer bends the word) | 1.9.4 | API-CONTRACT 1.9.4 (v13) | `tactics-zones-look3` | pending merge (section 13) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -627,7 +627,7 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     LOOK3 (1.9.3, the owner's rulings of 2026-11-14): linked O's stand off the line by `LINK.rise` (0.07) of their size each, the
     first up, the second down, a third up again (0.14 cap between neighbours; the pair's middle stays on the word's line, the block
     and keyline follow the letters); the over/under switch lies half way between the two rings' middles. Two O always interlock;
-    a run of three only on `LINK.three` (a quarter) of the seeds (the hand's own generator, the same on every client); four or more
+    a run of three only on `LINK.three` (20 %, the owner's «20 procent», 1.9.4) of the seeds (the hand's own generator, the same on every client); four or more
     never (plain O's in the word's pair spacing). A number's zeros stay level. In stepped motion linked rings shake as one piece;
     in the vertical column the rings stay on the column's axis (no stagger).
   - **Colour**: 11 flat palettes chosen from the sound (`hand.invPal`: yellow, orange, red, white, steel, cyan, blue, air, green,
@@ -665,7 +665,7 @@ tex counters capFont shadow prefix link arrange backdrop treat`. [R]
 - **Palettes**: `L.palettes()` [V]; `palette: "<name>"` per call (same on every client); `colors` overrides.
 
 Not done in LOOK2: joining other doubles (EE, UU) like OO; smooth interpolated motion in the invincible style (P16, MOTION2).
-LOOK3 open questions (owner): how rare a linked three is, how a run of three or more that does not interlock is set (today: plain O's), and whether a source above or below should still curve an invincible word (combat-questions LOOK3-1..4).
+LOOK3 open questions (owner): how a run of three or more that does not interlock is set (today: plain O's), and whether a source above or below should still curve an invincible word (combat-questions LOOK3-2..7; LOOK3-1 ruled: 20 %).
 
 ## 14. The owner's binding rulings
 Status: stable list, append-only. Every new ruling is added here with its date in the same turn it is given (and to the agent skill's
@@ -692,7 +692,8 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Keep the look from before the Invincible pass (today's `comic`) as the legacy style `expressive` | may pick `style: "expressive"` (1.8.0) | keep it identical to `comic` for the same options (`check-look2.mjs` P17) |
 | 2026-11-13 | Interlocked OO must meet properly and look artistically joined | - | done in `invincible` (LOOK2 P10: linked ovals from the face's own O) |
 | 2026-11-14 | The OO joins: the two letters are shifted apart vertically a little, the first one up, the second one down; a third O goes up again | - | done in `invincible` (LOOK3 1.9.3: `LINK.rise` 0.07 of the size each; `check-look3.mjs`) |
-| 2026-11-14 | Three O should interlock only rarely; four and more never | write the word as it sounds: the engine decides the join | done (LOOK3: three on a quarter of the seeds, four+ plain; the rate is provisional, LOOK3-1) |
+| 2026-11-14 | Three O should interlock only rarely; four and more never | write the word as it sounds: the engine decides the join | done (LOOK3: three on 20 % of the seeds, four+ plain) |
+| 2026-11-14 | How rare a linked three is: «20 procent» | - | done (LOOK3 1.9.4: `LINK.three` 0.2; `check-look3.mjs` measures 1000 seeds) |
 | 2026-11-13 | Letter spacing in `invincible` is too loose and must depend on the letter pair | - | optical kerning by pair: done (LOOK2 P18, `kernOptical`) |
 | 2026-11-13 | Animation must fit the sound: a motion table from the sound, not random picks | - | MOTION2 (SPEC-MOTION) |
 | 2026-11-13 | Recordings must be smooth and frame the subject (find out recorder vs engine) | record at 24/60 fps, words big enough, framed | one shared drawing grid; A/B film stepped vs smooth for the owner |
@@ -916,6 +917,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-14 (FIN-ENGINE, 1.9.1, `tactics-zones-fin-engine`): FXI-ENGINE merged onto MOTION2; section 4 (contact instant, `flash:
   false`), 21a (word + blow recipe, `blowAt`, `keep`, `series`, sizes, series scheduled ahead, cost, film-verified guard), stage
   table, API index, lessons (18).
+- 2026-11-14 (LOOK3 1.9.4): a linked three on 20 % of the seeds (owner's ruling), section 13 and 14.
 - 2026-11-14 (LOOK3, 1.9.3, `tactics-zones-look3`): section 13 (staggered interlocked O, the 2/3/4+ rule, first letter and case
   look-alikes, the hole before the last letter and its two causes), owner's rulings on the OO joins (14), stage table, API index.
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage

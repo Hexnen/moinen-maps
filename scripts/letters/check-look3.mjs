@@ -13,7 +13,7 @@ export async function run(ok, { bank, fontsApi, dir = null, verbose = !!process.
   const D = await import(at("design.mjs")), S = await import(at("shape.mjs")), G = await import(at("geom.mjs")), W = await import(at("words.mjs"));
   const P = await import(at("paint.mjs"));
   const { makePlan } = D, { settleCenter, pictureGeometry, kernOptical } = S, { bbox } = G;
-  const LINK = D.LINK ?? { rise: 0.07, three: 0.25, most: 3 };
+  const LINK = D.LINK ?? { rise: 0.07, three: 0.2, most: 3 };
   const say = (...a) => { if ( verbose ) console.log("  look3:", ...a); };
   const inv = (t, o = {}) => makePlan(t, { ...o, look: { style: "invincible", ...(o.look ?? {}) } }, fontsApi, []);
   const ink = (c) => /[\p{L}\p{N}]/u.test(c);
@@ -71,6 +71,13 @@ export async function run(ok, { bank, fontsApi, dir = null, verbose = !!process.
     }
     say(`runs of three: ${linked3} of ${three} linked; runs of four or more: ${fourLinked} of ${four} linked`);
     ok(three >= 100 && linked3 > 0 && linked3 <= 0.4 * three, `look3 OOO: a run of three interlocks rarely (${linked3} of ${three})`);
+    /* the owner's ruling (2026-11-14, «20 procent»): a run of three interlocks on 20 % of the seeds, decided per seed (same on every seat) */
+    { let n = 0, hit = 0, same = 0; for ( let s = 0; s < 1000; s++ ) { const seed = `rate3-${s}`, p = inv("GROOOAR", { mood: "roar", seed }), L = p.layout.letters, a = p.chars.indexOf("O");
+        const linked = L[a + 1].link === a && L[a + 2].link === a + 1; n++; if ( linked ) hit++;
+        if ( s < 50 ) { const q = inv("GROOOAR", { mood: "roar", seed }).layout.letters; if ( (q[a + 1].link === a && q[a + 2].link === a + 1) === linked ) same++; } }
+      say(`three O linked on ${hit} of ${n} seeds`);
+      ok(LINK.three === 0.2 && Math.abs(hit / n - 0.2) <= 0.04, `look3 OOO: three O interlock on 20 % of seeds (the owner's ruling; ${hit} of ${n})`);
+      ok(same === 50, `look3 OOO: the three-O choice is the same for the same seed (${same} of 50)`); }
     ok(zig === 0, `look3 OOO: a linked three goes up, down, up again (${zig} wrong; ${ex.join(", ")})`);
     ok(four >= 100 && fourLinked === 0, `look3 OOOO: four or more O never interlock (${fourLinked} of ${four})`);
     ok(inv("100", { mood: "impact", seed: 1 }).layout.letters.every((l) => Math.abs(l.dy - inv("100", { mood: "impact", seed: 1 }).layout.letters[0].dy) < 1e-9), "look3 OO: a number's zeros stay level");

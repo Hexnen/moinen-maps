@@ -265,9 +265,9 @@ export const RING_W = 0.94;   // a ring's width in cap heights (a circle a littl
 /* LOOK3 (the owner, 2026-11-14: «litery muszą być trochę rozjechane w pionie. Pierwsze do góry drugie w dół», «Trzecie znowu do
    góry»): interlocked O's of the invincible hand stand off their line by `rise` of their own size, the first up, the second down,
    a third up again (a stagger round the baseline: the pair's middle stays on the line). `three` = share of seeds whose run of three
-   O interlocks (the owner: rarely); `most` = the longest run that interlocks (four and more never). Digits (a number's 00) stay
+   O interlocks (the owner: rarely, «20 procent», 2026-11-14); `most` = the longest run that interlocks (four and more never). Digits (a number's 00) stay
    level: a number is even. */
-export const LINK = { rise: 0.07, three: 0.25, most: 3 };
+export const LINK = { rise: 0.07, three: 0.2, most: 3 };
 /* ---------- LOOK: the look says the sound (the user: «napisy pasowały wyglądem do dźwięków które opisują») ----------
    One deliberate mapping from the sound's CHARACTER to the lettering. The character is WORD's (words.mjs characterOf: hard, heavy, wet,
    metal, electric, heat, material, texture, contour per kind; L.word(...).play.character carries it); plain text gets its mood's. The

@@ -639,7 +639,7 @@ the penultimate syllable). `plan.accent` reports it.
 **Interlocked rings.** A run of O / 0 links as true rings, each passing through the one before it (`look.link`): circles of
 alternating size in `comic` / `expressive`; in `invincible` ovals of one size made from the face's own O (`ovalRing`), the block's counters kept open.
 In `invincible` (LOOK3 1.9.3, the owner's rulings) linked O's stand off the line by `LINK.rise` (0.07 of the size) each: the first up,
-the second down, a third up again. Two O always interlock; three only on a quarter of the seeds (`LINK.three`, `hand.link3`);
+the second down, a third up again. Two O always interlock; three only on 20 % of the seeds (the owner's ruling) (`LINK.three`, `hand.link3`);
 four or more never (plain O's). A number's zeros stay level; in stepped motion linked rings shake as one piece.
 **First letter, tail, holes (LOOK3).** In `invincible` the letters before the peak are as tall as the peak (`RISE`; a rising
 sound keeps steps of 0.93 with the first letter as tall as the second), the tail falls 0.93 a letter, a C O S U V W X Z never steps
