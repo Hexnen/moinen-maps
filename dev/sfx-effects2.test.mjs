@@ -171,6 +171,8 @@ group("RIDEVIEW", () => {
   ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
   ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
   ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "every story ride (pre, the plough's grind) is kept in view where it plays");
+  ok(/if \( w\.from && !shooterSeen\(\[w\.from\.x, w\.from\.y\]\) \) \{ playScreen\(spec\); return; \}/.test(src("sfx/sfx.mjs")), "a launch word of a hidden shooter is unlocated");
+  ok(/\.sort\(\(a, b\) => d\(a\) - d\(b\)\)\[0\];/.test(src("sfx/sfx.mjs")), "the shooter is the nearest token at the muzzle");
   ok(/const at = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* innerWidth, fw\)/.test(src("sfx/sfx.mjs")), "an edge word is held whole on the screen");
   ok(/alive: \[\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\), \.\.\.thisFlush\]/.test(src("sfx/sfx.mjs")) && /thisFlush\.push\(/.test(src("sfx/sfx.mjs")), "clusters of one flush avoid each other's words");
   ok(/w\.voice === "cavein" \? \{ \.\.\.w\.box, y1: w\.box\.y1 \+ \(w\.box\.y1 - w\.box\.y0\) \* 0\.5 \}/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");

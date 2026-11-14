@@ -454,6 +454,9 @@ function pageWord(p, w, t, waited = 0) {
   // screen, never at the hidden place)
   if ( w.screen ) { playScreen(spec, w.screen); return; }
   if ( !hereVisible(w.at?.x ?? w.x, w.at?.y ?? w.y) ) { playScreen(spec); return; }
+  // (a word at its shooter - a rocket's launch at the tube - whose shooter this client cannot see (a hidden token) is unlocated too, even
+  // where the ground is in view: it must not point at the hidden token)
+  if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(spec); return; }
   let placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
   // (a debris / catch word covered by the story's bigger words still on screen takes the next landing in view instead of being dropped)
   for ( const s of alts ) {
@@ -526,7 +529,10 @@ function playScreen(spec, fixed = null) {
 /** Is the shooter at scene point `from` (radius `fr`) visible to this client? A token there that this client cannot see: no. */
 function shooterSeen(from, fr) {
   if ( game.user?.isGM ) return true;
-  const G = grid(), t = (canvas.tokens?.placeables ?? []).find((q) => q.center && Math.hypot(q.center.x - from[0], q.center.y - from[1]) < (fr ?? G * 0.5) + G * 0.3);
+  // (the NEAREST token there is the shooter: live, a visible token standing next to a hidden turret was taken for it - the first in the
+  // list within reach - and the turret's launch word was drawn at the hidden turret)
+  const G = grid(), d = (q) => Math.hypot(q.center.x - from[0], q.center.y - from[1]);
+  const t = (canvas.tokens?.placeables ?? []).filter((q) => q.center && d(q) < (fr ?? G * 0.5) + G * 0.3).sort((a, b) => d(a) - d(b))[0];
   if ( t ) return !!t.visible && !t.document?.hidden;
   return hereVisible(from[0], from[1]);
 }
