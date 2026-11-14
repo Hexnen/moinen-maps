@@ -539,6 +539,42 @@ async function life(ok) {
     ok(kids() === 0 || h.alive, "impact life: keep leaves nothing");
     const g = I.play({ kind: "hit", magnitude: 1, seed: 23 }); await E.tick(60);
     ok(!String(g.plan.frames[g.idx]?.cv?.style.clipPath ?? "").includes("evenodd"), "impact life: no keep, no hole"); g.stop(); }
+  /* KEEPBOX (ADVX 7): a kept LETR WORD is not cut out as a box: it is copied onto the impact at its exact place, and knocked out of the
+     drawings that change the scene by a rim round its letters (an SVG filter); no hole in any drawing or in the scene's change */
+  await E.tick(1500);
+  { const view0 = canvas.app.view;
+    canvas.app.view = { getBoundingClientRect: () => ({ left: 10, top: 20, width: 1600, height: 900 }), clientWidth: 1600, clientHeight: 900 };
+    const pic = document.createElement("canvas"); pic.width = 200; pic.height = 80;
+    const sp = { visible: true, destroyed: false, alpha: 1, tint: 0xffffff, anchor: { x: 0.5, y: 0.5 }, texture: { width: 200, height: 80 },
+      parent: { worldTransform: { a: 2, b: 0, c: 0, d: 2, tx: 100, ty: 50 }, worldAlpha: 1 },
+      transform: { updateLocalTransform() {}, localTransform: { a: 1, b: 0, c: 0, d: 1, tx: 300, ty: 200 } } };
+    const word = { sprite: sp, shown: { canvas: pic }, alive: true, finished: new Promise(() => {}) };
+    h = I.play({ kind: "crit", magnitude: 2, seed: 24, subject: { x: 800, y: 440 }, keep: [word], keepPad: 4 });
+    let holes = 0, frames = 0, rimOn = 0, rimOff = 0, wrongRim = 0, placed = 0, follow = false, rimEl = null;
+    for ( let t = 0; t < h.plan.ms + 60 && h.alive; t += 16 ) {
+      await E.tick(16);
+      const f = h.plan.frames[h.idx]; if ( !f?.cv ) continue; frames++;
+      if ( /evenodd/.test(String(f.cv.style.clipPath ?? "")) || /evenodd/.test(String(h.back.style.clipPath ?? "")) ) holes++;
+      const c = h.copies?.get(word);
+      if ( !c ) continue;
+      if ( c.filter ) rimEl = c.filter;
+      if ( c.el.style.transform === "matrix(2,0,0,2,510,390)" && c.el.style.width === "200px" ) placed++;
+      const scene = !(f.full || f.back || f.cls !== "scene"), url = /^url\(#moinen-impact-keep-\d+\)$/.test(String(c.el.style.filter ?? ""));
+      if ( scene ) { if ( url ) wrongRim++; else rimOff++; } else if ( url ) rimOn++; else wrongRim++;
+      if ( t > 120 && !follow ) { sp.transform.localTransform = { ...sp.transform.localTransform, tx: 310 }; await E.tick(16); follow = /matrix\(2,0,0,2,530,390\)/.test(h.copies?.get(word)?.el.style.transform ?? "") || !h.alive; sp.transform.localTransform.tx = 300; }
+    }
+    ok(frames > 3 && holes === 0, `impact life: a kept word cuts no hole in any drawing or in the scene's change (${holes}/${frames})`);
+    ok(placed >= frames - 3, `impact life: the kept word's copy stands at the word's exact place, turn and size (${placed}/${frames})`);
+    ok(rimOn >= 2 && wrongRim === 0, `impact life: the rim round the letters shows exactly on the drawings that change the scene (${rimOn} on, ${rimOff} off, ${wrongRim} wrong)`);
+    ok(follow, "impact life: the copy follows the word when it moves");
+    ok(!!rimEl && /feMorphology[^>]*dilate/.test(rimEl.innerHTML ?? "") && /#fffdf2/.test(rimEl.innerHTML) && /#0b0b10/.test(rimEl.innerHTML), "impact life: the rim is a paper rim and an ink line dilated from the letters' own shape");
+    await E.tick(600);
+    ok(!h.alive && !rimEl?.parentNode && kids() === 0 && liveCv() === 1, `impact life: a kept word's copy and its rim filter are gone with the impact (canvases left: ${liveCv()}, the word's own picture)`);
+    /* a hidden (or ended) word: no copy shown */
+    sp.visible = false;
+    h = I.play({ kind: "crit", magnitude: 2, seed: 25, subject: { x: 800, y: 440 }, keep: word }); await E.tick(80);
+    ok([...(h.copies?.values() ?? [])].every((x) => x.el.style.display === "none"), "impact life: a word not shown on this seat gets no copy"); h.stop();
+    canvas.app.view = view0; }
 
   /* scene change */
   h = I.play({ kind: "hit", magnitude: 1.9, seed: 12 }); await E.tick(30); I.stopAll();

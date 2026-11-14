@@ -58,6 +58,13 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(n <= PHOTO.maxPerSec, `tools: at most ${PHOTO.maxPerSec} flashes a second (${n})`);
     const later = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log, t0: 5000 }));
     ok(flashTimes(later, TICK).length >= 1, "tools: the flash budget refills after a second");
+    /* KEEPBOX (ADVX 6): a word's own flash inside an impact's second gives way and takes no slot; a big word still takes its slot */
+    { const lg = [], w = filterPlan(JSON.parse(JSON.stringify(f0)), {}, { ...ctx({ log: lg, t0: 2000 }), impacts: [{ a0: 2600, a1: 2900 }] });
+      ok(flashTimes(w, TICK).length === 0 && lg.length === 0, "tools: a word's flash inside an impact's second gives way and takes no slot");
+      const lf = [], far = filterPlan(JSON.parse(JSON.stringify(f0)), {}, { ...ctx({ log: lf, t0: 2000 }), impacts: [{ a0: 9000, a1: 9300 }] });
+      ok(flashTimes(far, TICK).length === flashTimes(f0, TICK).length && lf.length === flashTimes(f0, TICK).length, "tools: a word far from any impact keeps its flash");
+      const lb = [], bg = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log: lb, t0: 2000, capPx: 800 * PHOTO.bigVh + 1 }));
+      ok(flashTimes(bg, TICK).length === 0 && lb.length === flashTimes(f0, TICK).length, "tools: a word too big to flash on this seat still takes its slot (seats log alike)"); }
     const pv = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ log: [0, 1, 2, 3], preview: true }));
     ok(flashTimes(pv, TICK).length >= 1, "tools: the designer's preview does not spend the flash budget");
   }

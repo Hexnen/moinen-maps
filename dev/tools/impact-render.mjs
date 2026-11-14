@@ -4,6 +4,8 @@
 // Spec (JSON, optional; default = every frame type held, then every kind at four strengths):
 //   { "items": [ { "label": "crit", "fn": "play" | "show", "type": "slam", "args": { "kind": "crit", "magnitude": 1.7, "dir": 20, "subject": "tok" } } ] }
 //   "subject": "tok" = the test figure, "tok2" = the small one, "word" = a lettered word; { "fx", "fy" } = a point (viewport fractions).
+// --keep "KA-THOOM!" (KEEPBOX): a LETR word (and its number, --keepnum "-3") lettered over the figure UNDER the impact layer (like a world
+//   word in the scene) and passed to every item as `keep`: shows how a kept word reads through every drawing. --keepsize = its size (px).
 // Output: <out>/<nn>-<label>/f##.png (one per tick), <out>/<nn>-<label>.png (the strip), <out>/frames.png (sheet of the single frame
 // types), <out>/kinds-*.png, <out>/film.webm (all items in order, 24 fps), <out>/report.json (plans, modes, paint ms).
 import http from "node:http"; import fs from "node:fs"; import path from "node:path"; import { execFileSync } from "node:child_process";
@@ -19,8 +21,9 @@ const MODE = arg("mode", "full"), BG = arg("bg", "map");
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;overflow:hidden;background:#000} #board{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+#under{position:fixed;inset:0;z-index:1;pointer-events:none}
 #tok,#tok2,#tok3{position:fixed;pointer-events:none}
-</style></head><body><canvas id=board></canvas><canvas id=tok></canvas><canvas id=tok2></canvas><canvas id=tok3></canvas><script>
+</style></head><body><canvas id=board></canvas><canvas id=tok></canvas><canvas id=tok2></canvas><canvas id=tok3></canvas><div id=under></div><script>
 (() => {   /* the film clock: time moves only when the driver says so */
   let T = 0; const timers = []; let tid = 0; let raf = [];
   performance.now = () => T;
@@ -86,14 +89,24 @@ const { createImpact } = await import("/eng/impact/index.mjs");
 const prefs = JSON.parse(q.get("prefs"));
 const I = createImpact({ get prefs() { return prefs; } }, null); window.I = I;
 await I.setMode(q.get("mode") ?? "full");
+/* KEEPBOX: the kept word(s), lettered by the engine under the impact layer, held for the whole run */
+window.__keep = [];
+if ( q.get("keep") ) {
+  const { createEngine } = await import("/eng/engine.mjs");
+  const L = createEngine(new URL("/eng/", location.href).href); await L.ready(); window.L = L;
+  const ts = +(q.get("tok") ?? 120), size = +(q.get("keepsize") ?? 56), under = document.getElementById("under");
+  const o = { space: "screen", parent: under, mood: "impact", magnitude: 1.2, seed: "keepbox", hold: 600000, size, fit: "exact", look: { style: "invincible" } };
+  window.__keep.push(L.play(q.get("keep"), { ...o, at: { x: W * 0.56, y: H * 0.5 - ts / 2 - size * 0.55 } }));
+  if ( q.get("keepnum") ) window.__keep.push(L.play(q.get("keepnum"), { ...o, seed: "keepbox#n", size: size * 0.8, at: { x: W * 0.56 + ts * 0.62 + size * 0.5, y: H * 0.5 - ts * 0.1 } }));
+}
 const fx = (v) => (v === "tok" || v === "tok2" || v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
-window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( a.from ) a.from = fx(a.from); if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(); a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( window.__keep.length && a.keep !== false ) a.keep = window.__keep.length > 1 ? window.__keep : window.__keep[0]; if ( a.from ) a.from = fx(a.from); if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(); a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
   const h = it.fn === "show" ? I.show(it.type, a) : I.play(a); window.__h = h;
   return { alive: h.alive, mode: h.mode, ms: h.plan?.ms, frames: h.plan?.frames.map((f) => [f.type, f.ticks, f.full ? "F" : "", f.stop ? "s" : "", f.punch ? "p" : ""].join("")), guard: h.plan?.guard }; };
 window.__done = true;
 </script></body></html>`;
 
-const MIME = { ".mjs": "text/javascript", ".js": "text/javascript", ".json": "application/json" };
+const MIME = { ".mjs": "text/javascript", ".js": "text/javascript", ".json": "application/json", ".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2" };
 const srv = http.createServer((q, s) => {
   const u = decodeURIComponent(q.url.split("?")[0]);
   if ( u === "/" ) { s.writeHead(200, { "content-type": "text/html" }); return s.end(PAGE); }
@@ -120,9 +133,10 @@ try {
   await s.send("Page.enable"); await s.send("Runtime.enable");
   const logs = []; s.on("Runtime.consoleAPICalled", (e) => { if ( e.type === "error" || e.type === "warning" ) logs.push(e.args.map((a) => a.value ?? a.description).join(" ")); });
   s.on("Runtime.exceptionThrown", (e) => logs.push("EXC " + (e.exceptionDetails?.exception?.description ?? e.exceptionDetails?.text)));
-  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
+  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}${arg("keep") ? `&keep=${encodeURIComponent(arg("keep"))}&keepnum=${encodeURIComponent(arg("keepnum", ""))}&keepsize=${arg("keepsize", "56")}` : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
   const ev = async (x) => { const r = await s.send("Runtime.evaluate", { expression: x, awaitPromise: true, returnByValue: true }); if ( r.result?.exceptionDetails ) logs.push("EVAL " + r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-  for ( let i = 0; i < 80 && !(await ev("window.__done===true")); i++ ) await new Promise((r) => setTimeout(r, 250));
+  for ( let i = 0; i < 400 && !(await ev("window.__done===true")); i++ ) { await ev("window.__advance(10).then(()=>true)"); await new Promise((r) => setTimeout(r, 30)); }
+  if ( arg("keep") ) await ev("window.__advance(1500).then(()=>true)");   // the kept word has landed and holds
   const shot = async (f) => { const r = await s.send("Page.captureScreenshot", { format: "png" }); fs.writeFileSync(f, Buffer.from(r.result.data, "base64")); };
   await shot(path.join(OUT, "scene.png"));
   const all = path.join(OUT, "all"); fs.rmSync(all, { recursive: true, force: true }); fs.mkdirSync(all, { recursive: true });
