@@ -154,6 +154,7 @@ group("WIRE", () => {
   ok(/C\.brushFalls\(ev,/.test(sfx), "a brush area's debris falls are added after it");
   // (live, meteor film 1: four debris words dropped under the main word and the wave; the rumble stood under the blast)
   ok(/PG\.pickSpots\(w, view\(\)/.test(sfx) && /for \( const s of alts \)/.test(sfx), "a covered debris word tries the next landing in view");
+  ok(/!placed\.length && w0\.cands && waited < PG\.FALL_WAIT_MS/.test(sfx) && P.FALL_WAIT_MS >= 500 && P.FALL_WAIT_MS <= 1500, "a still covered debris word waits for room a moment, then is dropped");
   ok(/else if \( w\.role === "pre" \) \{[\s\S]{0,400}spec\.stopAt = toPerf\(mw\.t\) \+ 40/.test(sfx), "a standing pre word yields when the main word lands");
 });
 

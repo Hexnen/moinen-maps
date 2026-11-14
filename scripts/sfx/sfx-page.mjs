@@ -26,6 +26,8 @@ export const RANK_MAG = [0, 0.3, 0.5, 0.8, 1.15, 1.5];
 export const DROP_ORDER = ["fall", "catch", "out", "wave", "pre", "main"];
 /** a travelling PRE word is gone this long before the MAIN's flash frame (4.4) */
 export const PRE_GAP = 90;
+/** how long a FALL / CATCH word covered by the story's bigger words waits for room before it is dropped (EFFECTS2, live meteor) */
+export const FALL_WAIT_MS = 1000;
 /** the shock dust's front time constant per level (fire/dust-model.mjs SHOCK tau, s) and its rim at about 2.2 tau */
 export const SHOCK_TAU = [0, 0.2, 0.28, 0.38];
 /** at most this many hisses for the fires of one firing (they die one by one: the arrangement, not one per fire) */

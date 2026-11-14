@@ -403,13 +403,14 @@ function pageWord(p, w, t, waited = 0) {
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
     p.texts.add(word.text); p.wt.set(w.key, word);
   }
-  let alts = [];
+  let alts = [], spot0 = null;
+  const w0 = w;
   if ( w.cands ) {
     p.used ??= new Set();
     const ss = PG.pickSpots(w, view(), p.used, Number(p.rec.t0), 6), s = ss[0];
     if ( !s ) { stats.dropped++; return; }
     alts = ss.slice(1);
-    p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+    p.used.add(spot0 = `${Math.round(s.x)},${Math.round(s.y)}`);
     w = { ...w, x: s.x, y: s.y, ...(s.gate ? { gate: s.gate } : {}) };
   }
   if ( !word?.text ) return;
@@ -455,6 +456,13 @@ function pageWord(p, w, t, waited = 0) {
     const s2 = { ...spec, x: s.x, y: s.y, subject: { x0: s.x - r2, y0: s.y - r2, x1: s.x + r2, y1: s.y + r2 } };
     placed = C.place([s2], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
     if ( placed.length ) p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+  }
+  // (still covered - a meteor's main word and wave fill the crater's surroundings at a close zoom: live, four debris words dropped) -
+  // it waits a moment for the bigger words to clear and tries again: the debris keeps coming down, the story still resolves
+  if ( !placed.length && w0.cands && waited < PG.FALL_WAIT_MS ) {
+    p.used.delete(spot0);
+    const g0 = gen; setTimeout(() => { if ( g0 === gen ) pageWord(p, w0, performance.now() + 60, waited + 250); }, 250);
+    return;
   }
   if ( !placed.length ) {
     stats.dropped++;
