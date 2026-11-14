@@ -475,6 +475,17 @@ async function life(ok) {
     ok(h.mode === "static", "impact life: reduced: false does not overrule the OS reduced-motion switch"); h.stop();
     globalThis.matchMedia = mm; P.motion = "full"; }
 
+  /* FIN-ENGINE: a series planned ahead (every blow called at once with its own startAt, apart in time) plays EVERY blow; one at a time
+     still holds for windows that overlap (seen live: the ladder's first four blows were "replaced" by the critical before they began) */
+  await E.tick(1500);
+  { const t0 = performance.now() + 100, hs = [0.4, 0.9, 1.5].map((m, i) => I.play({ kind: "hit", magnitude: m, seed: 30 + i, startAt: t0 + i * 700, subject: { x: 400, y: 300 } }));
+    ok(hs.every((x) => x.alive) && I.busy, "impact life: three blows scheduled apart are all alive");
+    const over = I.play({ kind: "hit", magnitude: 0.2, seed: 40, startAt: t0 + 700 + 20 });
+    ok(!over.alive && (await over.finished) === "busy", "impact life: a weaker blow overlapping a scheduled one is refused");
+    await E.tick(2400);
+    const why = await Promise.all(hs.map((x) => x.finished));
+    ok(why.every((w) => w === "done"), `impact life: every scheduled blow played (${why.join(",")})`);
+    ok(kids() === 0 && liveCv() === 0 && started, "impact life: clean after a series"); }
   /* FIN-ENGINE: blowAt = the instant of the blow: the impact starts peakMs earlier */
   await E.tick(1500);
   { const at = performance.now() + 300;

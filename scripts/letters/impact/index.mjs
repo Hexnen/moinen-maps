@@ -24,7 +24,10 @@ const BACK = {
 export function createImpact(L, tools = null) {
   const stats = { played: 0, paintMs: 0, paintMax: 0, painted: 0, showMax: 0, frameMax: 0, last: null };
   const roots = new Map();
-  let cur = null, seq = 0, localMode = "full", stopHeld = false, chromaOk = null;
+  /* FIN-ENGINE: the impacts alive (playing or waiting for their shared start). One AT A TIME means: no two whose time windows overlap; a
+     series planned ahead (blows 1.7 s apart, all called at once) plays every blow (before, each new call replaced the waiting one) */
+  const lives = new Set();
+  let seq = 0, localMode = "full", stopHeld = false, chromaOk = null;
 
   /* ---------- preferences ---------- */
   function ensureSetting() {
@@ -258,7 +261,7 @@ export function createImpact(L, tools = null) {
   function finish(h, why) {
     if ( !h.alive ) return;
     h.alive = false;
-    if ( cur === h ) cur = null;
+    lives.delete(h);
     if ( h.raf ) cancelAnimationFrame(h.raf);
     if ( h.dog ) clearTimeout(h.dog);
     try { setPunch(h, null); } catch {}
@@ -309,7 +312,9 @@ export function createImpact(L, tools = null) {
     const sub = armed && !over.subject ? armed.sub : subjectOf(spec);
     if ( sub.hidden ) return ended(plan, "hidden");
     /* one impact at a time: a stronger one takes over, a weaker one is not shown */
-    if ( cur?.alive ) { if ( plan.magnitude > cur.plan.magnitude ) finish(cur, "replaced"); else return ended(plan, "busy"); }
+    const a0 = startAt ?? t, a1 = a0 + plan.ms;
+    const clash = [...lives].filter((x) => x.alive && a0 < (x.t0 ?? t) + x.plan.ms && (x.t0 ?? t) < a1);
+    if ( clash.length ) { if ( clash.every((x) => plan.magnitude > x.plan.magnitude) ) for ( const x of clash ) finish(x, "replaced"); else return ended(plan, "busy"); }
     safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: t, t0: startAt ?? t });
     if ( !plan.frames.length ) return ended(plan, "off");
     let done, rdy;
@@ -329,7 +334,7 @@ export function createImpact(L, tools = null) {
     Object.assign(h.back.style, { position: "absolute", inset: "0", display: "none" });
     h.wrap.appendChild(h.back);
     (spec.parent instanceof HTMLElement ? spec.parent : rootFor(spec.over, spec.z)).appendChild(h.wrap);
-    cur = h; stats.played++;
+    lives.add(h); stats.played++;
     /* the watchdog: whatever happens to the frame loop (a hidden tab, an error), the impact is gone and the scene is free again */
     h.dog = setTimeout(() => finish(h, "done"), Math.max(0, (startAt ?? t) - t) + plan.ms + 300);
     h.raf = requestAnimationFrame(() => loop(h));
@@ -352,7 +357,7 @@ export function createImpact(L, tools = null) {
   }
   /* one frame type held to look at (gallery, design): at most LIMITS.galleryTicks */
   const show1 = (type, spec = {}) => play({ ...spec, frames: [{ type, ticks: Math.min(LIMITS.galleryTicks, spec.ticks ?? 12), punch: 0 }], demo: true });
-  function stopAll() { if ( cur ) finish(cur, "stopped"); setStop(false); }
+  function stopAll() { for ( const h of [...lives] ) finish(h, "stopped"); setStop(false); }
   try { globalThis.Hooks?.on?.("canvasTearDown", stopAll); } catch {}
 
   const api = {
@@ -360,7 +365,7 @@ export function createImpact(L, tools = null) {
     kinds: KIND_IDS.map((id) => ({ id, pl: KINDS[id].pl, en: KINDS[id].en, tone: KINDS[id].tone })),
     frames: FRAME_IDS.map((id) => ({ id, pl: FRAMES[id].pl, en: FRAMES[id].en, full: FRAMES[id].full })),
     tones: Object.keys(TONES), limits: LIMITS, steps: STEP_AT, series: { step: SERIES_STEP, max: SERIES_MAX }, stats,
-    get busy() { return !!cur?.alive; },
+    get busy() { return [...lives].some((x) => x.alive); },
     /* the chromatic split needs a backdrop filter that takes an SVG filter: false turns the scene's split off (the ink still splits) */
     set chroma(v) { chromaOk = v; }, get chroma() { return chromaOk; },
     async gallery(o = {}) { const g = await import("./gallery.mjs"); return g.gallery(api, o); }
