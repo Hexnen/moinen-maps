@@ -101,18 +101,23 @@ export const farLettered = (ev, farBefore) => !!ev?.preview || (farBefore(ev.k) 
 export function flashWord(ev, place, view, seed = "") {
   if ( !ev ) return null;
   const sd = `${seed}|flash|${ev.k}|${ev.t}`;
+  // the edge of THIS screen on the flash's side (the light comes from beyond it): its direction from the view's centre
+  const edge = () => {
+    const cx = view ? (view.x0 + view.x1) / 2 : 0, cy = view ? (view.y0 + view.y1) / 2 : 0;
+    const a = Math.atan2(place.y - cy, place.x - cx), ex = Math.cos(a), ey = Math.sin(a);
+    const k = 1 / Math.max(Math.abs(ex) / 0.36, Math.abs(ey) / 0.34, 1e-6);      // (on a box 0.14..0.86 x 0.16..0.84 of the screen)
+    return { fx: clamp(0.5 + ex * k, 0.14, 0.86), fy: clamp(0.5 + ey * k, 0.16, 0.84) };
+  };
   if ( ev.kind === "close" ) {
     const lv = clamp(ev.lv | 0 || 2, 1, 3), restrikes = Math.max(0, (ev.strokes?.length ?? 1) - 1);
+    // (a close strike beyond this screen - the storm strikes anywhere on the scene - is lettered at the edge toward it, still the big
+    // word: live, a strike off the view was dropped, its word had nowhere to stand)
+    const off = view && (place.x < view.x0 || place.x > view.x1 || place.y < view.y0 || place.y > view.y1);
     return { role: "main", kind: "thunder", wo: { loud: clamp(0.6 + 0.12 * lv + 0.04 * restrikes, 0.6, 1), ...(lv === 3 ? { prefix: true } : {}) }, t: ev.t, x: place.x, y: place.y,
-      rank: lv === 3 ? 5 : 4, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd };
+      ...(off ? { screen: edge() } : {}), rank: lv === 3 ? 5 : 4, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd };
   }
   const far = ev.kind === "far", lag = THUNDER_LAG[ev.kind], t = ev.t + Math.round(lag[0] + (lag[1] - lag[0]) * h01(`${sd}|lag`));
-  // the edge of THIS screen on the flash's side (the light comes from beyond it): its direction from the view's centre
-  const cx = view ? (view.x0 + view.x1) / 2 : 0, cy = view ? (view.y0 + view.y1) / 2 : 0;
-  const a = Math.atan2(place.y - cy, place.x - cx), ex = Math.cos(a), ey = Math.sin(a);
-  const k = 1 / Math.max(Math.abs(ex) / 0.36, Math.abs(ey) / 0.34, 1e-6);      // (on a box 0.14..0.86 x 0.16..0.84 of the screen)
-  const screen = { fx: clamp(0.5 + ex * k, 0.14, 0.86), fy: clamp(0.5 + ey * k, 0.16, 0.84) };
-  return { role: far ? "far" : "mid", kind: far ? "rumble" : "thunder", wo: { loud: far ? 0.15 : 0.32, long: far ? 0.8 : 0.6 }, t, screen, rank: far ? 1 : 2,
+  return { role: far ? "far" : "mid", kind: far ? "rumble" : "thunder", wo: { loud: far ? 0.15 : 0.32, long: far ? 0.8 : 0.6 }, t, screen: edge(), rank: far ? 1 : 2,
     ms: far ? 1800 : 1300, stage: { in: "grow", holdKind: "rattle", out: "dissolve" }, seed: sd };
 }
 

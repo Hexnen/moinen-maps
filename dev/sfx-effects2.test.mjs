@@ -56,6 +56,8 @@ group("FLASH", () => {
   ok(wf.rank === 1 && wm.rank === 2 && wc.rank >= 4, "far < mid < close");
   ok(wf.kind === "rumble" && wm.kind === "thunder" && wc.kind === "thunder", "kinds");
   ok(!wc.screen && wc.x === 900 && wc.t === close.t, "close: at the strike, on the stroke");
+  const wo = E.flashWord(close, { x: 900, y: -700 }, view, "s");
+  ok(wo.screen && wo.screen.fy < 0.2 && wo.role === "main" && wo.rank >= 4 && wo.t === close.t, "close beyond the screen: the big word at the edge toward it (live: dropped)");
   for ( const lang of ["en", "pl"] ) for ( let s = 0; s < 12; s++ ) {
     const t = V.word(wf.kind, { ...wf.wo, seed: `x${s}`, lang }).text;
     ok(!t.includes("!"), `far rumble without "!": ${t}`);
