@@ -449,7 +449,7 @@ Status: new, on branch `tactics-zones-kinds1` [V node: check-words section 20].
   KRUUM / KROOM, the owner's pick; BOOM / BUM only for blasts with fire), `impact` (a bullet or a blow landing; group `impact`),
   `debris` (falling pieces, repeats its last syllable for more pieces), `whizz` (a near miss), `casings` (brass on the floor),
   `dryfire` (an empty click), and `grenade` now has its own dry frag words (KDUMF, PDOOMF) instead of the boom's.
-- BOOM / BUM only for a blast with fire (1.9.4 WORDS3) [V]: only the kinds in `FIRE_BLASTS` (today `boom`) may letter BOOM / BUM
+- BOOM / BUM only for a blast with fire (1.9.5 WORDS3) [V]: only the kinds in `FIRE_BLASTS` (today `boom`) may letter BOOM / BUM
   in any spelling (KA-BOOOM, KRA-KA-BUUUM); every other kind, its variant rows, lead-ins and flows never do (check-words section
   21). Thunder (`thunder`, and `storm` sharing its quiet and normal words): en BRRMM / KRMMM -> KRAKOOM / KRAGOOM ->
   KRA-KA-GRRAWOOM / KRA-KA-KRRAWOOM, pl BRRMM / KRRMM -> KRAKUUM / KRAGUUM -> KRA-KA-GRRAWUUM / KRA-KA-KRRAWUUM: the lightning's
@@ -703,7 +703,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Impact frames are the exception to the restraint: they may go all out and must be spectacular; a system other effects use (`L.impact`) | one `L.impact.play` per event, at its instant | keep it one call for every caller; section 21a |
 | 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
 | 2026-11-13 | BOOM / BUM only for a blast WITH fire; a blast without fire is KROOM / KRUUM; a hero landing THOOM / DUUM; a cave-in BTHOOM / BDUUM | use `concussion` for a fireless blast, `boom` only with fire | keep `FIRE_BLASTS`; check-words section 21 |
-| 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.4 WORDS3 |
+| 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
 
 ## 15. Tools: settings, authoring, designer, accessibility
 Status: stable (TOOL, contract v6). [V] where marked, else [C].
@@ -928,7 +928,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   same-instant shared grid (11a), the owner's ruling (14), reduced-on-stepped limit (18), API index, stage table.
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
-- 2026-11-14 (WORDS3, 1.9.4, `tactics-zones-words3`): thunder without BOOM / BUM, `FIRE_BLASTS` and the check that keeps BOOM / BUM
+- 2026-11-14 (WORDS3, 1.9.5, `tactics-zones-words3`): thunder without BOOM / BUM, `FIRE_BLASTS` and the check that keeps BOOM / BUM
   in blasts with fire only (9a), the rulings (14), the prefix example.
 
 ## 21a. Impact frames: `L.impact`
