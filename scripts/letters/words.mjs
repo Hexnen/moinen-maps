@@ -223,7 +223,7 @@ export const SHARED = {
     BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
     KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     KRAKUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
-    KRADUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRAGUM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     DUMDUM: { kinds: ["stomp", "mech"], why: "a mech's walk is heavy stomping" },
     SZKLANG: { kinds: ["clang", "sword"], why: "a sword on metal is a clang" },
     RM: { kinds: ["rumble", "engine"], why: "a low rolling hum: a rumble and an idling engine sound the same" },
@@ -248,7 +248,7 @@ export const SHARED = {
     BRM: { kinds: ["thunder", "storm", "engine"], why: "a low rolling R-M: thunder, a storm and an idling engine" },
     KRM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     KRAKOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
-    KRADOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
+    KRAGOM: { kinds: ["thunder", "storm"], why: "a storm's single word is its thunder" },
     SHKLANG: { kinds: ["clang", "sword"], why: "a sword on metal is a clang" },
     RM: { kinds: ["rumble", "engine"], why: "a low rolling hum: a rumble and an idling engine sound the same" },
     FZT: { kinds: ["zap", "fizzle"], why: "a fizzle is a small electric zap dying" },
@@ -290,7 +290,7 @@ export const BANK = {
     scrape:   B("SKRRT|KRRT", "SZRRRK|SKRRYT", "SZRRRAKK|SKRRRYT"),
     boom:     B("BUM|FUUM", "TWUUM|BATUUM", "KA-BUUM|KA-TWUUMM|KA-GDUUM"),
     whump:    B("FUMF|WUMF|BWUMF", "FWUMP|FUUMF", "FWUUMPF|FWUUMMF"),
-    thunder:  B("BRRMM|KRRMM", "KRAKUUM|KRADUUM", "KRA-KA-BUUM|KRA-KA-DUUMM"),
+    thunder:  B("BRRMM|KRRMM", "KRAKUUM|KRAGUUM", "KRA-KA-GRRAWUUM|KRA-KA-KRRAWUUM"),   // WORDS3: no BUM (the owner: BUM only for a blast with fire)
     zap:      B("BZT|DZT|FZT", "BZZT|KZZT|DZZT", "BZZAKT|DZZAKT"),
     beam:     B("WZZM|ZZMM", "WZZZMM|ZZAMM", "WZZAAMM|BZZAAMM"),
     gunfire:  B("TRA-TA-TA|DRRT-DRRT", "TRA-TA-TA-TA|DRRT-DRRT-DRRT|RATATATA", "TRA-TA-TA-TA-TA|DRRT-DRRT-DRRT-DRRT|RATATATATA", "TRA-TA-TA|DRRT-DRRT-DRRT"),
@@ -357,7 +357,7 @@ export const BANK = {
     firetruck:B("BUAAP-UUIIUU|BUAAP-BUAAP", "BUAAP-UUIIUU-BUAAP|BUAAP-BUAAP-BUAAP", "UUIIUU-BUAAP-UUIIUU|BUAAAP-BUAAAP", "BUAAP-UUIIUU"),
     hail:     B("TYK-TYK-TYK|PYK-PYK", "TYK-TYK-TYK|PYK-PYK-PYK|TYKATYKATYK", "TYK-TYK-TYK-TYK|PYK-PYK-PYK-PYK", "TYK-TYK-TYK"),
     rain:     B("SZSZSZ|PSZSZ", "TSSSSZ|SSSSSZ", "SSSSSSSZ|PSSSSSSZ"),
-    storm:    B("BRRMM|KRRMM", "KRAKUUM|KRADUUM", "KRA-KA-WRRUMM|KRA-KA-PFRRUMM"),
+    storm:    B("BRRMM|KRRMM", "KRAKUUM|KRAGUUM", "KRA-KA-WRRUMM|KRA-KA-PFRRUMM"),
     tornado:  B("HWRUU|WRRUU", "WRRUUUUSZ|HWRRUUUU", "HWRRRUUUMM|WRRRUUUUSZ"),
     /* KINDS1 (2026-11-13) */
     shockwave:B("HWUMF|FHUMF", "HWUUUMMF|FHUUUMMF", "HWUUUUMMFF|FHWUUUUMMFF"),
@@ -387,7 +387,7 @@ export const BANK = {
     scrape:   B("SKRRT|KRRT", "SHRRRK|SKRRAT", "SHKRRRAKK|SKRRRAT"),
     boom:     B("BOOM|FOOM", "TWOOM|BADOOM|BTHOOM", "KA-BOOM|BATOOWW|KA-TWOOMM"),
     whump:    B("WUMF|BWUMF", "FWUMP|FWUMF", "FWOOMPF|FWUUMFF"),
-    thunder:  B("BRRMM|KRMMM", "KRAKOOM|KRADOOM", "KRA-KA-THOOM|KRA-KA-BOOM|KRA-KA-BTHOOM"),
+    thunder:  B("BRRMM|KRMMM", "KRAKOOM|KRAGOOM", "KRA-KA-GRRAWOOM|KRA-KA-KRRAWOOM"),   // WORDS3: no BOOM (fire blasts only), no landing THOOM, no cave-in BTHOOM
     zap:      B("BZT|FZT", "ZAP|BZZT|KZZT", "BZZAKT|KZZRAKK|ZZAPP"),
     beam:     B("VZZM|ZZMM", "VZZZMM|ZZAMM", "VZZAAMM|VZZAAMM"),
     gunfire:  B("DRRT-DRRT|BUDDA-BUDDA", "DRRT-DRRT-DRRT|BUDDA-BUDDA-BUDDA|BRAKKA-BRAKKA", "BRAKKA-BRAKKA-BRAKKA|DRRT-DRRT-DRRT-DRRT", "DRRT-DRRT-DRRT|BUDDA-BUDDA"),
@@ -454,7 +454,7 @@ export const BANK = {
     firetruck:B("BWAAMP-HWAAA|BWAAP-BWAAP", "BWAAMP-HWAAA-BWAAMP|BWAAP-BWAAP-BWAAP", "HWAAA-BWAAMP-HWAAA|BWAAAP-BWAAAP", "BWAAMP-HWAAA"),
     hail:     B("PAK-PAK|TSIK-TSIK", "PAK-PAK-PAK|TSIK-TSIK-TSIK|TAKATAKATAKA", "PAKK-KRAK-PAKK|TAKATAKATAKATAKA", "PAK-PAK-PAK"),
     rain:     B("SHHHH|PSHHH", "KSSHHH|SHHHHHH", "KSSSHHHH|SHHHHHHH"),
-    storm:    B("BRRMM|KRMMM", "KRAKOOM|KRADOOM", "KRA-KA-BWROOMM|KRA-KA-GRROOMM"),
+    storm:    B("BRRMM|KRMMM", "KRAKOOM|KRAGOOM", "KRA-KA-BWROOMM|KRA-KA-GRROOMM"),
     tornado:  B("HWRROO|VRROO", "VRROOOOSH|HWRROOOO", "SHWRRROOOOMM|VRRROOOOSHH"),
     /* KINDS1 (2026-11-13) */
     shockwave:B("FHOMF|VWOMF", "VWOOOMMF|FHOOOMMF", "VWOOOOMMFF|FHWOOOOMMFF"),
@@ -609,6 +609,11 @@ export const VARIANTS = {
   }
 };
 /* which kinds take which table */
+/* WORDS3 (2026-11-14): the owner's ruling "BOOM / BUM only for a blast WITH fire" (EFFECTS1 answer 3; thunder: «zmienić»). Only the
+   kinds named here may letter BOOM / BUM (any stretch, any lead-in); every other kind, its variant rows, prefixes and flows never do
+   (check-words.mjs section 21). The fireless blast is KROOM / KRUUM (concussion), a hero landing THOOM / DUUM, a cave-in BTHOOM /
+   BDUUM, thunder KRAKOOM / KRA-KA-GRRAWOOM. Add a kind here only when it is a blast with fire. */
+export const FIRE_BLASTS = ["boom"];
 export const VARY = { impact: ["impact"], debris: ["debris"], struck: ["punch", "smash", "slap", "thud"], blast: ["boom"], break: ["crack", "crash", "crumble"], fire: ["fire"] };
 for ( const [table, ids] of Object.entries(VARY) ) for ( const id of ids ) KINDS[id].vary = table;
 KINDS.debris.sized = true;

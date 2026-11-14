@@ -64,3 +64,7 @@ export const REVIEWED_KINDS1 = {
 };
 REVIEWED.pl.push(...REVIEWED_KINDS1.pl);
 REVIEWED.en.push(...REVIEWED_KINDS1.en);
+/* WORDS3 (2026-11-14): the thunder without BOOM / BUM (the owner: BOOM / BUM only for a blast with fire, «zmienić»): the lightning's
+   crack (KRA-KA-, KRAK-) and a rolling, low body (GRRAWOOM: the R rolls, the OO and M hold), read against the same rules */
+REVIEWED.pl.push(..."KRAGUM GRAWUM KRAWUM".split(" "));
+REVIEWED.en.push(..."KRAGOM GRAWOM KRAWOM".split(" "));

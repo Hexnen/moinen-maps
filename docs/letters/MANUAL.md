@@ -450,6 +450,12 @@ Status: new, on branch `tactics-zones-kinds1` [V node: check-words section 20].
   KRUUM / KROOM, the owner's pick; BOOM / BUM only for blasts with fire), `impact` (a bullet or a blow landing; group `impact`),
   `debris` (falling pieces, repeats its last syllable for more pieces), `whizz` (a near miss), `casings` (brass on the floor),
   `dryfire` (an empty click), and `grenade` now has its own dry frag words (KDUMF, PDOOMF) instead of the boom's.
+- BOOM / BUM only for a blast with fire (1.9.5 WORDS3) [V]: only the kinds in `FIRE_BLASTS` (today `boom`) may letter BOOM / BUM
+  in any spelling (KA-BOOOM, KRA-KA-BUUUM); every other kind, its variant rows, lead-ins and flows never do (check-words section
+  21). Thunder (`thunder`, and `storm` sharing its quiet and normal words): en BRRMM / KRMMM -> KRAKOOM / KRAGOOM ->
+  KRA-KA-GRRAWOOM / KRA-KA-KRRAWOOM, pl BRRMM / KRRMM -> KRAKUUM / KRAGUUM -> KRA-KA-GRRAWUUM / KRA-KA-KRRAWUUM: the lightning's
+  crack, then a low roll whose R stretches with length (KRA-KA-GRRRRRRAWOOM!!). It borrows no other event's fixed word: hero
+  landing THOOM / DUUM, cave-in BTHOOM / BDUUM, fireless blast KROOM / KRUUM. Far thunder in the map is the `rumble` kind.
 - Call-time word options (vocabulary keys, never passed to `L.play`): `material` (`stone wood metal earth water glass flesh
   shield`; aliases such as `concrete`, `steel`, `forcefield`; unknown = the kind's own words) picks the material's row for
   `impact`, `punch smash slap thud`, `debris`, `boom`, `crack crash crumble` (glass -> the `shatter` words, earth -> `crumble`) and
@@ -692,7 +698,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Only onomatopoeia: a word imitates the sound, never names it (no "growl", "creak", "roar") | take words from the vocabulary; no action names (HAYMAKER!, TRY AGAIN) | keep `naming()` / `DICT` checks over every bank word, prefix, syllable and flow segment |
 | 2026-11-13 | No dictionary words, not even imitative interjections from the dictionary (CIACH, TRZASK, PLUSK; CRASH, SPLASH, CRACK), and no near-words (a dictionary word with one letter changed, dropped, stuck on, or respelled: PLOSK, BLOSK, SPLAASK, WHOOSHK) | not hand-write sound words | build words from attack + lasting part + cut-off; extend the check to near-words (WORD2) |
 | 2026-11-13 | The ICONIC exception list (pl BUM BAM PAF; en POW THUD BAM BOOM BANG ZAP WHAM SHH) awaits the owner; nothing else is exempt | - | add an exception only with the owner's ruling and its reason |
-| 2026-11-13 | A prefix is the sound's own lead-in (KA-BUM, KRA-KA-BROOM), never another sound's signature (no gun rattle before a bomb) | - | every lead-in comes from `PREFIXES` |
+| 2026-11-13 | A prefix is the sound's own lead-in (KA-BUM, KRA-KA-GRRAWOOM), never another sound's signature (no gun rattle before a bomb) | - | every lead-in comes from `PREFIXES` |
 | 2026-11-13 | The comic's manner: an invented attack cluster, the lasting letters doubled or tripled (consonants too), one or two "!", short sounds short; loudness and duration separate; "!" 0..2 | pass `loud` and `long`/`duration` separately | keep the stretch rule (only the sustain repeats) |
 | 2026-11-13 | Letter play fits the event: an expressive onset and the lasting letter stretched (BTHOOM for a cave-in, KRRRRAK for a crack) | say what the event is (kind, material, phase) | let the kind and event choose the onset and which letter lasts |
 | 2026-11-13 | English is first-class and may become the default language; the laser pistol's "piu piu" is weak | do not assume Polish; pick one language per world (see section 5) | English is the master spelling (WORD2) |
@@ -721,6 +727,8 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Audio: default silent; later only an opt-in way to attach a sound to a word's clock | - | build no sound content |
 | 2026-11-13 | Impact frames are the exception to the restraint: they may go all out and must be spectacular; a system other effects use (`L.impact`) | one `L.impact.play` per event, at its instant | keep it one call for every caller; section 21a |
 | 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
+| 2026-11-13 | BOOM / BUM only for a blast WITH fire; a blast without fire is KROOM / KRUUM; a hero landing THOOM / DUUM; a cave-in BTHOOM / BDUUM | use `concussion` for a fireless blast, `boom` only with fire | keep `FIRE_BLASTS`; check-words section 21 |
+| 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
 
 ## 15. Tools: settings, authoring, designer, accessibility
 Status: stable (TOOL, contract v6). [V] where marked, else [C].
@@ -948,6 +956,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   look-alikes, the hole before the last letter and its two causes), owner's rulings on the OO joins (14), stage table, API index.
 - 2026-11-14 (FXI-ENGINE, 1.8.2): section 21a (impact frames; the IMPACT builder's patch folded in and corrected to 1.8.2), stage
   table rows, owner's rulings on impact frames (14), settings row `impact` (15), seams (17), limits (18), API index (20).
+- 2026-11-14 (WORDS3, 1.9.5, `tactics-zones-words3`): thunder without BOOM / BUM, `FIRE_BLASTS` and the check that keeps BOOM / BUM
+  in blasts with fire only (9a), the rulings (14), the prefix example.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
