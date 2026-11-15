@@ -761,30 +761,79 @@ export function sceneView(view, rect) {
  * MAPSEATS3), OFF_K of its size, its syllables running INTO the view; moved along that edge off this seat's panels. Pure.
  * -> { rule, at, dir, k }
  */
-export function streamSeat(src, { view, unit, panels = [], dir = -90, zoom = 1, edge = SEAT_EDGE } = {}) {
+export function streamSeat(src, { view, unit, panels = [], dir = -90, zoom = 1, edge = SEAT_EDGE, rows = 1, scale = null } = {}) {
   if ( !src || !view || !Number.isFinite(src.x) || !Number.isFinite(src.y) ) return { rule: "ok", at: src, dir, k: 1 };
-  const u = unit > 0 ? unit : 0, m = edge / Math.max(1e-4, zoom) + u * 1.2;
-  const v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
-  if ( v.x1 <= v.x0 || v.y1 <= v.y0 ) return { rule: "ok", at: src, dir, k: 1 };
-  if ( src.x >= v.x0 && src.x <= v.x1 && src.y >= v.y0 && src.y <= v.y1 ) return { rule: "ok", at: src, dir, k: 1 };
-  // (beyond which edge most: the syllables run away from it, into the view)
-  const ex = src.x < v.x0 ? v.x0 - src.x : src.x > v.x1 ? src.x - v.x1 : 0, ey = src.y < v.y0 ? v.y0 - src.y : src.y > v.y1 ? src.y - v.y1 : 0;
-  const d2 = ey >= ex ? (src.y < v.y0 ? 90 : -90) : (src.x < v.x0 ? 0 : 180);
-  const at = { x: clamp(src.x, v.x0, v.x1), y: clamp(src.y, v.y0, v.y1) };
-  // (off this seat's panels: the syllables' first rows - about 3 x 2.6 syllables along the run - moved along the edge, nearest first)
-  const k = OFF_K, s = u * k, rad = (d2 * Math.PI) / 180, fx = Math.cos(rad), fy = Math.sin(rad);
-  const foot = (p) => { const a = { x: p.x + fx * s * 3.5, y: p.y + fy * s * 3.5 }; return { x0: Math.min(p.x, a.x) - s * 1.6, y0: Math.min(p.y, a.y) - s * 0.9, x1: Math.max(p.x, a.x) + s * 1.6, y1: Math.max(p.y, a.y) + s * 0.9 }; };
+  const u = unit > 0 ? unit : 0, e = edge / Math.max(1e-4, zoom);
+  const v = { x0: view.x0 + e, y0: view.y0 + e, x1: view.x1 - e, y1: view.y1 - e };
+  if ( v.x1 <= v.x0 || v.y1 <= v.y0 || !(u > 0) ) return { rule: "ok", at: src, dir, k: 1 };
+  // (off this view - beyond which edge most: at that edge, the syllables running away from it, into the view, OFF_K of their size)
+  const away = !(src.x >= v.x0 && src.x <= v.x1 && src.y >= v.y0 && src.y <= v.y1);
+  let d2 = dir, k = 1;
+  if ( away ) {
+    const ex = src.x < v.x0 ? v.x0 - src.x : src.x > v.x1 ? src.x - v.x1 : 0, ey = src.y < v.y0 ? v.y0 - src.y : src.y > v.y1 ? src.y - v.y1 : 0;
+    d2 = ey >= ex ? (src.y < v.y0 ? 90 : -90) : (src.x < v.x0 ? 0 : 180); k = OFF_K;
+  }
+  // (the whole stack - every row of syllables up at once, both lane columns - inside the view: the source moved the least to fit; a view
+  // too short for it at this size: the syllables smaller until it fits, never under STREAM_MIN_K of the size)
+  const ext = (kk) => streamFoot({ x: 0, y: 0 }, d2, u * kk, rows);
+  let f = ext(k);
+  const fitK = Math.min(1, (v.x1 - v.x0) / Math.max(1e-6, f.x1 - f.x0), (v.y1 - v.y0) / Math.max(1e-6, f.y1 - f.y0));
+  if ( fitK < 1 ) { k = Math.max(k * STREAM_MIN_K, k * fitK); f = ext(k); }
+  // (a stream already playing keeps the size it was called at - the engine takes `scale` once: its later seats use that size)
+  if ( Number.isFinite(scale) && scale > 0 ) { k = scale; f = ext(k); }
+  const R = { x0: v.x0 - f.x0, x1: v.x1 - f.x1, y0: v.y0 - f.y0, y1: v.y1 - f.y1 };
+  const into = (p) => ({ x: R.x0 <= R.x1 ? clamp(p.x, R.x0, R.x1) : (R.x0 + R.x1) / 2, y: R.y0 <= R.y1 ? clamp(p.y, R.y0, R.y1) : (R.y0 + R.y1) / 2 });
+  const at = into(src);
+  // (off this seat's panels: the nearest place in the room whose stack lies on none)
+  const foot = (p) => ({ x0: p.x + f.x0, y0: p.y + f.y0, x1: p.x + f.x1, y1: p.y + f.y1 });
   const hit = (p) => panels.reduce((t, o) => t + inter(foot(p), o), 0);
   if ( panels.length && hit(at) > 0 ) {
-    const along = fy ? { x: 1, y: 0 } : { x: 0, y: 1 }, span = fy ? v.x1 - v.x0 : v.y1 - v.y0, stp = Math.max(s, span / 40);
-    let best = null;
-    for ( let i = 1; i * stp <= span && !best; i++ ) for ( const sg of [-1, 1] ) {
-      const p = { x: clamp(at.x + along.x * sg * i * stp, v.x0, v.x1), y: clamp(at.y + along.y * sg * i * stp, v.y0, v.y1) };
-      if ( hit(p) <= 0 ) { best = p; break; }
-    }
+    const sx = Math.max(0, R.x1 - R.x0), sy = Math.max(0, R.y1 - R.y0), stp = Math.max(u * k * 0.5, Math.max(sx, sy) / 30, 1);
+    const cand = [];
+    for ( let x = R.x0; x <= R.x0 + sx + 1e-6; x += stp ) for ( let y = R.y0; y <= R.y0 + sy + 1e-6; y += stp ) cand.push({ x, y });
+    for ( const p of [{ x: at.x, y: R.y0 }, { x: at.x, y: R.y0 + sy }, { x: R.x0, y: at.y }, { x: R.x0 + sx, y: at.y }] ) cand.push(p);
+    cand.sort((a, b) => Math.hypot(a.x - at.x, a.y - at.y) - Math.hypot(b.x - at.x, b.y - at.y));
+    const best = cand.find((p) => hit(p) <= 0);
     if ( best ) Object.assign(at, best);
   }
-  return { rule: "away", at, dir: d2, k };
+  const moved = Math.hypot(at.x - src.x, at.y - src.y) > 0.5;
+  return { rule: away ? "away" : moved ? "shift" : "ok", at, dir: d2, k };
+}
+/** MAPEDGE: a stream's syllables never smaller than this share of their size to fit a short view (a stack that still does not fit
+    stands centred on the view; the engine's own legible floor applies after) */
+export const STREAM_MIN_K = 0.5;
+/** MAPEDGE: how long an invincible stream syllable takes a LANE (the engine's LEGIBLE_MS: its life 340 ms + 260; engine.mjs stream()) */
+export const STREAM_LEG_MS = 600;
+/** MAPEDGE: the most syllables of one stream legible at once - its rows; more lanes than the view's room in front of the source go
+    BEHIND it in the engine with no room check (live: the heli run's 6 lanes, rows below the window) */
+export const STREAM_ROWS = 3;
+/** MAPEDGE: the stream's beats thinned on the table's data (the same on every seat) so that at most `max` syllables take a lane at once:
+    a beat is kept while fewer than `max` kept beats are still legible at its moment; the first and the last beat stay */
+export function thinBeats(beats, legMs = STREAM_LEG_MS, max = STREAM_ROWS) {
+  const bs = (beats ?? []).filter(Number.isFinite).slice().sort((a, b) => a - b), out = [];
+  for ( const b of bs ) if ( out.filter((t) => t + legMs > b).length < max ) out.push(b);
+  if ( bs.length && out.at(-1) !== bs.at(-1) ) { if ( out.length > 1 ) out.pop(); out.push(bs.at(-1)); }
+  return out;
+}
+/** the most beats legible at once (the lanes the engine opens) */
+export function streamRows(beats, legMs = STREAM_LEG_MS) {
+  const bs = (beats ?? []).filter(Number.isFinite);
+  return bs.reduce((m, b) => Math.max(m, bs.filter((t) => t <= b && t + legMs > b).length), bs.length ? 1 : 0);
+}
+/**
+ * MAPEDGE: the box (scene px) the ink of a stream's stack covers, its source at `at`, running `dir` degrees, syllable cap `s`, `rows`
+ * syllables up at once - from the engine's lanes (engine.mjs stream(): row r at 0.5 cap + 0.45 cap of travel + r half-steps along the run,
+ * two columns half a lane width either side of it), measured live (the heli run at zoom 0.5: half-step 1.57 caps, columns 2.05 caps out,
+ * a syllable's ink 1.5 caps high, about 2.8 wide). Pure.
+ */
+export const STREAM_FOOT = { ahead: 0.95, half: 1.6, inkH: 0.8, lat: 2.05, inkW: 1.4 };
+export function streamFoot(at, dir, s, rows = 1) {
+  const F = STREAM_FOOT, r = Math.max(1, Math.round(rows) || 1);
+  const fwd = s * (F.ahead + (r - 1) * F.half + F.inkH), back = s * Math.max(0, F.inkH - F.ahead + 0.5), lt = s * (F.lat + F.inkW);
+  const a = (dir * Math.PI) / 180, fx = Math.cos(a), fy = Math.sin(a), nx = -fy, ny = fx;
+  const xs = [], ys = [];
+  for ( const p of [fwd, -back] ) for ( const q of [lt, -lt] ) { xs.push(at.x + fx * p + nx * q); ys.push(at.y + fy * p + ny * q); }
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
 }
 /**
  * Is there a move d inside `A` ({ x0, x1, y0, y1 }: the moves allowed) that puts the box `k` on none of `obs` (touching allowed)? Exact:

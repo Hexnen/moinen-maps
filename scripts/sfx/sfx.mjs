@@ -57,6 +57,7 @@ const CLOCK_OK = 30, CLOCK_WAIT = 20000;  // ms: a seat's shared clock error a r
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
 const CATCH_SHOW_MS = T.CATCH_SHOW_MS;   // MAPSFXSEAT: a catch word sounds this long after its fire's shared moment (question MAPSFXSEAT-2)
 const UI_MS = 400;             // the interface rectangles are measured at most this often
+const UI_VISIT = 6000;         // the most page elements that walk visits (MAPEDGE: 900 missed the party panel)
 // a live fire's lasting word: the engine's sustain treatments WITHOUT "echo" (EFFECTS1, live: the echo copies sat stacked on
 // the word itself, FOOOFF three times over one fire)
 const BURN_TREATMENTS = ["breath", "stretch", "split", "shed", "accent"];
@@ -820,7 +821,11 @@ function reconcileBurn() {
     // (MAPRIDE: a run this seat now letters at another size - the room round it changed - starts again at the new size, on the shared clock)
     if ( w && w.live === b.live && w.sig === b.sig ) { b.plan = w.plan; b.off = rooms.get(k) ?? []; continue; }
     // gone out / removed: its words play their exits (the fire's last breath before the hiss); switched mode: at once
-    for ( const s of b.subs ) { try { s.stop({ quick: !!w }); } catch {} }
+    // (MAPEDGE: a group whose key changed as its fire grew - a new run over the same spots - burns on: at once too, no "FWUUUFF…" last
+    // breath; live 2026-11-15 A, each regrouping lettered the old run's ending phrase, the engine drew it ~300 px above its room, past the
+    // GM's top edge - request MAPEDGE-E3)
+    const goesOn = !w && burnGoesOn(b, want);
+    for ( const s of b.subs ) { try { s.stop({ quick: !!w || goesOn }); } catch {} }
     burns.delete(k);
   }
   // (MAPRIDE: a live run joins the shared clock only once this seat's clock has settled - live a player just after a reload was ~280 ms
@@ -829,6 +834,18 @@ function reconcileBurn() {
   for ( const [k, w] of want ) if ( !burns.has(k) && w.seat.length && !(w.live && clockLate) ) { const b = { plan: w.plan, live: w.live, idx: w.seat, sig: w.sig, off: rooms.get(k) ?? [], subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.seat); }
   stats.burns = burns.size;
   if ( burns.size || (stepFor("fire") > 0 && [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire")) ) scheduleBurn(1000);
+}
+/** MAPEDGE: does a run whose group key is gone burn on under a new key - a wanted run not yet lettered whose spots lie within two squares
+    of the old run's (its fire regrouped as it grew, not gone out)? */
+function burnGoesOn(b, want) {
+  try {
+    const now = sharedNow(), G = grid(), old = b.idx.map((i) => b.plan.at(i, now));
+    for ( const [k, w] of want ) {
+      if ( burns.has(k) ) continue;
+      if ( w.idx.some((i) => { const q = w.plan.at(i, now); return old.some((o) => Math.hypot(o.x - q.x, o.y - q.y) <= G * 2); }) ) return true;
+    }
+  } catch {}
+  return false;
 }
 /** Where each spot's words must move to stay off this client's interface panels (their phrases hover around the spot, in two seats
     one above the other, a little to either side: a box of about nine of their letters wide (an echo trails beside it) and three and a half high, mostly above
@@ -860,7 +877,9 @@ function burnRooms(want) {
       const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
       // (MAPSAME: one whose run would still reach into this view, cut at its edge, is not lettered here - sfx-seat offSpot)
       const motion = L?.motionMode?.() === "stepped" ? "stepped" : "smooth";
-      for ( const i of w.idx ) if ( !on.includes(i) ) arr[i] = { dx: 0, dy: 0, box: null, room: null, ok: SEAT.offSpot(p.at(i, now), k, v0, motion) === "out", off: true };
+      // (MAPEDGE: its run kept to its own block - the block offSpot judged - so a run "out" of this view stays out: with no room the engine let
+      // its phrases spread past the block and a fire burning just above the GM's view lettered into it, cut by the top edge - ADVM r2 item 6, A)
+      for ( const i of w.idx ) if ( !on.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }
       const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion });
       on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / k }; if ( r[j].ok ) taken.push(r[j].box); });
       out.set(key, arr);
@@ -897,12 +916,18 @@ function startBurn(p, live, idx = null) {
       // of that clock (the engine passes ms since startAt) -, so every seat letters the same phrases at the same instants, a late one joins
       // mid-phrase; take startAt only once this seat's clock is good (moinen-letters lesson), else the run starts here as before)
       const clockOk = !(L?.clock?.error?.() > CLOCK_OK) || performance.now() >= CLOCK_WAIT, t0 = runClock(p), startAt = live && clockOk && Number.isFinite(t0) ? toPerf(t0) : undefined;
-      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
-          return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
+      // (MAPEDGE: a run replaced or gone out plays its last phrases where this seat last seated it, inside its last room: before, with its
+      // entry gone from `burns` it fell back to the table's raw spot with no room - live 2026-11-15 A, the old run's exit phrases jumped to
+      // the unshifted spot and rose past the GM's top edge, under the challenges panel; ADVM r2 item 6)
+      const last = { at: null, room: null };
+      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key);
+          if ( !b && last.at ) return last.at;
+          const q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
+          return (last.at = o ? { x: q.x + o.dx, y: q.y + o.dy } : q); },
         level: startAt !== undefined ? (ms) => p.level(t0 + (Number.isFinite(ms) ? ms : sharedNow() - t0)) : () => p.level(sharedNow()),
         ...(startAt !== undefined ? { startAt } : {}),
         // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width)
-        room: () => burns.get(p.key)?.off?.[i]?.room ?? null, maxWidth: SEAT.RUN.mw * k,
+        room: () => { const b = burns.get(p.key); return b ? (last.room = b.off?.[i]?.room ?? null) : last.room; }, maxWidth: SEAT.RUN.mw * k,
         seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size,
         ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts(),
         // (EFFECTS1, FXLM2 leftover: the engine's "echo" treatment trails two copies of a phrase beside it - over a fire they sat on
@@ -995,7 +1020,9 @@ function uiBoxes() {
   const rect = board?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
   let rects = [];
   try {
-    rects = C.uiRects([...document.body.children], { style: (el) => getComputedStyle(el), vw: innerWidth, vh: innerHeight,
+    // (MAPEDGE: up to UI_VISIT elements - the walk stopped at 900 of a v14 page's ~8 000 before it reached plus-ultra's party panel
+    // (#invincible-party, fixed, bottom-left): the GM's thunder lead-in and the player's fire-out word stood on it; ~5 ms per walk)
+    rects = C.uiRects([...document.body.children], { style: (el) => getComputedStyle(el), vw: innerWidth, vh: innerHeight, max: UI_VISIT,
       skip: (el) => el === board || el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === "LINK" || el.classList?.contains("moinen-letters-layer") || el.classList?.contains("moinen-letter") || el.id === "tooltip" || el.classList?.contains("tooltip") || el.id === "pause" });
   } catch ( err ) { rects = []; }
   const st = canvas.stage;
@@ -1089,6 +1116,11 @@ function seatCall(w) {
   // mapped with the word, so the word keeps the table's direction wherever this seat moved it: left at the table's point, a word pulled
   // thousands of px into this view took another direction than on the table and than its measure - live 2026-11-15 detonate)
   if ( o.from && Number.isFinite(o.from.x) && Number.isFinite(o.from.y) ) oo.from = sh(o.from);
+  // (MAPEDGE: a word this seat laid out is not shoved by a later blast's `push` - the engine's shove is in absolute scene px from the
+  // pusher's size here and turns by its force over the pushed word's size here, so each seat shoved and turned it differently and off the
+  // place its layout checked clean: live 2026-11-15 detonate, the player's KA-KRROOOOMM!! pushed 250 px down-right and turned 29 deg, off
+  // the window, the GM's 8 deg - question MAPEDGE-5, engine request MAPEDGE-E2)
+  oo.pushable = false;
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
   return { o: oo, fit: { ...f, k: oo.size && o.size ? oo.size / o.size : 1 }, box: f.box, table: { size: o.size, at } };
@@ -1163,7 +1195,9 @@ function play(w) {
 /** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (the engine's stream). */
 function playStream(w) {
   const W = w.stream.walk, t0 = w.stream.t0;
-  const beats = C.streamBeats(W);
+  // (MAPEDGE: at most STREAM_ROWS syllables legible at once - thinned on the table's beats, the same on every seat - so the engine's lanes
+  // stand in front of the source, not off the window behind it)
+  const beats = SEAT.thinBeats(C.streamBeats(W)), rows = SEAT.streamRows(beats);
   const at = () => {
     const ms = performance.now() - t0;
     let i = 1; while ( i < W.length - 1 && W[i].ms < ms ) i++;
@@ -1178,13 +1212,14 @@ function playStream(w) {
   let unit = 0;
   try { unit = L.streamUnit?.({ space: "world", area: w.area, magnitude: w.magnitude, ...step })?.unit ?? 0; } catch { unit = 0; }
   const zoom = canvas.stage?.scale?.x || 1;
-  let seat = null, seatT = -Infinity;
+  let seat = null, seatT = -Infinity, kFix = null;
   const seatNow = () => {
     const pn = performance.now();
-    if ( !seat || pn - seatT > 120 ) { try { seat = SEAT.streamSeat(at(), { view: mapView(), unit, panels: uiBoxes(), dir, zoom }); } catch { seat = { rule: "ok", at: at(), dir, k: 1 }; } seatT = pn; }
+    if ( !seat || pn - seatT > 120 ) { try { seat = SEAT.streamSeat(at(), { view: mapView(), unit, panels: uiBoxes(), dir, zoom, rows, scale: kFix }); } catch { seat = { rule: "ok", at: at(), dir, k: 1 }; } seatT = pn; }
     return seat;
   };
-  const first = seatNow(), k = first.rule === "away" ? first.k : 1;
+  const first = seatNow(), k = first.k ?? 1;
+  kFix = k;
   const to = () => { const s = seatNow(), a = (s.dir * Math.PI) / 180; return { x: s.at.x + Math.cos(a) * 1000, y: s.at.y + Math.sin(a) * 1000 }; };
   const h = L.stream({ kind: w.kind, ...(material ? { material } : {}), lang: lang(), space: "world", at: () => seatNow().at, to, dir, beats, startAt: t0, area: w.area, magnitude: w.magnitude, seed: w.seed,
     ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...layerOpts(),

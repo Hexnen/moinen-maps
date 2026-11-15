@@ -271,7 +271,7 @@ for ( const S of ['gm', 'p1'] ) { const r = mainRows.filter((q) => q.S === S); o
   ok(PREVoff(below) === "lettered" && SEAT.offSpot(below, k, v) === "cut" && SEAT.offSpot(side, k, v) === "cut" && SEAT.offSpot(far, k, v) === "out",
     "PREV lettered a run whose source is just off the view (its block reaching in, cut by the edge); now such a spot is \"cut\" - not lettered on this seat -, one wholly off it \"out\"");
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
-  ok(src.includes("ok: SEAT.offSpot(p.at(i, now), k, v0, motion) === \"out\", off: true"), "burnRooms letters an off-view spot only when offSpot says its run lies wholly outside the view");
+  ok(src.includes("const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === \"out\", off: true }"), "burnRooms letters an off-view spot only when offSpot says its run lies wholly outside the view");
 }
 // ---- seeded, nothing per seat at random
 const sig = () => JSON.stringify([...drawSeat(REC.p1, 3).out].map(([k, q]) => [k, q.cap, q.box]));

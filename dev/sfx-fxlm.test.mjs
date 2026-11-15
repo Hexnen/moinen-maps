@@ -210,7 +210,7 @@ group("F15", () => {
   ok(b.length === 3 && b[0] === 0 && b[2] === 240 && b.every((x, i) => i === 0 || x > b[i - 1]), "F15 a three-round walk rattles on three beats over its length");
   const long = Array.from({ length: 20 }, (_, i) => ({ x: i, y: 0, ms: i * 90 }));
   ok(C.streamBeats(long).length === 8 && C.streamBeats(long).at(-1) === 1710 && C.streamBeats([{ x: 0, y: 0, ms: 0 }]).length >= 1, "F15 a long burst: at most eight syllables to its last round; a single round still sounds");
-  ok(/const beats = C\.streamBeats\(W\)/.test(sfx), "F15 the runtime uses them");
+  ok(/const beats = SEAT\.thinBeats\(C\.streamBeats\(W\)\)/.test(sfx), "F15 the runtime uses them (MAPEDGE: thinned to the stream's rows)");
 });
 
 /* F16: a scene change leaves nothing behind */

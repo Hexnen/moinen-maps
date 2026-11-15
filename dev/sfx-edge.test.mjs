@@ -11,6 +11,12 @@
 //   SCENE   a seat's view of the map is its view inside the scene's rectangle: a word whose thing lies on the padding is not lettered there
 //   STREAM  a stream (a gun's report or its impacts) whose source is off this seat's view letters at the view's edge toward it, OFF_K of
 //           its size, its syllables running into the view, off the panels (before: no seat rule, the DRRT cut at the top edge)
+//           - and its whole STACK (the rows of syllables up at once, both lane columns) inside the view: its beats thinned to STREAM_ROWS
+//           on the table's data, the source moved the least to fit (live: the heli's 6 lanes, rows behind the source off the window)
+//   RUN     a fire spot off this view keeps its run to the block offSpot judged (before: no room, its phrases reached in, cut at the top)
+//           and a run replaced or gone out plays its exit where this seat last seated it, in its last room (before: the raw spot)
+//   UIWALK  the panel walk reaches a panel after the first 900 elements (live: plus-ultra's party panel on a v14 page of ~8 000)
+//   PUSH    a word this seat laid out is not shoved by a later blast (the engine's shove differs per seat: the player's word off the window)
 //   GUN     a gun's walk has no page: its record does not silence its pocks (sfx-page mayPage; the page test checks every preset)
 //   WIRING  the runtime uses all of it
 import fs from "node:fs";
@@ -144,16 +150,53 @@ function drawDet(S, prev) {
   const view = { x0: 1000, y0: 1000, x1: 2866, y1: 2050 }, unit = 60;
   const inV = SEAT.streamSeat({ x: 1900, y: 1500 }, { view, unit, dir: -90, zoom: 0.686 });
   ok(inV.rule === "ok" && inV.at.x === 1900 && inV.at.y === 1500 && inV.dir === -90 && inV.k === 1, "a source in the view: as asked");
+  const inset = (v, z) => { const e = SEAT.SEAT_EDGE / z; return { x0: v.x0 + e, y0: v.y0 + e, x1: v.x1 - e, y1: v.y1 - e }; };
+  const inside = (f, v) => f.x0 >= v.x0 - 1e-6 && f.y0 >= v.y0 - 1e-6 && f.x1 <= v.x1 + 1e-6 && f.y1 <= v.y1 + 1e-6;
   const above = SEAT.streamSeat({ x: 1900, y: 400 }, { view, unit, dir: -90, zoom: 0.686 });
-  const m = SEAT.SEAT_EDGE / 0.686 + unit * 1.2;
-  ok(above.rule === "away" && Math.abs(above.at.y - (view.y0 + m)) < 1e-6 && above.at.x === 1900 && above.dir === 90 && above.k === SEAT.OFF_K, `a shooter above the view: at the top edge, running down into it, OFF_K (${JSON.stringify(above)})`);
+  const fa = SEAT.streamFoot(above.at, above.dir, unit * above.k, 1);
+  ok(above.rule === "away" && Math.abs(fa.y0 - inset(view, 0.686).y0) < 1e-6 && above.at.x === 1900 && above.dir === 90 && above.k === SEAT.OFF_K, `a shooter above the view: its stack against the top edge, running down into it, OFF_K (${JSON.stringify(above)})`);
   const left = SEAT.streamSeat({ x: 200, y: 1500 }, { view, unit, dir: -90, zoom: 1 });
-  ok(left.rule === "away" && left.dir === 0 && left.at.x > view.x0, "beyond the left edge: running right into the view");
-  // (its first syllables would stand under a panel at the top edge: moved along the edge off it)
+  ok(left.rule === "away" && left.dir === 0 && left.at.x > view.x0 && inside(SEAT.streamFoot(left.at, 0, unit * left.k, 1), inset(view, 1)), "beyond the left edge: running right into the view, inside it");
+  // (its first syllables would stand under a panel at the top edge: moved off it)
   const panel = { x0: 1700, y0: 1000, x1: 2100, y1: 1400 };
   const off = SEAT.streamSeat({ x: 1900, y: 400 }, { view, unit, dir: -90, zoom: 0.686, panels: [panel] });
-  ok(off.rule === "away" && (off.at.x < panel.x0 - unit * SEAT.OFF_K || off.at.x > panel.x1 + unit * SEAT.OFF_K), `moved along the edge off this seat's panel (x ${off.at.x.toFixed(0)})`);
+  const fo = SEAT.streamFoot(off.at, off.dir, unit * off.k, 1);
+  ok(off.rule === "away" && !(fo.x0 < panel.x1 && fo.x1 > panel.x0 && fo.y0 < panel.y1 && fo.y1 > panel.y0) && inside(fo, inset(view, 0.686)), `moved off this seat's panel, still in the view (x ${off.at.x.toFixed(0)})`);
   ok(typeof PS.streamSeat !== "function", "PREV: streams had no seat rule");
+
+  // (live, take B after: the heli run's impact stream - 8 beats bunched into 6 lanes at once; the engine stacks lanes in front of the
+  // source only as far as the view has room and the rest BEHIND it, so near the bottom edge rows fell off the window on both seats)
+  const heli = [0, 60, 130, 190, 260, 330, 400, 900];
+  ok(SEAT.streamRows(heli) >= 6, `the heli's beats open ${SEAT.streamRows(heli)} lanes at once (live: 6)`);
+  const thin = SEAT.thinBeats(heli);
+  ok(SEAT.streamRows(thin) <= SEAT.STREAM_ROWS && thin[0] === 0 && thin.at(-1) === 900 && thin.every((b) => heli.includes(b)), `thinned on the table's beats: ${JSON.stringify(thin)}, at most ${SEAT.STREAM_ROWS} up at once, first and last kept`);
+  let worst = 0;
+  for ( let n = 0; n < 400; n++ ) { const bs = Array.from({ length: 2 + (n % 9) }, (_, i) => Math.round(((n * 37 + i * 97) % 211) * (1 + (i % 3)))); worst = Math.max(worst, SEAT.streamRows(SEAT.thinBeats(bs))); }
+  ok(worst <= SEAT.STREAM_ROWS, `any beats thinned: at most ${SEAT.STREAM_ROWS} lanes (worst ${worst})`);
+  const gmV = { x0: 800, y0: 100, x1: 4000, y1: 1900 }, gMv = () => gmV, p1V = { x0: 1523, y0: 1007, x1: 3277, y1: 1993 }, hu = 178.3, rows = SEAT.streamRows(thin);
+  const src0 = { x: 2734, y: 1618 }, gI = inset(gMv(), 0.5);
+  ok(SEAT.streamFoot(src0, -90, hu, SEAT.streamRows(heli)).y0 < gI.y0, "PREV: the 6 lanes do not fit in front of the source (the engine put the rest behind it, off the bottom)");
+  const g = SEAT.streamSeat(src0, { view: gmV, unit: hu, dir: -90, zoom: 0.5, rows });
+  ok(g.rule === "ok" && g.k === 1 && inside(SEAT.streamFoot(g.at, g.dir, hu * g.k, rows), gI), "GM 1600x900 z0.5: thinned, the whole stack stands in front of the source in the view, full size, where it is");
+  const g2 = SEAT.streamSeat({ x: 2734, y: 1850 }, { view: gmV, unit: hu, dir: -90, zoom: 0.5, rows });
+  ok(g2.rule === "shift" && g2.k === 1 && inside(SEAT.streamFoot(g2.at, g2.dir, hu, rows), gI), `a source at the bottom edge: moved up ${(1850 - g2.at.y).toFixed(0)} px, the stack inside`);
+  const p = SEAT.streamSeat({ x: 2900, y: 1640 }, { view: p1V, unit: hu, dir: -90, zoom: 0.73, rows });
+  ok(p.k < 1 && p.k >= SEAT.STREAM_MIN_K && inside(SEAT.streamFoot(p.at, p.dir, hu * p.k, rows), inset(p1V, 0.73)), `player 1280x720 z0.73: the stack is taller than the view at full size - drawn at ${p.k.toFixed(2)} of it, inside`);
+  const kept = SEAT.streamSeat({ x: 2900, y: 1640 }, { view: p1V, unit: hu, dir: -90, zoom: 0.73, rows, scale: 1 });
+  ok(kept.k === 1, "a stream already playing keeps the size it was called at");
+  // (any source, direction and view: the stack inside the view whenever it can fit at STREAM_MIN_K)
+  let bad = 0, tried = 0;
+  for ( let n = 0; n < 600; n++ ) {
+    const vw = 900 + (n * 131) % 2600, vh = 500 + (n * 71) % 1500, z = 0.3 + ((n * 13) % 90) / 100, uu = 40 + (n * 29) % 200, rr = 1 + (n % 3);
+    const V = { x0: 500, y0: 300, x1: 500 + vw, y1: 300 + vh }, d = [-90, 90, 0, 180, -60, 30, 145][n % 7];
+    const s0 = { x: 500 - 800 + ((n * 977) % (vw + 1600)), y: 300 - 600 + ((n * 613) % (vh + 1200)) };
+    const r = SEAT.streamSeat(s0, { view: V, unit: uu, dir: d, zoom: z, rows: rr });
+    const f = SEAT.streamFoot(r.at, r.dir, uu * r.k, rr), I = inset(V, z);
+    const minF = SEAT.streamFoot({ x: 0, y: 0 }, r.dir, uu * SEAT.STREAM_MIN_K * (r.rule === "away" ? SEAT.OFF_K : 1), rr);
+    if ( minF.x1 - minF.x0 > I.x1 - I.x0 || minF.y1 - minF.y0 > I.y1 - I.y0 ) continue;
+    tried++; if ( !inside(f, I) ) bad++;
+  }
+  ok(bad === 0 && tried > 300, `600 random streams: the stack inside the view in ${tried - bad} of ${tried} that can fit`);
 }
 
 // ---- GUN: a gun's record does not own its pocks (dev/sfx-page.test.mjs MAPEDGE-GUN checks every preset)
@@ -164,12 +207,43 @@ function drawDet(S, prev) {
   ok(typeof PPG.mayPage !== "function", "PREV: every record owned its strokes (sfx.mjs planPage)");
 }
 
+// ---- RUN: a fire spot off the view keeps its run to the block judged "out"
+{
+  let bad = 0, outs = 0;
+  const view = { x0: 1000, y0: 1000, x1: 3000, y1: 2200 };
+  for ( let n = 0; n < 500; n++ ) {
+    const q = { x: 200 + (n * 173) % 3600, y: 200 + (n * 97) % 2800 }, k = 20 + (n * 7) % 60;
+    if ( q.x > view.x0 && q.x < view.x1 && q.y > view.y0 && q.y < view.y1 ) continue;
+    if ( SEAT.offSpot(q, k, view, n % 2 ? "stepped" : "smooth") !== "out" ) continue;
+    outs++; const b = SEAT.runBox(q, k);
+    if ( b.x0 < view.x1 && b.x1 > view.x0 && b.y0 < view.y1 && b.y1 > view.y0 ) bad++;
+  }
+  ok(outs > 50 && bad === 0, `a spot judged "out" (${outs}): its run's block - its room now - lies wholly off the view`);
+}
+
+// ---- UIWALK: a fixed panel late in a big page is a panel
+{
+  const el = (cs, kids = [], r = null) => ({ nodeType: 1, tagName: "DIV", cs, children: kids, childNodes: [], getBoundingClientRect: () => r ?? { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 } });
+  const plain = { display: "block", visibility: "visible", opacity: "1", backgroundColor: "rgba(0, 0, 0, 0)", backgroundImage: "none", borderTopWidth: "0" };
+  const filler = Array.from({ length: 1200 }, () => el(plain));
+  const party = el({ ...plain, backgroundColor: "rgb(20, 20, 30)" }, [], { left: 96, top: 510, right: 336, bottom: 790, width: 240, height: 280 });
+  const roots = [el(plain, filler), party], env = { style: (e) => e.cs, vw: 1600, vh: 900 };
+  const hit = (rs) => rs.some((r) => r.x0 === 96 && r.y0 === 510);
+  const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8"), mx = Number(/const UI_VISIT = (\d+);/.exec(src)?.[1]);
+  ok(!hit(C.uiRects(roots, env)) && mx >= 6000 && hit(C.uiRects(roots, { ...env, max: mx })) && /vh: innerHeight, max: UI_VISIT,/.test(src), `PREV the walk stopped at 900 elements and missed the party panel; the seat walks ${mx}`);
+}
+
 // ---- WIRING
 {
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8"), tab = fs.readFileSync(path.join(root, "scripts/sfx/sfx-table.mjs"), "utf8");
   ok(/if \( PG\.mayPage\(rec\) \) \{\n\s*for \( const d of rec\.d \?\? \[\] \) if \( d\?\.id \) owned\.d\.add\(d\.id\);/.test(src), "planPage owns a record's strokes only when it may page");
-  ok(/seat = SEAT\.streamSeat\(at\(\), \{ view: mapView\(\), unit, panels: uiBoxes\(\), dir, zoom \}\)/.test(src) && /at: \(\) => seatNow\(\)\.at, to, dir,/.test(src) && /logCall\(\{ \.\.\.w, text: w\.text \?\? w\.kind \}/.test(src), "a located stream plays through its seat rule and is logged");
+  ok(/const beats = SEAT\.thinBeats\(C\.streamBeats\(W\)\), rows = SEAT\.streamRows\(beats\);/.test(src), "a stream's beats are thinned to its rows before it plays");
+  ok(/seat = SEAT\.streamSeat\(at\(\), \{ view: mapView\(\), unit, panels: uiBoxes\(\), dir, zoom, rows, scale: kFix \}\)/.test(src) && /at: \(\) => seatNow\(\)\.at, to, dir,/.test(src) && /logCall\(\{ \.\.\.w, text: w\.text \?\? w\.kind \}/.test(src), "a located stream plays through its seat rule and is logged");
   ok(/const up = \[\.\.\.alive\]\.filter\(\(r\) => r\.box && r\.grp !== grp\)/.test(src) && /grp: w\.group \?\? null, life: \[ts0, ts0 \+ lifeMs\(w\)\]/.test(src), "a group's layout counts this seat's other words up");
+  ok(/room: SEAT\.runBox\(q, k\), ok: SEAT\.offSpot\(q, k, v0, motion\) === "out", off: true/.test(src), "a fire spot off the view letters its run inside the block it was judged by");
+  ok(/if \( !b && last\.at \) return last\.at;/.test(src) && /return b \? \(last\.room = b\.off\?\.\[i\]\?\.room \?\? null\) : last\.room;/.test(src), "a run replaced or gone out keeps its last seated place and room for its exit");
+  ok(/const goesOn = !w && burnGoesOn\(b, want\);\n\s*for \( const s of b\.subs \) \{ try \{ s\.stop\(\{ quick: !!w \|\| goesOn \}\); \} catch \{\} \}/.test(src) && /function burnGoesOn\(b, want\)/.test(src), "a fire regrouped under a new key burns on: its old run stops without the last-breath phrase");
+  ok(/oo\.pushable = false;/.test(src) && /function seatCall\(w\)[\s\S]*?oo\.pushable = false;[\s\S]*?return \{ o: oo/.test(src), "a word this seat laid out is not shoved off its checked place");
   ok(/const vw = mapView\(\), zoom/.test(src) && /v0 = mapView\(\), z = canvas/.test(src) && /return SEAT\.sceneView\(view\(\), canvas\.dimensions\?\.sceneRect\)/.test(src), "words and runs stand in the seat's view of the map");
   ok(/panels: uiCache\.rects \?\? \[\], up: screenUp\.filter/.test(src), "an unlocated word: panels are panels, words up are words up");
   ok(/if \( o\.from && Number\.isFinite\(o\.from\.x\) && Number\.isFinite\(o\.from\.y\) \) oo\.from = sh\(o\.from\);/.test(src), "the side a word's sound comes from moves with the word (the table's direction on every seat)");
