@@ -593,6 +593,13 @@ async function life(ok) {
   /* scene change */
   h = I.play({ kind: "hit", magnitude: 1.9, seed: 12 }); await E.tick(30); I.stopAll();
   ok(!h.alive && kids() === 0 && started, "impact life: stopAll");
+  /* ENG24: the impact that starts next (here 1 s after its call) has its art and its first drawings ready before it starts (painted
+     between frames from the call on, not in its own frames) */
+  { await E.tick(1500); const hn = I.play({ kind: "crit", magnitude: 2, seed: 61, startAt: performance.now() + 1000, subject: { x: 400, y: 300 } });
+    await E.tick(400, 16);
+    const ready = hn.plan.frames.filter((f) => f.cv).length;
+    ok(hn.alive && hn.idx < 0 && ready >= 5 && !hn.jobs?.length, `impact life: the next impact's art jobs ran and its drawings are painted well before its start (${ready} drawings, ${hn.jobs?.length} of ${hn.jobN} jobs left)`);
+    hn.stop(); }
   /* ENG24 (CALLER5-E4): once per page, while idle after canvasReady, every frame type and figure treatment is painted once off screen and
      each backdrop filter shown on a 1 px box, then removed: the first impact of a session is not cold; nothing is left on the page */
   { const n0 = document.body.children.length;

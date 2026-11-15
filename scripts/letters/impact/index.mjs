@@ -644,7 +644,7 @@ export function createImpact(L, tools = null) {
   }
   /* ENG24: between frames, one piece of work per task: the art jobs first, then the next drawings painted ahead (at most FEED_N ahead of the
      one on screen: each is a full-view canvas). A drawing still unpainted when it is due is painted in its frame, as before */
-  const FEED_N = 5, FEED_SOON = 250, FEED_GAP = 8;
+  const FEED_N = 5, FEED_SOON = 250, FEED_EARLY = 1500, FEED_GAP = 8;
   let feedT = -Infinity;
   const task = (() => {
     const MC = globalThis.MessageChannel;
@@ -660,7 +660,10 @@ export function createImpact(L, tools = null) {
     /* drawings are painted ahead only for an impact that plays or starts within FEED_SOON (a series called at once waits in the frame
        loop's shared budget, FIN-ENGINE), and one painting per FEED_GAP ms over every impact (a task between frames delays the next frame) */
     const t = now(), fr = h.plan.frames, top = Math.min(fr.length, Math.max(0, h.idx) + 1 + FEED_N);
-    if ( h.t0 != null && t < h.t0 - FEED_SOON ) { setTimeout(() => feed(h), Math.min(500, h.t0 - FEED_SOON - t + 1)); return; }
+    /* (live 1.9.24, a loaded seat: waiting for FEED_SOON left the drawings to the impact's own frames; the impact that starts NEXT, within
+       FEED_EARLY, is painted ahead from the call on) */
+    const next = h.t0 == null || t >= h.t0 - FEED_SOON || (h.t0 - t < FEED_EARLY && [...lives].every((x) => x === h || !x.alive || (x.t0 ?? -Infinity) > h.t0));
+    if ( !next ) { setTimeout(() => feed(h), Math.min(200, Math.max(1, h.t0 - FEED_SOON - t + 1))); return; }
     if ( t - feedT < FEED_GAP ) { setTimeout(() => feed(h), FEED_GAP); return; }
     for ( let j = Math.max(0, h.idx + 1); j < top; j++ ) if ( fr[j].cv === undefined ) { feedT = now(); paint(h, j); feedT = now(); task(() => feed(h)); return; }
     if ( top < fr.length ) setTimeout(() => feed(h), TICK);   // the window moves with the drawing on screen

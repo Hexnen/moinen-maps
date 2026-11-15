@@ -215,7 +215,8 @@ one (the 2.5 % area cap); splashes, rings and residue without the figures covere
      worked out where it is needed, as before: the picture is the same.
   2. A 2D canvas only records; the browser rasters it in the frame that first shows it (1-6 ms the view, 10-28 ms a figure layer).
      `paint()` now reads one pixel of each canvas it paints, so the raster happens where it is painted; after the jobs the player paints
-     up to 5 drawings ahead between frames (one per 8 ms over every impact; only for an impact that plays or starts within 250 ms).
+     up to 5 drawings ahead between frames (one per 8 ms over every impact; for an impact that plays, starts within 250 ms, or is the next
+     to start within 1.5 s: from the call on).
   3. The catch-up: a drawing this seat passed and never showed comes next (one per display frame) while it ended less than `LAG_MS`
      (10 ticks) ago; past that only key drawings (a flash, a hit-stop, the peak) are caught, within 2 x `LAG_MS`; plain ones between are
      skipped. The stall hold (one more frame for a key drawing) is not applied on a seat already running late. The watchdog gives a late
@@ -223,6 +224,11 @@ one (the 2.5 % area cap); splashes, rings and residue without the figures covere
      and `slow160` (6 fps): same endings as the GM, the GM's drawings in order, every flash and every opening drawing.
   4. The first impact of a page was cold (its frames about twice as long): once per page, while idle after `canvasReady`, every frame type
      is painted once on a 160 x 90 canvas and each backdrop filter is shown for one frame on a 1 px box (`rehearse`).
+  Live after (lane 5, 2026-11-15, cold pages, recording at 60 fps, GM + player 1600x900): an ordinary roll 6 of 6, three criticals
+  (two starring Mauler B) 19 of 19 on BOTH seats, the first roll's longest frame 26 ms (was 66). Under CPU throttle (GM 4x, player 3x)
+  every flash drawing now shows on both seats (was 1 of 2 on each critical) and 5-13 of 19 drawings (was 3-9); one critical's drawings
+  cost about 19 ms each on an unthrottled machine (the figure layers: ~42 scaled copies), so a 4x-throttled seat cannot paint 19 in a
+  second and still leaves plain drawings out, differently per seat (bounded by `LAG_MS`).
 The gentle variant and reduced motion get none of this (no `cu`, no `kb`, rims only), exactly as before.
 Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps film clock): six impacts (hit, heavy, crit, crit
 without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
