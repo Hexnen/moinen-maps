@@ -314,6 +314,36 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
   - *far thunder after a storm is cleared* (MAPRIDE): the far-flash count is keyed on the storm's previous level too
     (`EV.farIndex`, window `FAR_WIN` 30 s), and a page whose flash the storm no longer holds when it draws (`flashStill`) is skipped
     on every seat; before, a seat that saw the clear first lettered a rumble the others did not.
+  - *the same picture on every seat* (MAPSAME; live 2026-11-15 the blast's word stood below-left of the bomb on the GM's seat and right
+    of it on the player's, the rising word and the debris words differed too, step 3 drew the size of step 2 (185 / 186 world px), and
+    the player's step 1 stood on the notification bar). It supersedes "largest clean size on any side" and "the table may put a word on
+    another side at another step" above:
+    - the table places a page (and a moment) ONCE, at step 2's sizes (`atStep2`), and draws each word at its group's step by `restep`
+      about `shrinkOnSide`: the centre keeps its share of the two half sizes (word + subject) on both axes, so the side reads the same;
+      scaling about the point nearest the thing moved a word that overlaps its crater ONTO it;
+    - the table chooses its main word's SIDE on shared probe seats (`mainSide`: the reference window centred on the subject at 1, 1.45
+      and 2 x the reference zoom (`SIDE_PROBES`), the shared panel zones, pins and tokens): the side whose WORST probe holds the
+      largest share of its step-3 size clean, an earlier side of the order within 4 % (`it.side`). The reference view alone has room
+      above a blast that a closer seat has not;
+    - every seat keeps every word on the table's side (`sideOfBox`; a rider's way measured with the word at its largest size, its way
+      moved, turned or shortened only within that side); another side only where its own side holds nothing clean even at its floor
+      ("side": 3 % of the spread's word x seat x step, none on the take's seats);
+    - ONE layout per seat for all steps: a word's ENVELOPE is the largest size up to its step-3 size (`nom`) standing clean on its
+      side, searched from the table's step-2 box (`box2`, `u2`); step 3 draws the envelope, step 2 its own size but at most the
+      envelope / 1.15, step 1 its own but at most step 2 / 1.15, none under the floor ("room" when under its own size, "floor"),
+      each inside the envelope (`shrinkOnSide` with its ink inside the envelope's ink). The words laid out after it keep off the
+      envelope whatever the step. A seat short of room thus draws step 2 under its own size so that step 3 can be bigger (question
+      MAPSAME-1);
+    - the search: nearest first, plus a grid scan of the moves (0.05 x 0.1 of the box, `SCAN_*`) for the two sizes above the one it
+      found: a spot that needs two moves at once - off the hotbar AND off the subject's allowed share - is not reached from the seeds
+      (the player's blast word stood 1-2 sizes under its room). `dev/sfx-same.test.mjs` ROOM proves by brute force that no clean spot
+      on its side holds a "room" word one size up;
+    - cost: the table and this seat's layout are made in an idle moment ~500 ms before a page's first word (`prepPage`), not in the
+      frame the word starts in (live one layout took 114 ms there); again at a word only if the view changed. Riders search the moves
+      of their 10 cheapest changes (`RIDE_PAIRS`, 30 before). A crowded view (40 tokens, 6 pins) costs ~8 ms per page per seat in node
+      (the trunk 9-15 ms), the take's plain views ~3 ms (GM) / ~6 ms (player);
+    - a fire whose source is off this seat's view: lettered only when its run's whole block is off it too (`offSpot` "out"); a block
+      reaching in ("cut") is not lettered here - live the second of two fires lettered its run in from the player's view edge.
 - **what the first rule got wrong** (MAPSFXSEAT, live 2026-11-15): it scaled the whole page as ONE group about the event to fit a
   closer seat's view (`seatGroup`, k 0.6 GM / 0.4 player), then shrank it five more times by 0.9 off its panels, then stepped a word
   off a pin (`groupNudge`). A seat zoomed closer drew every word weaker (the blast's main word 203 -> 159 GM, 120 -> 111 player), step
@@ -1518,6 +1548,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: ENGVIEW (1.9.18, `tactics-zones-engview`): section 6a (one table picture from the public API: `view`, the standing
   footprint, `L.streamUnit`, legacy sustain on `startAt`, the impact's ladders, what each caller may drop or pass), the `ceilK`
   warning (6), notes in 8, 10, 12, limits (18), API index (20), stage table; `check-engview.mjs` (check.mjs section 15).
+- 2026-11-15 (MAPSAME, moinen-maps caller `tactics-zones-mapsame`, no engine change): section 5 "the same picture on every seat" (one
+  table side for every word at every step, the main word's side chosen on shared probe seats, one envelope per seat with the steps
+  drawn inside it, the grid scan, the layout made ahead in an idle moment, off-view fire runs); `dev/sfx-same.test.mjs`.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

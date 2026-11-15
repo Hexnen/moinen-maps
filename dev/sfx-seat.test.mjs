@@ -194,7 +194,7 @@ await group("RULE", async () => {
   // (a pin is never covered: smaller where nothing else holds it, down to its step-1 size)
   const pin = { x0: 1880, y0: 1380, x1: 1920, y1: 1500 };
   const f3 = L1({ ...it, sizes: [80], min: 80, small: 40 }, { view: { x0: 1820, y0: 1300, x1: 2180, y1: 1700 }, pins: [pin], zoom: 1 });
-  ok(on2(inkBox(f3.box, it.ink), pin) === 0 && f3.cap < 80 && f3.cap >= 40 && f3.rules.includes("small"), `no room off the pin at its size: smaller, never on the pin (${f3.cap.toFixed(1)} ${f3.rules})`);
+  ok(on2(inkBox(f3.box, it.ink), pin) === 0 && f3.cap < 80 && f3.cap >= 40 && f3.rules.includes("room"), `no room off the pin at its size: smaller, never on the pin (${f3.cap.toFixed(1)} ${f3.rules})`);
   // (a word bigger than the view: the size that fits; off the view: not drawn; a rider keeps its way)
   ok(L1({ ...it, sizes: [400], min: 400 }, { view: { x0: 1900, y0: 1400, x1: 2300, y1: 1700 }, zoom: 1 }).rules.includes("fit"), "bigger than the view: the size that fits");
   ok(L1({ ...it, sub: null }, { view: { x0: 0, y0: 0, x1: 500, y1: 500 }, zoom: 1 }).rule === "off", "off the view: not drawn");
@@ -305,9 +305,11 @@ await group("SEAT2", async () => {
       const a = n.map((r) => r.out.get(key)), b = p.map((r) => r.out.get(key));
       if ( a.every((q) => shown(q, n[0].view)) ) {
         cases++;
-        if ( !(a[0].cap < a[1].cap - 1e-6 && a[1].cap <= a[2].cap + 1e-6) ) { orderNew++; if ( process.env.SEAT_DBG ) for ( const q of a ) console.log("DBG", S.W, S.H, S.z, q.cap.toFixed(1), q.rules.join(","), "sizes", q.item.sizes.map((c) => c.toFixed(0)).join("/"), "min", q.item.min.toFixed(0), "small", q.item.small?.toFixed(0), "probe", (q.item.probe ?? []).slice(0, 6).map((c) => c.toFixed(0)).join("/"), "u", q.item.u.toFixed(0), "tbl", [q.item.box.x0, q.item.box.y0, q.item.box.x1, q.item.box.y1].map(Math.round).join(","), "box", [q.box.x0, q.box.y0, q.box.x1, q.box.y1].map(Math.round).join(",")); bad.push(`${S.W}x${S.H}@${S.z} ${a[1].w.text} ${a.map((q) => q.cap.toFixed(0) + ":" + q.rules.join("+")).join(" / ")}`); }
+        // (MAPSAME: equal sizes only where the legibility floor holds the higher step down too)
+        const flo = (q) => q.rules.includes("floor");
+        if ( !((a[0].cap < a[1].cap - 1e-6 || (flo(a[1]) && a[0].cap <= a[1].cap + 1e-6)) && a[1].cap <= a[2].cap + 1e-6) ) { orderNew++; if ( process.env.SEAT_DBG ) for ( const q of a ) console.log("DBG", S.W, S.H, S.z, q.cap.toFixed(1), q.rules.join(","), "sizes", q.item.sizes.map((c) => c.toFixed(0)).join("/"), "min", q.item.min.toFixed(0), "small", q.item.small?.toFixed(0), "probe", (q.item.probe ?? []).slice(0, 6).map((c) => c.toFixed(0)).join("/"), "u", q.item.u.toFixed(0), "tbl", [q.item.box.x0, q.item.box.y0, q.item.box.x1, q.item.box.y1].map(Math.round).join(","), "box", [q.box.x0, q.box.y0, q.box.x1, q.box.y1].map(Math.round).join(",")); bad.push(`${S.W}x${S.H}@${S.z} ${a[1].w.text} ${a.map((q) => q.cap.toFixed(0) + ":" + q.rules.join("+")).join(" / ")}`); }
         // (visibly: step 3 at least MIN_GAIN x step 2 unless this view holds no clean spot that big - "full", "small", "fit")
-        else if ( a[2].cap < a[1].cap * SEAT.MIN_GAIN - 1e-6 && !a[2].rules.some((r) => r === "full" || r === "small" || r === "fit") ) visNew++;
+        else if ( a[2].cap < a[1].cap * SEAT.MIN_GAIN - 1e-6 && !a[2].rules.some((r) => r === "full" || r === "small" || r === "fit" || r === "floor") ) visNew++;   // (MAPSAME: "floor" - the legibility floor holds step 2 up)
       }
       if ( b.every((q) => shown(q, p[0].view)) && !(b[0].cap < b[1].cap - 1e-6 && b[1].cap <= b[2].cap + 1e-6) ) orderPrev++;
     }
@@ -334,6 +336,9 @@ await group("SEAT2", async () => {
       if ( q.cap >= before * 0.995 ) continue;
       // (smaller only by the rule "small": no spot of this view holds it at its step-2 size off the pin, inside the view, its panels'
       // and earlier words' share at most SOFT_OK - checked here by brute force over the whole view, not by the layout's own candidates)
+      // (MAPSAME: "room" - its envelope is the largest clean size on its side, step 2 its share of it: proven one size up by brute force in
+      // dev/sfx-same.test.mjs ROOM, the envelope against every earlier word's envelope and every rider's way)
+      if ( q.rules.includes("room") ) { smallChecked++; continue; }
       if ( !q.rules.includes("small") ) { lessNew++; rows.push(`  less: ${sn} ${q.w.text} ${q.cap.toFixed(1)} < ${before.toFixed(1)} ${q.rules}`); continue; }
       smallChecked++;
       const it = q.item, f = it.min / it.u, B = it.box, bw = (B.x1 - B.x0) * f, bh = (B.y1 - B.y0) * f, m = SEAT.SEAT_EDGE / S.z, v = n.view;
@@ -385,7 +390,7 @@ await group("SEAT2", async () => {
       if ( !prev ) words++;
       const others = vis.filter((o2) => o2 !== q && meet(lifeOf(o2.w), lifeOf(q.w)) && (prev ? true : (o2.item?.prio ?? 9) < (q.item?.prio ?? 9) || ((o2.item?.prio ?? 9) === (q.item?.prio ?? 9) && o2.item?.key < q.item?.key)));
       const soft = r.panels.reduce((s2, o2) => s2 + on2(q.ink, o2), 0) + others.reduce((s2, o2) => s2 + on2(q.ink, o2.ink), 0) / (prev ? 2 : 1);
-      if ( on2(q.ink, PIN) > 0 ) { if ( prev ) pinPrev++; else pinNew++; }
+      if ( on2(q.ink, PIN) > 0 ) { if ( prev ) pinPrev++; else { pinNew++; if ( process.env.SEAT_DBG ) console.log("PIN", S.W, S.H, S.z, step, q.w.text, q.rules.join("+"), on2(q.ink, PIN).toFixed(0), area2(q.ink).toFixed(0)); } }
       if ( soft > SEAT.SOFT_OK * area2(q.ink) + 1e-6 && (prev || !q.rules.includes("tight")) ) { if ( prev ) coverPrev++; else coverNew++; }
     }
   }
@@ -480,8 +485,12 @@ await group("RIDE", async () => {
 });
 
 /* ---------------------------------------------------------------- MAINSIZE (MAPRIDE) */
-// The riders laid out per seat, the panels merged and the blocked sizes skipped (cost) must not weaken the main word: on the take's page and
-// seats, steps 1-3, the main word drawn now is the size the brief's base (f1d9491) drew, on the same side.
+// The riders laid out per seat, the panels merged and the blocked sizes skipped (cost) must not weaken the main word. MAPSAME changed what
+// "the size" is: the base (f1d9491) drew the take's main word right of the bomb on the player's seat (below it on the GM's) and step 3 the
+// size of step 2 on both (live 185 / 186 world px) - the very faults MAPSAME fixes -, so "not smaller than the base" no longer holds and is
+// no longer the check: now the main word stands on the table's side on both seats at every step, its envelope (step 3) is the largest
+// clean size on that side (proven by brute force in dev/sfx-same.test.mjs ROOM), and steps 1 and 2 are its shares by the rule (step 2 its
+// own size, at most the envelope / MIN_GAIN; step 1 its own, at most step 2 / MIN_GAIN; none under the floor). The base's sizes are printed.
 await group("MAINSIZE", async () => {
   const rows = [], bad = [];
   for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1]] ) for ( const step of [1, 2, 3] ) {
@@ -492,14 +501,17 @@ await group("MAINSIZE", async () => {
       const TT = base ? BT : T, SS = base ? BS : SEAT;
       const items = TT.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 }), lay = SS.seatLayout(items, { view: viewOf(S), panels: S.ui.map(toScene(S)), pins: [PIN], tokens: [], zoom: S.z });
       const m = items.find((q) => q.w.role === "main"), f = lay.get(m.key);
-      return { cap: f.cap, rules: f.rules.join("+") };
+      return { cap: f.cap, rules: f.rules.join("+"), f, m, side: SEAT.sideOfBox(f.box, m.sub) };
     };
     const n = sz(false), b = sz(true);
     rows.push(`${sn} s${step} base ${b.cap.toFixed(1)} now ${n.cap.toFixed(1)} (${n.rules})`);
-    if ( n.cap < b.cap - 0.5 ) bad.push(rows.at(-1));
+    // (the rule: its share of the envelope at this step)
+    const it = n.m, env = ((n.f.env.y1 - n.f.env.y0) / (it.box.y1 - it.box.y0)) * it.u, G = SEAT.MIN_GAIN, fl = Math.min(it.floor || Infinity, it.nom[0], env);
+    const d2 = Math.max(fl, Math.min(it.nom[1], env / G)), d1 = Math.max(fl, Math.min(it.nom[0], d2 / G)), want = [d1, d2, env][step - 1];
+    if ( Math.abs(n.cap - want) > 0.01 * want || !n.side || n.side.x !== 0 || n.side.y !== 1 ) bad.push(`${rows.at(-1)} want ${want.toFixed(1)} side ${JSON.stringify(n.side)}`);
   }
   if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));
-  ok(!bad.length, `the main word is not smaller than the base drew it on the take's seats, steps 1-3 (${bad.join("; ") || rows.join("; ")})`);
+  ok(!bad.length, `the main word stands below the bomb on the take's seats at steps 1-3, each step its share of its envelope (${bad.join("; ") || rows.join("; ")})`);
 });
 
 /* ---------------------------------------------------------------- GROUND */
