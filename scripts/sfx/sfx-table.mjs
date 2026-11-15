@@ -18,6 +18,9 @@ import * as SZ from "./sfx-size.mjs";
 import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
 
+/** the engine's tick (24 a second): its timeline's pictures last whole ticks */
+const TICK_MS = 1000 / 24;
+
 /** steam's way up off what was put out (grid squares: sideways, up) */
 export const DRIFT = [0.15, 0.9];
 /** a fire's catch word sounds this long after the fire's shared moment (a seat on time shows its flames by then; question MAPSFXSEAT-2) */
@@ -158,7 +161,10 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH };
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
+      // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
+      ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
   });
 }
 /** MAPSFXSEAT2: the share of a word's box (FIT.wordBox: its hold box with room for its entrance and outline) its INK covers - the hold
@@ -199,7 +205,8 @@ export function measureOf(text, o, d) {
     const m = d.L?.measure?.(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 } });
     if ( !(m?.unit > 0) || !(m.hold?.w > 0) ) return null;
     const u = m.unit;
-    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u } };
+    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, holdMs: Number(m.plan?.holdMs) || 0,
+      exitMs: (m.plan?.timeline?.exit ?? []).reduce((a, p) => a + (Number(p.ticks) || 0) * TICK_MS, 0) };
   } catch { return null; }
 }
 /** The word's TABLE box (scene px) at its table size and its reach (the engine's own measure): the table's placement keeps the box free,
@@ -216,6 +223,12 @@ export function measure(w, d) {
     w.bw = b.bw; w.bh = b.bh;
     // (the reach the engine itself reports for THIS word, instead of a factor per entrance that goes stale with the engine's motion)
     w.reachU = md?.reach ?? null; w.rk = md ? FIT.reachFactor(hb, md.reach) : FIT.reachOf(o.in);
+    // (MAPRIDE: the hold the engine gives the word - its sound family's own body: a shock wave holds 1.3 s, KA-BOOOOM 1.4 s - so its life
+    // on the table (sfx-seat lifeOf) is as long as it really stands: live a wave word still stood when a debris word was laid onto it)
+    w.holdMs = md?.holdMs ?? 0;
+    // (and its exit: a rider stopped early - the wave at its rim - plays its exit from the stop, still legible about half of it: live
+    // the debris word laid out 250 ms after the wave's stop was lettered onto it)
+    w.exitMs = md?.exitMs ?? 0;
     if ( w.drift ) { w.rise = d.grid * DRIFT[1]; w.riseX = d.grid * DRIFT[0]; }
   } catch { /* the estimate stands */ }
 }

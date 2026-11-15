@@ -198,19 +198,21 @@ await group("RULE", async () => {
   // (a word bigger than the view: the size that fits; off the view: not drawn; a rider keeps its way)
   ok(L1({ ...it, sizes: [400], min: 400 }, { view: { x0: 1900, y0: 1400, x1: 2300, y1: 1700 }, zoom: 1 }).rules.includes("fit"), "bigger than the view: the size that fits");
   ok(L1({ ...it, sub: null }, { view: { x0: 0, y0: 0, x1: 500, y1: 500 }, zoom: 1 }).rule === "off", "off the view: not drawn");
-  const rd = L1({ ...it, sizes: [60], ride: true, path: [{ x: 2000, y: 1490 }] }, { view, panels: [panel], zoom: 1 });
-  ok(rd.rule === "ride" && rd.dx === 0 && rd.dy === 0 && rd.f === 1.5, "a rider keeps the table's way, only its size is this seat's");
-  // (MAPSFXSEAT2 live: the blast's wave word rode half off the GM's screen - the table holds a way inside the REFERENCE view; each seat
-  // holds it inside its own where that way stays off the words laid out before it and the pins: the anchor's rectangle keeps the word
-  // whole in this view, and the runtime clamps the way's points to it. Live take 4: held inside, the wave rode over the main word - so a
-  // way that would meet one keeps the table's)
-  const way = [{ x: 2000, y: 1490 }, { x: 2000, y: 2400 }], rideIt = { ...it, key: "r", prio: 2, sizes: [40], ride: true, path: way, life: [0, 1000] };
-  const rv = L1(rideIt, { view, zoom: 1 }), rr = rv.ride, vv = { x0: view.x0 + SEAT.SEAT_EDGE, y0: view.y0 + SEAT.SEAT_EDGE, x1: view.x1 - SEAT.SEAT_EDGE, y1: view.y1 - SEAT.SEAT_EDGE };
-  ok(rr && rr.x0 >= vv.x0 && rr.x1 <= vv.x1 && rr.y0 >= vv.y0 && rr.y1 <= vv.y1 && rr.x1 > rr.x0 && rr.y1 < 2100, "a rider's way that leaves this seat's view is held inside it");
+  // (MAPRIDE: a rider is laid out on this seat like any word - sfx-seat rideLayout; the finer checks are in dev/sfx-mapride.test.mjs)
+  const wbox = { bw: 200, bh: 80 };
+  const rd = L1({ ...it, key: "r0", sizes: [60], ride: true, path: [{ x: 2000, y: 1490, ms: 0 }, { x: 2200, y: 1490, ms: 400 }], w: wbox, life: [0, 1000] }, { view, zoom: 1 });
+  ok(rd.rules[0] === "ride" && rd.f === 1.5 && rd.way?.length === 2 && rd.way[0].x === 2000 && rd.way[1].x === 2200, `a rider with room rides the table's way at this seat's size (${rd.rules})`);
+  // (MAPSFXSEAT2 live: the blast's wave word rode half off the GM's screen - the table holds a way inside the REFERENCE view; held inside
+  // this view by a clamp (take 4) it rode over the main word. Now: every sample of its way whole in this view and off the words up with it)
+  const way = [{ x: 2000, y: 1490, ms: 0 }, { x: 2000, y: 2400, ms: 500 }], rideIt = { ...it, key: "r", prio: 2, sizes: [40], ride: true, path: way, w: wbox, life: [0, 1000], anchor: "start", turn: true };
+  const vv = { x0: view.x0 + SEAT.SEAT_EDGE, y0: view.y0 + SEAT.SEAT_EDGE, x1: view.x1 - SEAT.SEAT_EDGE, y1: view.y1 - SEAT.SEAT_EDGE };
+  const rv = L1(rideIt, { view, zoom: 1 }), rb = rv.box;
+  ok(rv.way && rb.x0 >= vv.x0 - 1e-6 && rb.x1 <= vv.x1 + 1e-6 && rb.y0 >= vv.y0 - 1e-6 && rb.y1 <= vv.y1 + 1e-6, `a rider's way that leaves this seat's view is laid out inside it (${rv.rules})`);
   const low = { ...it, key: "m", sub: null, box: { x0: 1900, y0: 1960, x1: 2100, y1: 2040 }, life: [0, 1000] };
-  const lr = SEAT.seatLayout([low, rideIt], { view, zoom: 1 }).get("r");
-  ok(lr.rule === "ride" && !lr.ride, "held inside, it would ride over a word laid out before it: the table's way stands");
-  ok(/else if \( o\.path\?\.points && f\.ride \) \{[\s\S]{0,400}oo\.path = \{ \.\.\.o\.path, points: o\.path\.points\.map\(kp\) \}; oo\.at = kp\(at\);/.test(SRC), "the runtime clamps a rider's way to it");
+  const ll = SEAT.seatLayout([low, rideIt], { view, zoom: 1 }), lr = ll.get("r"), lm = inkBox(ll.get("m").box, it.ink);
+  const meetsLow = lr.way && lr.way.some((q, i) => i < lr.way.length - 1 && [0, 0.25, 0.5, 0.75, 1].some((g) => { const x = q.x + (lr.way[i + 1].x - q.x) * g, y = q.y + (lr.way[i + 1].y - q.y) * g, f = lr.cap / 40; return on2(inkBox({ x0: x - 100 * f, y0: y - 40 * f, x1: x + 100 * f, y1: y + 40 * f }, it.ink), lm) > SEAT.SOFT_OK * 200 * 80 * f * f * it.ink[0] * it.ink[1] + 1e-6; }));
+  ok(lr.rules[0] === "ride" && (lr.rule === "noroom" || !meetsLow), `kept inside the view it does not ride over a word laid out before it (${lr.rules})`);
+  ok(/if \( o\.path\?\.points && f\.way \) \{[\s\S]{0,300}oo\.path = \{ \.\.\.o\.path, points: f\.way\.map/.test(SRC) && /f\.rule === "noroom"/.test(SRC), "the runtime rides the way this seat laid out (or none)");
   // (two words of one picture up at the same time: the second keeps off the first)
   const lay = SEAT.seatLayout([{ ...it, key: "a", life: [0, 1000] }, { ...it, key: "b", prio: 1, life: [500, 1500], box: { x0: 1950, y0: 1460, x1: 2150, y1: 1540 } }], { view, zoom: 1 });
   ok(on2(inkBox(lay.get("a").box, it.ink), inkBox(lay.get("b").box, it.ink)) === 0, "a word never lands on another word up with it");
@@ -277,7 +279,7 @@ function drawSeat(S, step, prev = false) {
     const items = T.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 });
     const lay = SEAT.seatLayout(items, { view, panels, pins: [PIN], tokens: [], zoom: S.z });
     for ( const it of items ) { const f = lay.get(it.key), sk = it.w.size / (T.optsOf(it.w, d).size || 1);
-      out.set(it.key, { cap: f.cap / sk, box: f.box, ink: inkBox(f.box, it.ink), rules: f.rules, ok: f.ok, w: it.w, item: it, sub: it.sub }); }
+      out.set(it.key, { cap: f.cap / sk, box: f.box, ink: inkBox(f.box, it.ink), rules: f.rules, ok: f.ok, w: it.w, item: it, sub: it.sub, way: f.way ?? null, f: f.f }); }
     return { out, view, panels };
   }
   // (the previous rule, as its runtime did it: sfx.mjs wordGeom + groupFit + seatCall at eab7e02)
@@ -395,6 +397,111 @@ await group("SEAT2", async () => {
   ok(sig2() === sig2(), "a seat draws the same picture twice");
 });
 
+/* ---------------------------------------------------------------- RIDE (MAPRIDE) */
+// The words that ride a way (the bomb's falling word, the shock wave) on the take's two seats and the spread, steps 1-3: every sample of
+// the way as this seat draws it (its box at this seat's size, at the instant it passes there) whole in this seat's view, its ink off the
+// pin, at most SOFT_OK of it under this seat's panels and the words up at that instant. The previous rule (f1d9491: the table's way, held
+// inside the view by a clamp only where that clamp stayed off earlier words) broke it on the recorded seats (live: the wave half off the
+// GM's bottom edge, the falling word under the challenges panel).
+const BASE = revTree(root, "f1d9491", "scripts/sfx", fs.mkdtempSync(path.join(os.tmpdir(), "mapride-base-")));
+const BT = await import(pathToFileURL(path.join(BASE, "sfx-table.mjs")).href), BS = await import(pathToFileURL(path.join(BASE, "sfx-seat.mjs")).href);
+/** the riders of the page as a seat draws them: { key, way, f, w, item } (base: the f1d9491 rule) + the words up with them */
+function ridersOf(S, step, base = false) {
+  enterSeat(S);
+  const d = wdeps(step), tb = pageAt(step, false);
+  const ws = [...tb.values()].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y));
+  const view = viewOf(S), panels = S.ui.map(toScene(S));
+  const TT = base ? BT : T, SS = base ? BS : SEAT;
+  const items = TT.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 }), lay = SS.seatLayout(items, { view, panels, pins: [PIN], tokens: [], zoom: S.z });
+  const riders = [], words = [];
+  for ( const it of items ) {
+    const f = lay.get(it.key);
+    if ( it.ride && (it.path?.length ?? 0) > 1 ) {
+      let way = f.way ?? it.path;
+      if ( base && f.ride ) { const r = f.ride; way = it.path.map((q) => ({ ...q, x: r.x1 > r.x0 ? Math.min(Math.max(q.x, r.x0), r.x1) : (r.x0 + r.x1) / 2, y: r.y1 > r.y0 ? Math.min(Math.max(q.y, r.y0), r.y1) : (r.y0 + r.y1) / 2 })); }
+      riders.push({ key: it.key, way, f: f.f ?? f.cap / it.u, rules: f.rules, w: it.w, item: it, stop: Number.isFinite(it.w.stopAt) ? it.w.ts + (it.w.stopAt - it.w.t) : it.life[1] });
+    } else if ( f && !f.rules.includes("off") ) words.push({ ink: inkBox(f.box, it.ink), life: it.life, prio: it.prio });
+  }
+  return { riders, words, view, panels };
+}
+/** the faults of a rider's way on a seat: samples off the view, on the pin, under panels / words up beyond SOFT_OK */
+function rideFaults(r, ctx, S) {
+  const m = SEAT.SEAT_EDGE / S.z, v = { x0: ctx.view.x0 + m, y0: ctx.view.y0 + m, x1: ctx.view.x1 - m, y1: ctx.view.y1 - m };
+  const W = r.way, P0 = W[0].ms, tot = Math.max(1, W.at(-1).ms - P0), bw = r.w.bw * r.f, bh = r.w.bh * r.f, k = r.item.ink;
+  const out = { off: 0, pin: 0, cover: 0, n: 0 };
+  for ( let i = 0; i <= 20; i++ ) {
+    const ms = P0 + (tot * i) / 20;
+    let j = 1; while ( j < W.length - 1 && W[j].ms < ms ) j++;
+    const a = W[j - 1], b = W[j], g = b.ms > a.ms ? Math.min(1, Math.max(0, (ms - a.ms) / (b.ms - a.ms))) : 1, x = a.x + (b.x - a.x) * g, y = a.y + (b.y - a.y) * g;
+    const box = { x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 }, ink = inkBox(box, k), t = r.item.life[0] + ms - P0;
+    out.n++;
+    if ( area2(box) - on2(box, v) > 1 ) out.off++;
+    if ( on2(ink, PIN) > 0 ) out.pin++;
+    const up = ctx.words.filter((q) => q.prio < r.item.prio && q.life[0] < t + 80 && q.life[1] > t - 80);
+    const soft = ctx.panels.reduce((s, o) => s + on2(ink, o), 0) + up.reduce((s, o) => s + on2(ink, o.ink), 0);
+    if ( soft > SEAT.SOFT_OK * area2(ink) * 1.05 + 1 ) out.cover++;
+  }
+  return out;
+}
+await group("RIDE", async () => {
+  let faultsNew = 0, faultsBase = 0, shownNew = 0, noroom = 0, cases = 0;
+  const rows = [];
+  for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1], ...SPREAD.map((q) => [`${q.W}x${q.H}@${q.z}`, q])] ) for ( const step of [1, 2, 3] ) {
+    const n = ridersOf(S, step), b = ridersOf(S, step, true);
+    for ( const r of n.riders ) {
+      cases++;
+      if ( r.rules.includes("off") ) continue;
+      if ( r.rules.includes("noroom") ) { noroom++; if ( sn === "gm" || sn === "p1" ) rows.push(`noroom ${sn} s${step} ${r.w.text}`); continue; }
+      shownNew++;
+      const fl = rideFaults(r, n, S);
+      if ( fl.off || fl.pin || fl.cover ) { faultsNew++; rows.push(`NEW ${sn} s${step} ${r.w.text} ${JSON.stringify(fl)} ${r.rules}`); }
+      if ( (sn === "gm" || sn === "p1") && process.env.SEAT_VERBOSE ) { const P = r.item.path, kp = r.item.anchor === "end" ? [P.at(-1), r.way.at(-1)] : [P[0], r.way[0]];
+        rows.push(`${sn} s${step} ${r.w.text} cap ${(r.f * r.item.u).toFixed(0)} ${r.rules.join("+")} anchor moved ${Math.round(kp[1].x - kp[0].x)},${Math.round(kp[1].y - kp[0].y)} (${(Math.hypot(kp[1].x - kp[0].x, kp[1].y - kp[0].y) / (r.w.bh * r.f)).toFixed(1)} box h)`); }
+    }
+    for ( const r of b.riders ) {
+      if ( r.rules.includes("off") ) continue;
+      const fl = rideFaults(r, b, S);
+      if ( fl.off || fl.pin || fl.cover ) { faultsBase++; if ( sn === "gm" || sn === "p1" ) rows.push(`base ${sn} s${step} ${r.w.text} ${JSON.stringify(fl)}`); }
+    }
+  }
+  if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));
+  ok(faultsBase > 0, `the previous rule: riders off the view, on the pin or under a panel / word in ${faultsBase} rider x seat x step cases (${rows.filter((q) => q.startsWith("base gm") || q.startsWith("base p1")).slice(0, 3).join("; ")})`);
+  ok(faultsNew === 0, `now: every rider's way whole in view, off the pin, at most an edge under panels / words up (${shownNew} drawn, ${noroom} without room, of ${cases}; faults ${faultsNew}: ${rows.filter((q) => q.startsWith("NEW")).slice(0, 3).join("; ")})`);
+  // (the take's two seats draw both riders at every step - the falling word and the wave are the story's build and its pressure)
+  let recShown = 0;
+  for ( const S of [REC.gm, REC.p1] ) for ( const step of [1, 2, 3] ) recShown += ridersOf(S, step).riders.filter((r) => !r.rules.includes("noroom") && !r.rules.includes("off")).length;
+  ok(recShown === 2 * 3 * 2, `the take's seats draw the falling word and the wave at every step (${recShown} of 12; ${rows.filter((q) => q.startsWith("noroom")).join("; ")})`);
+  // (seeded and clocked: the same seat lays its riders out the same twice; the wave keeps its start at the blast, the fall its end)
+  const sig3 = () => JSON.stringify(ridersOf(REC.gm, 2).riders.map((r) => [r.key, r.f, r.way]));
+  ok(sig3() === sig3(), "a seat lays its riders out the same twice");
+  const g2 = ridersOf(REC.gm, 2).riders;
+  for ( const r of g2 ) { const P = r.item.path, Wy = r.way, keep = r.item.anchor === "end" ? [P.at(-1), Wy.at(-1)] : [P[0], Wy[0]];
+    ok(r.rules.includes("shift") || Math.hypot(keep[0].x - keep[1].x, keep[0].y - keep[1].y) < 1e-6, `${r.w.text}: its ${r.item.anchor} stays where the table tied it unless the whole way had to move (${r.rules})`); }
+});
+
+/* ---------------------------------------------------------------- MAINSIZE (MAPRIDE) */
+// The riders laid out per seat, the panels merged and the blocked sizes skipped (cost) must not weaken the main word: on the take's page and
+// seats, steps 1-3, the main word drawn now is the size the brief's base (f1d9491) drew, on the same side.
+await group("MAINSIZE", async () => {
+  const rows = [], bad = [];
+  for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1]] ) for ( const step of [1, 2, 3] ) {
+    const sz = (base) => {
+      enterSeat(S);
+      const d = wdeps(step), tb = pageAt(step, false);
+      const ws = [...tb.values()].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y));
+      const TT = base ? BT : T, SS = base ? BS : SEAT;
+      const items = TT.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 }), lay = SS.seatLayout(items, { view: viewOf(S), panels: S.ui.map(toScene(S)), pins: [PIN], tokens: [], zoom: S.z });
+      const m = items.find((q) => q.w.role === "main"), f = lay.get(m.key);
+      return { cap: f.cap, rules: f.rules.join("+") };
+    };
+    const n = sz(false), b = sz(true);
+    rows.push(`${sn} s${step} base ${b.cap.toFixed(1)} now ${n.cap.toFixed(1)} (${n.rules})`);
+    if ( n.cap < b.cap - 0.5 ) bad.push(rows.at(-1));
+  }
+  if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));
+  ok(!bad.length, `the main word is not smaller than the base drew it on the take's seats, steps 1-3 (${bad.join("; ") || rows.join("; ")})`);
+});
+
 /* ---------------------------------------------------------------- GROUND */
 await group("GROUND", () => {
   const fill = (r, g, b, n = 64 * 64) => { const a = new Uint8ClampedArray(n * 4); for ( let i = 0; i < n; i++ ) { a[i * 4] = r; a[i * 4 + 1] = g; a[i * 4 + 2] = b; a[i * 4 + 3] = 255; } return a; };
@@ -403,6 +510,94 @@ await group("GROUND", () => {
   ok(["stone", "metal"].includes(SEAT.groundOfPixels(fill(120, 120, 122), 64)), "grey: stone / metal");
   ok(SEAT.groundOfPixels(fill(250, 250, 250), 64) === "snow", "white: snow");
   ok(SEAT.groundOfPixels(new Uint8ClampedArray(0), 64) === "auto", "nothing read: auto (earth)");
+});
+
+/* ---------------------------------------------------------------- BURN (MAPRIDE) */
+// A burning fire's run on the take's two seats (The Warehouse, their recorded panels and the bomb's pin), steps 1-3: a fire burning by the
+// hotbar, one by the pin, and a second fire 4.5 run sizes above the first (two fires one above the other: SUSTAINGAP-5). Each run's block
+// (sfx-seat runReserve: the room the engine keeps the run to + the margin its ink may leave it by - measured in dev/sfx-burn.test.mjs)
+// stands whole in the view, off the pin and the panels (a 6 % share of a tall block hid a whole phrase live), never on another fire's block. The previous rule (f1d9491
+// burnOffsets: a box -2.5 .. +0.9 em, em = 1.25 x the run's size, cleared of panels and pins, the run left to take its own height) put the
+// run's real block on the hotbar, the pin or the other fire's run.
+await group("BURN", async () => {
+  // (sfx.mjs burnSize: the run's size at the fire group's step - a live fire at level 0.6)
+  const kOf = (step) => SZ.sizeAt(Math.max(4, (SEAT.REF_VH * (0.035 + 0.03 * Math.min(1, 0.6 / 0.9))) / SEAT.refZoom(WG, 0)), step);
+  const mid = (S, sx, sy) => ({ x: CAM.x + (sx - S.W / 2) / S.z, y: CAM.y + (sy - S.H / 2) / S.z });
+  let bad = 0, badPrev = 0, notLettered = 0, cases = 0;
+  const rows = [], sizesRow = [], minsOf = {};
+  for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1]] ) for ( const step of [1, 2, 3] ) for ( const motion of ["smooth", "stepped"] ) {
+    const k = kOf(step), v0 = viewOf(S), m = SEAT.SEAT_EDGE / S.z, v = { x0: v0.x0 + m, y0: v0.y0 + m, x1: v0.x1 - m, y1: v0.y1 - m };
+    const panels = S.ui.map(toScene(S));
+    // (the fires, the same on both seats: by the GM's hotbar, beside the pin, and one above the first)
+    const A0 = mid(REC.gm, 760, 800), k2 = kOf(2), spots = [A0, { x: PIN.x0 - 0.5 * k2, y: PIN.y1 + 0.5 * k2 }, { x: A0.x, y: A0.y - 4.5 * k2 }];
+    // (the previous rule)
+    const em = 1.25 * k, ui = [...panels, PIN], prevBlocks = [];
+    for ( const q of spots ) {
+      const box = { x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, d = C.clearOf(box, ui, v0, Math.max(v0.x1 - v0.x0, v0.y1 - v0.y0) * 0.45);
+      if ( d.dx || d.dy ) ui.push({ x0: box.x0 + d.dx, y0: box.y0 + d.dy, x1: box.x1 + d.dx, y1: box.y1 + d.dy });
+      prevBlocks.push(SEAT.runReserve({ x: q.x + d.dx, y: q.y + d.dy }, k, motion));
+    }
+    // (now)
+    // (as sfx.mjs burnRooms: smaller on this seat where the table's size has no room, down to half of it, never under the legibility floor)
+    const kMin = Math.min(k, SZ.floorPx(S.H, 1, L.sizeModel) / S.z);
+    const r = SEAT.burnRoom(spots, { k, kMin, below: [1, 2, 3].filter((s) => s < step).map(kOf), v, hard: [PIN, ...panels], motion });
+    const mins = (minsOf[`${sn} ${motion}`] ??= []); mins[step] = r.map((o) => (o.ok ? o.k : 0));
+    sizesRow.push(`${sn} s${step} ${motion}: ${r.map((q) => (q.ok ? Math.round(q.k * S.z) : "-")).join("/")} px (table ${Math.round(k * S.z)})`);
+    const fault = (b, others) => (on2(b, PIN) > 0 ? "pin" : area2(b) - on2(b, v) > 1 ? "off" : panels.some((o) => on2(b, o) > 1) ? "panel" : others.some((o) => on2(b, o) > 1) ? "fire" : "");
+    prevBlocks.forEach((b, i) => { const f = fault(b, prevBlocks.filter((_, j) => j !== i)); if ( f ) { badPrev++; if ( rows.length < 40 ) rows.push(`prev ${sn} s${step} ${motion} fire${i} ${f}`); } });
+    r.forEach((q, i) => { cases++; if ( !q.ok ) { notLettered++; rows.push(`noroom ${sn} s${step} ${motion} fire${i} k ${k.toFixed(0)} block ${Math.round(q.box.x1 - q.box.x0)}x${Math.round(q.box.y1 - q.box.y0)} view ${Math.round(v.x1 - v.x0)}x${Math.round(v.y1 - v.y0)}`); return; }
+      const f = fault(q.box, r.filter((o, j) => j !== i && o.ok).map((o) => o.box)); if ( f ) { bad++; rows.push(`NOW ${sn} s${step} ${motion} fire${i} ${f}`); }
+      if ( !(q.room.x0 >= q.box.x0 - 1e-6 && q.room.x1 <= q.box.x1 + 1e-6 && q.room.y0 >= q.box.y0 - 1e-6 && q.room.y1 <= q.box.y1 + 1e-6) ) { bad++; rows.push(`room ${sn} s${step} fire${i} not inside its block`); } });
+  }
+  if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n") + "\nrun sizes on screen: " + sizesRow.join("; "));
+  ok(badPrev > 0, `the previous rule: a fire's run on the pin, a panel, off the view or on another fire's run in ${badPrev} fire x seat x step cases (${rows.filter((q) => q.startsWith("prev")).slice(0, 4).join("; ")})`);
+  ok(bad === 0, `now: every run's block whole in view, off the pin and the panels, never on another fire's (${bad} faults; ${rows.filter((q) => q.startsWith("NOW") || q.startsWith("room")).slice(0, 3).join("; ")})`);
+  ok(notLettered === 0, `the take's fires are lettered on both seats at every step (${cases - notLettered} of ${cases}; ${rows.filter((q) => q.startsWith("noroom")).join("; ")})`);
+  const order = Object.entries(minsOf).filter(([, m]) => m[1].some((_, i) => !(m[1][i] <= m[2][i] + 1e-9 && m[2][i] <= m[3][i] + 1e-9)));
+  ok(!order.length, `a higher step never letters a crowded seat's run smaller (${order.map(([s, m]) => s + " " + m.slice(1).map((x) => x.map(Math.round).join("/")).join(" ")).join("; ")})`);
+  const sig4 = () => JSON.stringify(SEAT.burnRoom([{ x: 2400, y: 4300 }, { x: 2400, y: 4100 }], { k: 60, v: viewOf(REC.p1), hard: [PIN], soft: REC.p1.ui.map(toScene(REC.p1)) }));
+  ok(sig4() === sig4(), "a seat lays its runs out the same twice");
+});
+
+/* ---------------------------------------------------------------- LIFE (MAPRIDE) */
+// A word's life on the table (the ledger, and what the seat layout keeps later words off) is as long as the engine keeps it legible: live
+// (take 2026-11-15, step 3, GM) a debris word was laid onto the blast's shock-wave word, which the table thought gone after 1.25 s while
+// the engine held it 1.9 s. Each word is played on the engine and its last legible instant compared with its table life.
+await group("LIFE", async () => {
+  const { drawnOf, LEGIBLE_ALPHA } = await import(pathToFileURL(path.join(root, "scripts/letters/check-sustain.mjs")).href);
+  const short = [], shortPrev = [];
+  for ( const [kind, wo] of [["shockwave", { loud: 0.9 }], ["debris", { pieces: "large", material: "stone", loud: 0.7 }], ["boom", { loud: 1, prefix: true }], ["thud", { loud: 0.9 }], ["crack", { loud: 0.5 }]] ) {
+    const word = L.word(kind, { ...wo, seed: `life-${kind}`, lang: "en" });
+    const w = { role: "sec", text: word.text, word, x: 2000, y: 1500, magnitude: 0.9, area: 150, seed: `life-${kind}`, shrink: 1, stage: { in: "slam" }, ms: 800, zr: 0, voice: kind, alive: 0 };
+    globalThis.innerWidth = SEAT.REF_VW; globalThis.innerHeight = SEAT.REF_VH; canvas.stage.scale.x = SEAT.refZoom(G, 0);
+    const d = A.deps(SEAT.makeLedger()), o = T.baseOpts(w, d); T.measure(w, d);
+    const E2 = await setup({ gm: true }), L2 = E2.engine; L2.lookStyle("invincible");
+    const h = await L2.play(w.text, { ...o, at: { x: 2000, y: 1500 }, keepInView: false });
+    let last = 0; for ( let t = 0; t < 6000; t += 33 ) { await E2.tick(33, 33); const dd = drawnOf(h); if ( dd && dd.a >= LEGIBLE_ALPHA ) last = t; }
+    E2.restoreWarn?.();
+    const life = SEAT.lifeOf(w, 0).t1, prev = SEAT.lifeOf({ ...w, holdMs: 0 }, 0).t1;
+    if ( life < last ) short.push(`${w.text} ${life} < ${last}`);
+    if ( prev < last ) shortPrev.push(`${w.text} ${prev} < ${last}`);
+  }
+  ok(shortPrev.length > 0, `the previous life (hold / ms + 450) ended before the engine's word did: ${shortPrev.join("; ")}`);
+  ok(!short.length, `every word's table life lasts as long as the engine keeps it legible (${short.join("; ") || "all"})`);
+  // A rider stopped early (the wave at its rim + 180 ms, sfx.mjs stopAt) plays its exit from the stop: live (take after3, step 3, GM) the
+  // debris word starting 250 ms after the wave's stop was laid onto the wave, which the seat layout thought gone at the stop.
+  {
+    const word = L.word("shockwave", { loud: 0.9, seed: "life-stop", lang: "en" });
+    const path = [{ x: 2000, y: 1500, ms: 0 }, { x: 2400, y: 1300, ms: 836 }];
+    const w = { role: "sec", text: word.text, word, x: 2000, y: 1500, magnitude: 0.9, area: 150, seed: "life-stop", shrink: 1, stage: {}, ms: 836, zr: 0, voice: "shockwave", kind: "shockwave", alive: 0,
+      path, orient: "none", t: 0, ts: 0, stopAt: 836 };
+    globalThis.innerWidth = SEAT.REF_VW; globalThis.innerHeight = SEAT.REF_VH; canvas.stage.scale.x = SEAT.refZoom(G, 0);
+    const d = A.deps(SEAT.makeLedger()), o = T.baseOpts(w, d); T.measure(w, d);
+    const E2 = await setup({ gm: true }), L2 = E2.engine; L2.lookStyle("invincible");
+    const h = await L2.play(w.text, { ...o, at: { x: 2000, y: 1500 }, keepInView: false, orient: "none", path: { points: path } });
+    let last = 0; for ( let t = 0; t < 6000; t += 17 ) { await E2.tick(17, 17); if ( t >= 836 && t < 853 ) h.stop(); const dd = drawnOf(h); if ( dd && dd.a >= LEGIBLE_ALPHA ) last = t; }
+    E2.restoreWarn?.();
+    const it = T.seatItems([w], d, { vw: SEAT.REF_VW, vh: SEAT.REF_VH, zoom: SEAT.refZoom(G, 0), scale: 1 })[0];
+    ok(836 < last, `a stopped wave word stays legible past its stop (${last} ms)`);
+    ok(it?.stop >= last, `the seat layout keeps later words off a stopped rider until its exit is over (${Math.round(it?.stop)} >= ${last}; before: 836)`);
+  }
 });
 
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900; canvas.stage.scale.x = 1;

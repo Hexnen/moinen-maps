@@ -68,7 +68,8 @@ group("F2", () => {
   const moved = { x0: fireBox.x0 + sh.dx, y0: fireBox.y0 + sh.dy, x1: fireBox.x1 + sh.dx, y1: fireBox.y1 + sh.dy };
   ok((sh.dx || sh.dy) && ui.every((b) => ov(moved, b) === 0) && Math.hypot(sh.dx, sh.dy) < 600, "F2 a burning fire's words move just clear of a panel over its flames");
   ok(C.clearOf({ x0: 1000, y0: 1000, x1: 1200, y1: 1100 }, ui, { x0: 0, y0: 0, x1: 3200, y1: 1800 }).dx === 0, "F2 ... and stay put where nothing covers them");
-  ok(/burnOffsets\(/.test(sfx) && /o \? \{ x: q\.x \+ o\.dx, y: q\.y \+ o\.dy \}/.test(sfx), "F2 the runtime moves the burning fire's phrase spots by those shifts");
+  // (MAPRIDE: the shifts now come from burnRooms - sfx-seat burnRoom, the run's real block, dev/sfx-seat.test.mjs BURN)
+  ok(/burnRooms\(/.test(sfx) && /o \? \{ x: q\.x \+ o\.dx, y: q\.y \+ o\.dy \}/.test(sfx), "F2 the runtime moves the burning fire's phrase spots by those shifts");
   const steam = { role: "main", voice: "out", x: 2600, y: 400, bw: 300, bh: 80, rise: 90 * 2, t: 0, subject: { x0: 2580, y0: 380, x1: 2620, y1: 420 }, cover: 0.4 };
   const ps = C.place([steam], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] })[0];
   ok(ps && ps.box.y0 <= ps.y - 40 - 180 + 1 && ui.every((b) => ov(ps.box, b) === 0), "F2 a word that rises (steam) keeps its whole way up off the panels");
@@ -342,7 +343,8 @@ group("CROWD", () => {
   ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
   // (THUNDERFIT added the map's pins after the words up: the same obstacles, plus the pins)
   // (MAPSFXSEAT: the event words up are the TABLE's - the ledger, the same on every seat - not what this seat drew)
-  ok(sfx.includes("ui = [...uiBoxes(), ...ledger.boxes(sharedNow(), sharedNow() + 1000), ...pinBoxes(v)]"), "CROWD a burning fire's phrases keep off the event words still up");
+  // (MAPRIDE: burnRooms keeps the run's block off the words up as off the panels)
+  ok(sfx.includes("const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box)"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */

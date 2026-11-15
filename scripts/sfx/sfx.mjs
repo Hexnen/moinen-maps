@@ -48,6 +48,8 @@ import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
+const RUN_EPOCH = 30 * 60000;  // ms: a burning run's clock moves on by this much at a time (runClock)
+const CLOCK_OK = 30, CLOCK_WAIT = 20000;  // ms: a seat's shared clock error a run joins on; how long after load a run waits for it
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
 const CATCH_SHOW_MS = T.CATCH_SHOW_MS;   // MAPSFXSEAT: a catch word sounds this long after its fire's shared moment (question MAPSFXSEAT-2)
 const UI_MS = 400;             // the interface rectangles are measured at most this often
@@ -86,7 +88,7 @@ const ploughs = new Set();     // stroke id|start of the ploughs lettered here
 let soon = [];                  // boxes of words placed, not started yet ({ box, until })
 let stormTimer = 0;
 const flashSeen = new Set();
-let farCount = { key: "", k: 0, n: 0, list: new Map() };
+let farCount = { key: "", list: new Map() };
 // MAPSFXSEAT: the table picture (sfx-seat.mjs): the words every seat holds, planned from shared data; and this seat's own log of every
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
 const ledger = SEAT.makeLedger();
@@ -362,22 +364,36 @@ function pollStorm() {
     const w = EV.flashWord(ev, place, view(), canvas.scene?.id ?? "");
     if ( !w ) continue;
     const r = G * 0.5;
-    storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }], null, "weather");
+    const p = storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }], null, "weather");
+    // (MAPRIDE: when its word is due, the flash is asked again with the storm as it stands THEN - the GM's change reaches his own seat at
+    // once and a player's a moment later, so a seat that polled before the change and one that polled after decided differently)
+    if ( !ev.preview ) p.still = () => flashStill(ev);
     stats.flashes = (stats.flashes ?? 0) + 1;
   }
   again(700);
 }
-/** How many far flashes the storm made before slot `k` since it was switched on (counted once, then kept up: the same on every client). */
+/** MAPRIDE: is a lightning flash still one this storm makes and letters, read with the storm's settings as they stand now on this seat (a
+    switch-off that reached this seat after its poll: the flash is gone, on every seat alike)? No storm shown here: as polled. */
+function flashStill(ev) {
+  try {
+    const storm = moduleApi.weather?.stormDisplay?.(), SM = moduleApi.weather?.stormModel;
+    if ( !storm?.S || !SM?.flashOf ) return true;
+    const now = SM.flashOf(storm.S, storm.seed, ev.k, storm.rainP);
+    if ( !now || now.kind !== ev.kind || now.t !== ev.t ) return false;
+    return ev.kind !== "far" || EV.farLettered(now, (k) => farBefore(storm, k));
+  } catch { return true; }
+}
+/** How many far flashes the storm made in slot `k`'s window before it (sfx-events farIndex: the same on every seat; MAPRIDE - before, a
+    count since the switch-on that restarted when a change reached this seat, so seats numbered one flash differently). */
 function farBefore(storm, k) {
   const S = storm.S, SM = moduleApi.weather?.stormModel; if ( !S || !SM?.flashOf ) return 1;
-  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}`;
-  if ( farCount.key !== key ) farCount = { key, k: Math.max(Math.floor(S.t / SM.SLOT), k - EV.FAR_SCAN), n: 0, list: new Map() };
+  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}|${S.prev?.on}`;
+  if ( farCount.key !== key ) farCount = { key, list: new Map() };
   if ( farCount.list.has(k) ) return farCount.list.get(k);
-  if ( k < farCount.k ) return C.hashStr(String(k)) & 1;
-  for ( ; farCount.k < k; farCount.k++ ) { const ev = SM.flashOf(S, storm.seed, farCount.k, storm.rainP); if ( ev?.kind === "far" ) { farCount.list.set(farCount.k, farCount.n); farCount.n++; } }
-  farCount.list.set(k, farCount.n);
+  const n = EV.farIndex(k, (j) => SM.flashOf(S, storm.seed, j, storm.rainP)?.kind === "far");
+  farCount.list.set(k, n);
   if ( farCount.list.size > 2000 ) farCount.list.delete(farCount.list.keys().next().value);
-  return farCount.n;
+  return n;
 }
 
 /* ---------------------------------------------------------------- preset firings as pages (EFFECTS1) */
@@ -464,6 +480,7 @@ function pageWord(p, w) {
   if ( stepFor(grp) === 0 ) return;
   const q = tb?.get(w.key);
   if ( !q ) return;
+  if ( p.still && !p.still() ) { seatSkip(q, "gone"); return; }
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
   // (this seat's own need: its performance mode keeps fewer words up - never the main word)
   const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
@@ -615,7 +632,10 @@ function reconcileBurn() {
     // flames first showed HERE, so a busy seat started a fire's sound seconds later, with other spots and phrases)
     const fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now) && Number(s.g ?? s.q ?? 0) + BURN_AFTER <= now);
     const geo = Fire.geo(), P = Fire.params0();
-    const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, P), levelNow: (s, t) => FM.levelNow(s, Number.isFinite(t) ? t : undefined) }))
+    // (MAPRIDE: each run's own clock - the shared instant its group began to burn - so its size, its level and its phrases are the same on
+    // every seat, a seat that joins late included: before, the size and level were read at this seat's own start, up to a second apart)
+    const plans = C.burnGroups(fires, G).map((g) => ({ ...C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, P), levelNow: (s, t) => FM.levelNow(s, Number.isFinite(t) ? t : undefined) }),
+      start: Math.min(...g.map((s) => Number(s.g ?? s.q ?? 0))) + BURN_AFTER }))
       .sort((a, b) => b.prio - a.prio);
     let live = 0;
     const spots = [];
@@ -635,45 +655,76 @@ function reconcileBurn() {
       want.set(p.key, { plan: p, live: isLive, idx });
     }
   }
+  // (MAPRIDE: this seat's room for every run, in the table's order: a run never letters into one laid out before it; a spot with no clean
+  // room on this seat is not lettered here)
+  const rooms = burnRooms(want);
+  for ( const w of want.values() ) { const r = rooms.get(w.plan.key) ?? []; w.seat = w.idx.filter((i) => r[i]?.ok !== false); w.sig = `${w.seat.map((i) => `${i}:${Math.round((r[i]?.f ?? 1) * 100)}`).join()}@${runClock(w.plan)}`; }
   for ( const [k, b] of burns ) {
     const w = want.get(k);
-    if ( w && w.live === b.live && w.idx.join() === b.idx.join() ) { b.plan = w.plan; b.off = burnOffsets(w.plan, w.live, b.idx); continue; }
+    // (MAPRIDE: a run this seat now letters at another size - the room round it changed - starts again at the new size, on the shared clock)
+    if ( w && w.live === b.live && w.sig === b.sig ) { b.plan = w.plan; b.off = rooms.get(k) ?? []; continue; }
     // gone out / removed: its words play their exits (the fire's last breath before the hiss); switched mode: at once
     for ( const s of b.subs ) { try { s.stop({ quick: !!w }); } catch {} }
     burns.delete(k);
   }
-  for ( const [k, w] of want ) if ( !burns.has(k) ) { const b = { plan: w.plan, live: w.live, idx: w.idx, off: burnOffsets(w.plan, w.live, w.idx), subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.idx); }
+  // (MAPRIDE: a live run joins the shared clock only once this seat's clock has settled - live a player just after a reload was ~280 ms
+  // off with the clock "ready" (ENGVIEW-1); its run waits a second or two for it, at most CLOCK_WAIT after the page loaded)
+  const clockLate = (L?.clock?.error?.() ?? 0) > CLOCK_OK && performance.now() < CLOCK_WAIT;
+  for ( const [k, w] of want ) if ( !burns.has(k) && w.seat.length && !(w.live && clockLate) ) { const b = { plan: w.plan, live: w.live, idx: w.seat, sig: w.sig, off: rooms.get(k) ?? [], subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.seat); }
   stats.burns = burns.size;
   if ( burns.size || (stepFor("fire") > 0 && [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire")) ) scheduleBurn(1000);
 }
 /** Where each spot's words must move to stay off this client's interface panels (their phrases hover around the spot, in two seats
     one above the other, a little to either side: a box of about nine of their letters wide (an echo trails beside it) and three and a half high, mostly above
     it). Measured once a second with the burn. */
-function burnOffsets(p, live, idx = null) {
+function burnRooms(want) {
+  const out = new Map();
   try {
     // (off the panels, and off the event words still up: a debris word that landed where the fire then catches)
     // (THUNDERFIT: and off the map's pins - live, a burning fire's phrases stood on the scene's skull pin)
     // (MAPSFXSEAT: the seat rule's shift - off THIS seat's panels and pins; and off the table's words up, the same words on every seat)
-    const v = view(), ui = [...uiBoxes(), ...ledger.boxes(sharedNow(), sharedNow() + 1000), ...pinBoxes(v)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
-    const keep = new Set(idx ?? p.points.map((_, i) => i));
-    return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
-      // (a spot off this screen stays where it is: its words are not pulled into view; a spot not lettered stays too)
-      if ( !inV || !keep.has(i) ) return { dx: 0, dy: 0 };
-      const box = { x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, d = C.clearOf(box, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45);
-      // (THUNDERFIT: a spot moved off a panel must not land on the fire's next spot: its phrases' box, where it now stands, is in the way
-      // of the spots after it)
-      if ( d.dx || d.dy ) ui.push({ x0: box.x0 + d.dx, y0: box.y0 + d.dy, x1: box.x1 + d.dx, y1: box.y1 + d.dy });
-      return d; });
-  } catch { return []; }
+    // (MAPRIDE: the run's real block - sfx-seat RUN: it is ~7.8 caps tall (two seats of phrases, the lower below the source), the old box was 4 caps short and the run took its own
+    // height over the macro bar -, pins and tokens never under it, the runs laid out before it a panel to it; the engine keeps the run
+    // inside that block - its `room` - and its phrases to the block's width - `maxWidth`)
+    const now = sharedNow(), v0 = view(), z = canvas.stage?.scale?.x || 1, m = SEAT.SEAT_EDGE / z;
+    const v = { x0: v0.x0 + m, y0: v0.y0 + m, x1: v0.x1 - m, y1: v0.y1 - m };
+    // (panels are hard for a run, not a 6 % share as for a word: 6 % of a run's tall block is a whole phrase hidden at its edge - live, the
+    // player's FOOOOOMF ran under the challenges panel)
+    // (and off the words THIS seat drew where they stand here - the seat layout moves them from the table's place: live the player's
+    // KA-BOOOOM!! stood where a run then lettered; a run that started first moves off within its next second)
+    const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
+    const maxShift = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45;
+    for ( const [key, w] of want ) {
+      const p = w.plan, sc = L?.prefs?.scale ?? 1, k = burnSize(p, w.live) * sc, arr = [], st = stepFor("fire");
+      // (smaller on this seat where the table's size has no clean room - down to the legibility floor of its window, never under it -,
+      // laid out from the lower steps up so a higher step never letters a run smaller: sfx-seat burnRoom; question MAPRIDE-3)
+      const kMin = Math.min(k, SZ.floorPx(globalThis.innerHeight || 900, 1, L.sizeModel) / z), below = [1, 2, 3].filter((s) => s < st).map((s) => burnSize(p, w.live, s) * sc);
+      // (a spot off this screen stays where it is: its words are not pulled into view, and it takes no room here)
+      const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
+      for ( const i of w.idx ) if ( !on.includes(i) ) arr[i] = { dx: 0, dy: 0, box: null, room: null, ok: true, off: true };
+      const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion: L?.motionMode?.() === "stepped" ? "stepped" : "smooth" });
+      on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / k }; if ( r[j].ok ) taken.push(r[j].box); });
+      out.set(key, arr);
+    }
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's room`, err); }
+  return out;
 }
 /** The cap height (scene px) of a burning fire's words: a share of the REFERENCE view's height at the reference zoom (MAPSFXSEAT: the
     same size on every seat; live: 3.5..6 %, by the fire's level; ambient: 3 %) - its phrases sit over the flames for as long as they
     burn, so they stay a size under the event words (the engine's ceiling share, ceilK, does not reach continuous sounds: REQUESTS lmap) */
-function burnSize(p, live) {
-  const zoom = SEAT.refZoom(grid(), 0), lv = p.level(sharedNow());
+/** MAPRIDE: the clock a live run is lettered on: its group's shared start, carried forward by whole RUN_EPOCHs - the engine replays a
+    clocked run's past phrases from its start (at most 10 000 of them, ~3 h; live a fire painted two days before never lettered at all),
+    so a fire burning longer starts its run again at each epoch, on every seat at the same shared instant (reconcileBurn) */
+function runClock(p, now = sharedNow()) {
+  if ( !Number.isFinite(p.start) ) return NaN;
+  return p.start + Math.floor(Math.max(0, now - p.start) / RUN_EPOCH) * RUN_EPOCH;
+}
+function burnSize(p, live, step = stepFor("fire")) {
+  // (MAPRIDE: the level at the run's shared start, not this seat's now: the same size on every seat, one joining late too)
+  const zoom = SEAT.refZoom(grid(), 0), lv = p.level(Number.isFinite(p.start) ? p.start : sharedNow());
   const px = SEAT.REF_VH * (live ? 0.035 + 0.03 * Math.min(1, lv / 0.9) : 0.03);
   // (SFXSIZE: at the fire group's size step; the phrase spacing and the panel shifts use this size too)
-  return SZ.sizeAt(Math.max(4, px / zoom), stepFor("fire"));
+  return SZ.sizeAt(Math.max(4, px / zoom), step);
 }
 function startBurn(p, live, idx = null) {
   const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), G = grid();
@@ -681,9 +732,19 @@ function startBurn(p, live, idx = null) {
   // (each spot keeps its own index - its seed and its place on the path - whichever spots are lettered)
   return (idx ?? p.points.map((_, i) => i)).map((i) => {
     try {
+      // (this seat's size for the run: the table's, or smaller where its room was short - burnRooms)
+      const f = burns.get(p.key)?.off?.[i]?.f ?? 1, size = burnSize(p, live) * f, k = size * (L?.prefs?.scale ?? 1);
+      // (MAPRIDE: a live run on the shared clock - `startAt` the instant its group began to burn, its level read at the phrase's own instant
+      // of that clock (the engine passes ms since startAt) -, so every seat letters the same phrases at the same instants, a late one joins
+      // mid-phrase; take startAt only once this seat's clock is good (moinen-letters lesson), else the run starts here as before)
+      const clockOk = !(L?.clock?.error?.() > CLOCK_OK) || performance.now() >= CLOCK_WAIT, t0 = runClock(p), startAt = live && clockOk && Number.isFinite(t0) ? toPerf(t0) : undefined;
       return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
           return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
-        level: () => p.level(sharedNow()), seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size: burnSize(p, live),
+        level: startAt !== undefined ? (ms) => p.level(t0 + (Number.isFinite(ms) ? ms : sharedNow() - t0)) : () => p.level(sharedNow()),
+        ...(startAt !== undefined ? { startAt } : {}),
+        // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width)
+        room: () => burns.get(p.key)?.off?.[i]?.room ?? null, maxWidth: SEAT.RUN.mw * k,
+        seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size,
         ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts(),
         // (EFFECTS1, FXLM2 leftover: the engine's "echo" treatment trails two copies of a phrase beside it - over a fire they sat on
         // the phrase itself and on the next one; a burning fire's phrases breathe, stretch, split, shed and flare, without the echo)
@@ -851,17 +912,15 @@ function seatCall(w) {
   w.group ??= { words: [w] };
   const lay = groupLayout(w.group, vw, zoom, sc), f = lay?.get(w.key ?? `${w.seed}|${w.role}`);
   if ( !f ) return { o: { ...o, startAt: w.t, reduced: reducedMotion() }, fit: { rule: "ok", rules: [], k: 1 }, box: w.box, table: { size: o.size, at } };
-  if ( f.rule === "off" ) return { o: null, fit: f, box: f.box };
+  if ( f.rule === "off" || f.rule === "noroom" ) return { o: null, fit: f, box: f.box };
   const sh = (q) => SEAT.layoutAt(q, f);
   const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
   // (the size this seat draws: its cap over the table's, this seat's own size setting counted once - the engine applies it itself)
   if ( Number.isFinite(o.size) && w.size > 0 ) oo.size = (o.size * f.cap) / (w.size * sc);
-  if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
-  else if ( o.path?.points && f.ride ) {
-    // (a rider keeps the table's way, held inside this seat's view - sfx-seat seatLayout `ride`)
-    const r = f.ride, kp = (q) => ({ ...q, x: r.x1 > r.x0 ? Math.min(Math.max(q.x, r.x0), r.x1) : (r.x0 + r.x1) / 2, y: r.y1 > r.y0 ? Math.min(Math.max(q.y, r.y0), r.y1) : (r.y0 + r.y1) / 2 });
-    oo.path = { ...o.path, points: o.path.points.map(kp) }; oo.at = kp(at);
-  }
+  if ( o.path?.points && f.way ) {
+    // (MAPRIDE: a rider rides the way THIS seat laid out - sfx-seat rideLayout: the table's, or turned / shortened / moved to stand clean)
+    oo.path = { ...o.path, points: f.way.map((q) => ({ x: q.x, y: q.y })) }; oo.at = { x: f.way[0].x, y: f.way[0].y };
+  } else if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
@@ -880,7 +939,10 @@ function groupLayout(grp, vw, zoom, sc) {
   grp.seatKey = key;
   const d = tdeps(), items = T.seatItems(grp.words, d, seatView(zoom, sc));
   const pins = [...sharedPins(vw), ...pinBoxes(vw)];
-  return (grp.seat = SEAT.seatLayout(items, { view: vw, panels: ui, pins, tokens: sharedTokens(vw), zoom }));
+  // (MAPRIDE: its cost on this seat - api.sfx.status().stats seatMs / seatN / seatMax - for live frame-time checks)
+  const t0 = performance.now(), r = SEAT.seatLayout(items, { view: vw, panels: ui, pins, tokens: sharedTokens(vw), zoom }), ms = performance.now() - t0;
+  stats.seatMs = (stats.seatMs ?? 0) + ms; stats.seatN = (stats.seatN ?? 0) + 1; stats.seatMax = Math.max(stats.seatMax ?? 0, ms);
+  return (grp.seat = r);
 }
 /** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
 function logCall(w, call) {
@@ -919,6 +981,9 @@ function play(w) {
     const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
+    // (MAPRIDE: a burning run gives way to an event word at once - burnRooms keeps the runs off the words this seat drew; live a close
+    // strike's KRRRMMM! stood a second on a run's phrase)
+    if ( burns.size && bx ) scheduleBurn(60);
   };
   const wait = w.t - performance.now();
   if ( wait > 4 ) later(`w|${w.seed}|${w.role}|${w.t}`, wait, go, { obj: w.obj, voice: w.voice }); else go();

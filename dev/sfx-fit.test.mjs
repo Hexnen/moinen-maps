@@ -167,7 +167,8 @@ await group("RIDE", () => {
   // (MAPSFXSEAT: on the table - the reference view, the shared pins, the table's main word and words up; the seat rule then moves the
   // whole way off this seat's panels; its reach is the engine's own measure of the word)
   ok(/const avoid = \[\.\.\.\(env\.mainBox \? \[env\.mainBox\] : \[\]\), \.\.\.upNow\(\), \.\.\.env\.pins\];/.test(sfx) && /spec\.path = FIT\.rideFit\(wr\.ride, vw, avoid, spec\.bw \?\? G, spec\.bh \?\? G \* 0\.4, spec\.rk \?\? FIT\.REACH\.other, FIT\.EDGE \/ z\);/.test(sfx), "the runtime fits the wave's way (off the pins, the main word, the words up; its measured reach)");
-  ok(/\.\.\.ledger\.boxes\(sharedNow\(\), sharedNow\(\) \+ 1000\), \.\.\.pinBoxes\(v\)\], em = burnSize/.test(sfx), "a burning fire's spots keep off the pins");
+  // (MAPRIDE: burnRooms - the run's real block; pins and tokens hard, panels and the words up soft: dev/sfx-seat.test.mjs BURN)
+  ok(sfx.includes("const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];"), "a burning fire's spots keep off the pins");
   ok(/PG\.waveRide\(w\.wave\.at, w\.wave\.r0, w\.wave\.reach, w\.wave\.rim, \{ avoid, /.test(sfx), "the wave's way is chosen off the pins");
   // (MAPSFXSEAT, live at step 3: the wave word crossed the map pin BETWEEN two clean points of its way - the box is checked along it)
   const pin = { x0: 1500, y0: 1370, x1: 1560, y1: 1430 };
@@ -216,7 +217,7 @@ await group("BURN", () => {
   ok(C.burnCrowded([{ x: 1300, y: 1000 }], [{ x: 1000, y: 1000, em: 60 }], 20) && !C.burnCrowded([{ x: 1300, y: 1000 }], [{ x: 1000, y: 1000 }], 20), "a small fire is crowded by the BIGGER phrases");
   ok(/const idx = C\.burnSpots\(all, em\), pts = idx\.map\(\(i\) => all\[i\]\);/.test(sfx) && /spots\.push\(\.\.\.pts\.map\(\(q\) => \(\{ x: q\.x, y: q\.y, em \}\)\)\);/.test(sfx), "the runtime letters only the kept spots and records their size");
   ok(/return \(idx \?\? p\.points\.map\(\(_, i\) => i\)\)\.map\(\(i\) => \{/.test(sfx) && /seed: `\$\{seed\}\|\$\{i\}`/.test(sfx), "a kept spot keeps its own seed (the same phrases as today)");
-  ok(/if \( d\.dx \|\| d\.dy \) ui\.push\(/.test(sfx), "a spot moved off a panel keeps off the next spot");
+  ok(sfx.includes("if ( r[j].ok ) taken.push(r[j].box);"), "a spot moved off a panel keeps off the next spot");
 });
 
 /* ---------------------------------------------------------------- the engine in node */

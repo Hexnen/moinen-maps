@@ -88,11 +88,24 @@ export const THUNDER_LAG = { far: [1200, 2000], mid: [500, 1000], close: [0, 0] 
 /** slots scanned back at most to number the far flashes (6 h of one-second slots); beyond: the slot's own parity */
 export const FAR_SCAN = 21600;
 /**
- * Is this far flash lettered? Every second far flash of the storm (owner's answer 7), counted from the storm's switch-on so every
- * client counts the same. `farBefore(k)` -> how many far flashes came in the slots before k since the switch-on (sfx.mjs counts them
- * with the storm model; a preview flash: always lettered).
+ * Is this far flash lettered? Every second far flash of the storm (owner's answer 7), counted so every client counts the same.
+ * `farBefore(k)` -> how many far flashes came before slot k in its window (MAPRIDE farIndex; sfx.mjs counts them with the storm model;
+ * a preview flash: always lettered). (FAR_SCAN: the old count since the switch-on, kept for older callers.)
  */
 export const farLettered = (ev, farBefore) => !!ev?.preview || (farBefore(ev.k) % 2 === 1);
+/** MAPRIDE: the far flashes are numbered inside fixed windows of FAR_WIN slots (aligned to the shared clock), not from the storm's
+    switch-on: a GM's switch-off (or any lightning change) reached the GM's own seat at once and a player's a moment later, and the count
+    "since the switch-on" restarted at the change's time on the seat that already had it - a far flash just before a switch-off was
+    numbered on two seats differently (live 2026-11-15: a far rumble right after the storm was cleared lettered on the GM's seat only).
+    A window's count reads only the flashes of its own slots, the same on every seat that has the same settings for them. */
+export const FAR_WIN = 30;
+/** how many far flashes came in the slots of k's window before k: `isFar(j)` -> slot j holds a far flash (storm-model flashOf) */
+export function farIndex(k, isFar) {
+  const k0 = Math.floor(k / FAR_WIN) * FAR_WIN;
+  let n = 0;
+  for ( let j = k0; j < k; j++ ) if ( isFar(j) ) n++;
+  return n;
+}
 /**
  * The word of a lightning flash. `ev` (storm-model makeFlash), `place` ({ x, y } scene px: storm-model placeOf), `view` ({ x0, y0, x1,
  * y1 } scene px of this client), `seed`. -> { kind, wo, t (shared ms), rank, screen? ({ fx, fy }: a share of the screen, unlocated at the
