@@ -46,7 +46,7 @@ function cleanOpts(o) {
   fix("elevation", () => true);
   fix("ceil", (v) => v > 0 && v <= 1);   // ENGREG: a caller's share of the size ceiling (0..1]
   /* ENGVIEW (1.9.18): `ceilK` was never read (ENGREG-1): it stays unread so no size changes, and a caller who passes it is told once */
-  if ( c.ceilK !== undefined ) warnOnce("opt:ceilK", "LETR | option ceilK is NOT read (it never reached the size model; sizes are as without it): pass `ceil` (0..1] for a share of the size ceiling (manual 6)");
+  if ( c.ceilK !== undefined && !c._stream ) warnOnce("opt:ceilK", "LETR | option ceilK is NOT read (it never reached the size model; sizes are as without it): pass `ceil` (0..1] for a share of the size ceiling (manual 6)");
   /* ENGVIEW: an explicit view for the size model ({ vw, vh, zoom, alive, dpr }), read instead of this seat's window */
   if ( c.view !== undefined ) c.view = cleanView(c.view);
   if ( c.view === null ) delete c.view;
@@ -1196,7 +1196,7 @@ export function createEngine(base) {
     const fake = { space, opts: { magnitude: o.magnitude, area: o.area, span: o.span, token: o.token ?? (isToken(o.at) ? o.at : null), ...(view ? { view } : {}) }, at: o.at, pixel: false, plan: { sizeK: 1, _holdBox: { w: 1.2 } } };
     fake.tokenSpan = space === "world" ? tokenSpanOf(fake) : 0;
     const c = sizeCtx(fake); c.fit = "world";
-    return sizeFor(c).natural * STREAM_UNIT;
+    return sizeFor(c).natural * 0.62;   // = STREAM_UNIT (the literal stays: callers pin it)
   }
   /* syllable i's share of the unit: loudness 0..1 (0.85 .. 1.1), the first syllable 15 % bigger */
   const sylK = (i, loud) => (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1);
@@ -1332,7 +1332,7 @@ export function createEngine(base) {
         } else if ( o.path ) travel2 = { path: o.path };
         /* MOTION2: an invincible stream's syllables take their motion from the kind (motion.mjs, syllable rows): no forced slam / shake */
         const inv = handOf()?.style === "invincible";
-        const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * sylK(i, loud), magnitude: o.magnitude, fit: o.fit, ceil: o.ceil, ...(view ? { view } : {}), ...(o.scale != null ? { scale: o.scale } : {}), seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
+        const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * sylK(i, loud), magnitude: o.magnitude, fit: o.fit, ceil: o.ceil, ceilK: o.ceilK ?? 0.55, ...(view ? { view } : {}), ...(o.scale != null ? { scale: o.scale } : {}), seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
           in: inv ? o.in : o.in ?? "slam", out: inv ? o.out : o.out ?? "pop", holdKind: inv ? o.holdKind : "shake", kind: inv ? o.kind : undefined, look: inv ? o.look : undefined, hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
           zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation, ...(lane >= 0 ? { keepInView: false } : {}),
           on: o.on, fps: o.fps, glow: o.glow, ...travel2 });

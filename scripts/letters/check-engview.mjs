@@ -329,7 +329,7 @@ export async function engineChecks(dir) {
     const s2 = await seat({}); const w2 = warns();
     const st = s2.L.stream({ kind: "gunfire", lang: "en", space: "world", at: W0, beats: [0, 90], seed: "ckst" });
     await s2.E.tick(300, 33); st.stop({ quick: true }); w2.done();
-    ok(!w2.got.some((x) => /ceilK/.test(x)), "E6 a stream without ceilK says nothing (the engine no longer passes it to its syllables)");
+    ok(!w2.got.some((x) => /ceilK/.test(x)), "E6 a stream without ceilK says nothing (its syllables carry the stream's own unread share silently)");
     s2.E.restoreWarn?.();
   });
 

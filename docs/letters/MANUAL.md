@@ -441,8 +441,9 @@ ranked words `ceilK: 1`) draw exactly what they drew (432 role/size/zoom calls a
 clamp held them.
 **ENGREG-1 (1.9.18): `ceilK` says so.** The behaviour stays (sizes as without it), but a caller who passes `ceilK` to `L.play`,
 `L.sfx`, `L.sizeOf`, `L.measure`, `L.stream` or `L.sustain` now gets ONE console warning per page ("option ceilK is NOT read ...
-pass `ceil`"), and `L.measure` lists it: `m.unread = ["ceilK"]`. The engine's own streams no longer pass a `ceilK` to their syllables
-(that internal 0.55 was never read either; sizes unchanged, fingerprint-proven). [V node]
+pass `ceil`"), and `L.measure` lists it: `m.unread = ["ceilK"]`. A stream still hands its syllables its own unread share
+(`ceilK: o.ceilK ?? 0.55`, never read; kept because the map's dev/sfx-size.test.mjs pins that source text) and those syllables do
+not warn; a caller's own `ceilK` on `L.stream` warns once. [V node]
 
 ## 6a. One table picture from the public API (ENGVIEW 1.9.18)
 Status: pending merge (`tactics-zones-engview`). [V node: `check-engview.mjs`, check.mjs section 15; headless two-seat demos]
@@ -714,7 +715,7 @@ travelling along `dir` or toward `to`, one hand for the whole stream.
   it.
 - (1.9.18 ENGVIEW) `view` and `scale` are honoured as for a word (every seat's syllables the same size with one `view`); a caller that
   plans room asks `L.streamUnit(opts)` -> `{ unit, sizeOf(i, loud), fit, view }` instead of copying 0.62 / 0.85 / 1.15. `ceil` is passed
-  to every syllable; `ceilK` is not read (one warning). Example in section 6a. [V node]
+  to every syllable; `ceilK` is not read (one warning when a caller passes it). Example in section 6a. [V node]
 
 ## 11. Motion (core): the legacy styles `comic` / `expressive`
 Status: stable and frozen for `comic` / `expressive` (their plans and drawings are proved unchanged by MOTION2: 2052 fingerprints).
