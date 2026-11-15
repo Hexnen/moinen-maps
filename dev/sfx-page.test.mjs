@@ -216,6 +216,21 @@ group("INVIEW", () => {
   const b = P.pickSpot(roles(pg, "fall")[1], big, used, rec.t0);
   ok(a.x === f.x && (b.x !== a.x || b.y !== a.y), "own spot first, never one spot twice");
 });
+// MAPEDGE (review 2026-11-15 item 5): a gun's walk has no page, so its record does NOT own its damage areas - the pocks letter the
+// impact at the target (sfx.mjs onEntry). Every built-in preset: the record alone says "may page" exactly when its page has a MAIN.
+group("MAPEDGE-GUN", () => {
+  for ( const d of BUILTIN ) {
+    let F;
+    try { F = page(d.id); } catch { continue; }
+    const has = F.pg.main !== null;
+    ok(P.mayPage(F.rec) === has, `${d.id}: mayPage ${P.mayPage(F.rec)} vs page main ${F.pg.main}`);
+  }
+  for ( const id of ["uzi", "heliHmg"] ) {
+    const { rec, pg } = page(id);
+    ok(rec.walk?.hits?.length && rec.d.length && !P.mayPage(rec) && pg.main === null && pg.owned.d.size === 0, `${id}: a gun's pocks are not a page's`);
+  }
+  ok(P.mayPage({ id: "x", f: [], d: [{ id: "d0" }] }) && !P.mayPage(null), "an unknown firing without a walk keeps the old rule");
+});
 if ( process.env.DBG ) { const { pg } = page(process.env.DBG); for ( const w of pg.words ) console.log(w.role, w.key, w.kind, JSON.stringify(w.wo), Math.round(w.t - pg.words.find((q) => q.role === "main").t), w.rank, P.pageMag(w), word(w).text, word(w, "pl").text); }
 if ( failed.length ) { console.log(failed.join("\n")); console.log(`sfx-page: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }
 console.log(`sfx-page: ${n} checks passed`);

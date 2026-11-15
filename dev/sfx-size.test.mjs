@@ -201,7 +201,7 @@ group("WIRING", () => {
   // stepped the same way and drawn at that size, fit "world"; dev/sfx-seat.test.mjs proves it is L.sizeOf's on a reference seat)
   ok(/if \( step !== 0 && w\.text \) \{ const b = tableSized\(w, o, step, d\); if \( b \) return b; \}/.test(sfx) && /const ts = SEAT\.tableSize\(d\.sizeFor, d\.L\.sizeModel, o, planInfo\(w\.text, o, d\), \{ z, alive: w\.alive \?\? 0, grid: d\.grid, step, fitK: w\.fitK \}\);/.test(sfx)
     && /const out = \{ \.\.\.o, fit: "world", size: ts\.size, keepInView: false \};/.test(sfx) && /const st = stepPx\(px, s, /.test(SEAT_SRC), "a world word at another step is stepped from the size the engine draws it at (its clamp would hold it)");
-  ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
+  ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 1 && /step = streamStep\(grpOf\(w\), \{ space: "world", area: w\.area, magnitude: w\.magnitude \}\)/.test(sfx) && /\.\.\.step, \.\.\.\(k !== 1 \? \{ scale: k \} : \{\}\) \}\)/.test(sfx), "both gun streams step (MAPEDGE: the located one through its seat rule)");
   ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
   ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");
   // (GMALLMAPS: a player reads the sizes in the table window, every row as text: was injected into Foundry's settings list; the window's
