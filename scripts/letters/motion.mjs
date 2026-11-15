@@ -73,8 +73,8 @@ export const KIND_MOTION = {
   chime: K("ring", { in: "pop", flash: false }),
   /* breaks */
   crack: K("break"), shatter: K("break", { ms: [220, 420] }),
-  crash: K("break", { in: "drop", hold: "rattle", out: "fall", ms: [600, 1100], rate: 3, why: "the body is debris falling during the hold" }),
-  crumble: K("break", { in: "drop", hold: "rattle", out: "crumble", ms: [600, 1100], rate: 3, roles: "word" }),
+  crash: K("break", { in: "drop", hold: "rattle", out: "fall", ms: [600, 1100], rate: 3, lifeKind: "settle", why: "the body is debris falling during the hold" }),
+  crumble: K("break", { in: "drop", hold: "rattle", out: "crumble", ms: [600, 1100], rate: 3, roles: "word", lifeKind: "settle" }),
   /* booms */
   boom: K("boom"), grenade: K("boom"), concussion: K("boom"), shotgun: K("boom", { ms: [520, 900] }), blaster: K("boom", { ms: [420, 800], out: "trailOff" }),
   thunder: K("boom", { hold: "roll", ms: [1300, 2200], why: "rolling: weaker re-shakes at irregular gaps" }), sonicboom: K("boom", { out: "trailOff" }),
@@ -165,6 +165,9 @@ export function motionOf(o = {}) {
   m.dir = o.dir < 0 ? -1 : 1;
   m.phase = ((Number(o.seed) || 0) % 6283) / 1000;
   m.run = roleLetters(o.chars ?? [], o.accent, m.roles);
+  m.life = lifeOf(m);   // HOLDS: what lives on after the sound (null: the hold moves by itself, reduced, a syllable)
+  if ( m.life ) m.bodyMs = m.holdMs;   // the sound's own body at tempo 1 (trackTimeline divides by the tempo)
+  delete m.lifeKind;
   delete m.ms;
   return m;
 }
@@ -343,6 +346,100 @@ export function holdPose(m, t, H) {
     case "sputter": { const k = kickAt(t, 230, [0], true, ph); o.a = k.k % 3 === 2 && k.dt < 70 ? 0.25 : 1; o.y = 0.04 * u; break; }
     default: break;
   }
+  if ( m.life ) lifePose(m, t, H, o);
+  return o;
+}
+
+/* ---------- HOLDS (1.9.10): the word lives while it is read ----------
+   The hold envelopes of hits (recoil, rattle, ring, wobble, still) are the SOUND's body: they decay within its natural length (the
+   table's ms, plan.motion.bodyMs). Callers keep a word up much longer than its sound so it can be read (token reactions 1-1.5 s, map
+   words, the splash): from half of the body on the lettering begins to live on by itself (fully once the body is over), in the manner of the sound, until its exit.
+   Small (the word stays inside its rest box + LIFE_REACH, so a caller's placement holds), slow (nothing faster than an echo twitch),
+   deterministic (time and the plan's phase only: every seat the same pose at the same age); never under reduced motion, never for a
+   stream syllable. Stepped mode reads it like every hold channel: scale, squash and turn on the shared grid, translation smooth. */
+export const LIFE_HOLDS = ["recoil", "rattle", "ring", "wobble", "still", "roll", "arc", "sputter"];
+/* what lives on after the sound, per family (a kind row may name its own: crash / crumble settle like a heavy hit) */
+export const LIFE = {
+  dry: "echo",       // a sharp hit: the word keeps pushing at the reader, and the hit answers in small sharp echoes, further apart
+  heavy: "settle",   // weight: dull aftershocks that squash the word onto its base and come back to rest, a slow low list
+  ring: "hum",       // metal: the word keeps humming, a slow counter-breathing of width and height
+  break: "sag",      // broken: the cracked word leans as it gives, a piece shifts now and then
+  electric: "hum",
+  water: "slosh",    // water: the slosh goes on, smaller and slower
+  voice: "breath",   // a voice: the breath goes on
+  boom: "rumble",     // a boom (thunder's roll): a low tremor stays under the word
+  flyby: "breath", wind: "breath", power: "breath", fire: "breath", hiss: "breath", engine: "breath", siren: "breath",
+  series: "echo", animal: "breath", device: "breath"
+};
+/* the farthest the life takes the word from its rest pose: displacement (cap heights) and scale */
+export const LIFE_REACH = { xy: 0.05, s: 1.045 };
+/* how much of the life already shows inside the sound's own body (the rest comes once the body is over): a heavy body is debris still
+   settling, a ring's own long decay must stay the loudest thing in it */
+export const LIFE_EARLY = { echo: 0.25, settle: 0.45, hum: 0.2, sag: 0.25, slosh: 0.3, breath: 0.3, rumble: 0.3 };
+/* how long the hits' own envelopes last (2 time constants): a short hold a caller pins on a long sound (a rattle on a rumble) is over long
+   before the sound's body, and the life must not wait for the body */
+const TRANSIENT_MS = { recoil: 220, rattle: 340, wobble: 520, roll: 500, sputter: 0 };
+/* the onsets of a life's beats: gaps of P x 0.8..1.2 from the plan's phase (a sequence, so a gap never jumps mid-beat); dt = ms since the
+   last onset, k = its index. Long holds (sustains) wrap after 64 beats. */
+function lifeBeat(lt, P, ph) {
+  const gap = (k) => P * (0.8 + 0.4 * (((Math.sin(k * 12.9898 + ph * 78.233) * 43758.5453) % 1 + 1) % 1));
+  let a = 0, k = 0, cyc = 0;
+  for ( let j = 0; j < 64; j++ ) cyc += gap(j);
+  const t = lt % cyc, base = Math.floor(lt / cyc) * 64;
+  while ( k < 63 && a + gap(k) <= t ) { a += gap(k); k++; }
+  return { dt: t - a, k: base + k };
+}
+const smooth01 = (u) => { const v = clamp(u, 0, 1); return v * v * (3 - 2 * v); };
+export function lifeOf(m) {
+  if ( m.reduced || m.syllable || !LIFE_HOLDS.includes(m.hold) ) return null;
+  return m.lifeKind ?? LIFE[m.family] ?? "breath";
+}
+/* adds the life to a hold pose o (t ms since the hold began, H = the hold's length) */
+export function lifePose(m, t, H, o = { ...REST }) {
+  const body = Number.isFinite(m.bodyMs) ? m.bodyMs : 400, still = m.hold === "still", half = 0.5 * body;
+  const on = still ? 0 : Math.min(half, TRANSIENT_MS[m.hold] ?? half), full = on < half ? Math.min(body, on + 400) : body;
+  /* inside the sound's body the life only begins to show (LIFE_EARLY: a part, so the hit's own envelope still falls); once the body is over it
+     takes the hold (a still hold has no body of its own: the life is there at once) */
+  const w = still ? smooth01(t / 300) : (LIFE_EARLY[m.life] ?? 0.25) * smooth01((t - on) / Math.max(1, full - on)) + (1 - (LIFE_EARLY[m.life] ?? 0.25)) * smooth01((t - full) / 300);
+  if ( w <= 0 ) return o;
+  const d = m.dir, ph = m.phase ?? 0, lt = t - on, rest = Math.max(400, (H || 0) - on), u = clamp(lt / rest, 0, 1);
+  /* an onset that rises over `at` ms (never a jump inside one frame) and dies with time constant tau */
+  const hit = (dt, at, tau) => smooth01(dt / at) * decay(Math.max(0, dt - at), tau);
+  switch ( m.life ) {
+    case "echo": {
+      /* sharp echoes of the hit (a quick swell, a quick fall), fainter as the hold goes on, over a slow push and give towards the reader */
+      const k = lifeBeat(lt, 660, ph), e = hit(k.dt, 45, 60) * (1 - 0.4 * u);
+      o.s *= 1 + w * (0.015 * (0.5 - 0.5 * Math.cos(TAU * lt / 1600)) + 0.022 * e);
+      o.r += w * 0.007 * d * Math.sin(TAU * lt / 2300 + ph);
+      break;
+    }
+    case "settle": {
+      /* dull aftershocks: each squashes the word onto its base and lets it back; a slow list between them */
+      const k = lifeBeat(lt, 620, ph), e = hit(k.dt, 110, 100) * (1 - 0.4 * u);
+      o.y += w * 0.042 * e; o.sy *= 1 - w * 0.04 * e; o.sx *= 1 + w * 0.028 * e;
+      o.r += w * 0.007 * d * Math.sin(TAU * lt / 1900 + ph);
+      o.s *= 1 + w * 0.008 * Math.sin(TAU * lt / 1300 + 2 * ph);
+      break;
+    }
+    case "hum": { const b = Math.sin(TAU * lt / 700 + ph); o.sx *= 1 + w * 0.018 * b; o.sy *= 1 - w * 0.018 * b; o.y += w * 0.004 * Math.sin(TAU * lt / 1400); break; }
+    case "sag": {
+      /* the broken word leans as it gives, creaks back and forth round the lean, and a piece shifts now and then (a small jolt) */
+      const k = lifeBeat(lt, 720, ph), e = hit(k.dt, 40, 50) * (k.k === 0 ? 0 : 1), lean = EASE.io(clamp(lt / 1400, 0, 1));
+      o.r += w * d * (0.014 * lean + 0.006 * e + 0.007 * Math.sin(TAU * lt / 1300 + ph));   // a piece gives further, then settles back
+      o.y += w * (0.02 * lean + 0.01 * e);
+      o.x += w * 0.012 * e * (k.k % 2 ? -1 : 1);
+      break;
+    }
+    case "rumble": {
+      /* a low tremor under the word, swelling and easing like a far rumble (slow beats of a ~4.5 Hz shake) */
+      const g = 0.6 + 0.4 * Math.sin(TAU * lt / 900 + ph);
+      o.x += w * 0.016 * g * Math.sin(TAU * 4.5 * lt / 1000 + ph); o.y += w * 0.008 * g * Math.sin(TAU * 3.7 * lt / 1000 + 2 * ph);
+      o.s *= 1 + w * 0.01 * Math.sin(TAU * lt / 1100 + ph);
+      break;
+    }
+    case "slosh": { const b = Math.sin(TAU * lt / 640 + ph); o.sy *= 1 + w * 0.03 * b; o.sx *= 1 - w * 0.022 * b; o.y -= w * 0.014 * b; break; }
+    default: { const b = Math.sin(TAU * lt / 1200 + ph); o.s *= 1 + w * 0.025 * b; o.y -= w * 0.016 * b; break; }
+  }
   return o;
 }
 /* how strong the hold's own motion still is at t (1 = full, 0 = settled): stepped mode stops cycling letter drawings below 0.25 */
@@ -390,6 +487,8 @@ export function trackReach(tr, W = 3, H = 1) {
     s = Math.max(s, k);
     l = Math.max(l, -q.x); r = Math.max(r, q.x); u = Math.max(u, -q.y); d = Math.max(d, q.y);
   }
+  /* HOLDS: the life of a long hold stays inside LIFE_REACH of the rest pose */
+  if ( tr.life ) { s = Math.max(s, LIFE_REACH.s); l = Math.max(l, LIFE_REACH.xy); r = Math.max(r, LIFE_REACH.xy); u = Math.max(u, LIFE_REACH.xy); d = Math.max(d, LIFE_REACH.xy); }
   return { l: W / 2 * s + Math.min(1.6, l), r: W / 2 * s + Math.min(1.6, r), u: H / 2 * s + Math.min(1.6, u), d: H / 2 * s + Math.min(1.6, d) };
 }
 /* the global drawing grid (stepped mode): every word's drawn channels change on the same instants of the page clock */

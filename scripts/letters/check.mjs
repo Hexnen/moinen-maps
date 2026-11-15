@@ -213,6 +213,9 @@ await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
 /* 8g. MOTION2: the invincible style's motion table, tracks, envelopes, rhythm, roles, reduced fade, shared pictures (check-motion2.mjs) */
 await (await import("./check-motion2.mjs")).run(ok, { bank, fontsApi });
 
+/* 8g2. HOLDS: a held invincible word lives as long as it stands, in the manner of its sound, inside its placement (check-holds.mjs) */
+await (await import("./check-holds.mjs")).run(ok, { fontsApi });
+
 /* 8f. IMPACT: impact frames (impact/check-impact.mjs) */
 await (await import("./impact/check-impact.mjs")).run(ok);
 
@@ -234,6 +237,14 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-motion2.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
   for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
   ok(r.status === 0, `motion2 engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
+/* 11b. HOLDS on the fake browser: long holds keep moving (smooth and stepped), stepped on the shared grid, reduced still, two seats
+   alike, frame cost with 40 words standing (own process) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-holds.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `holds engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 /* 12. FONTSEL on the fake browser: the table's face reaches the next word without a reload, GM and player alike (own process) */

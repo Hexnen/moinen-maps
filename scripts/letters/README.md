@@ -189,6 +189,16 @@ shared clock (`"stepped"`). The default is the GM's table setting `movement` (1.
 `look.motion` beats the setting, reduced motion beats both. Pictures carry a `key`; same key = one painting. Rules and numbers:
 manual 11a; checks: `check-motion2.mjs`.
 
+**1.9.10 HOLDS: a held word lives as long as it stands.** A hit's hold envelope is the sound's body and decays within the sound's
+own length (`plan.motion.bodyMs`); callers keep words up far longer to be read (token reactions 1-1.5 s), and 1.9.0-1.9.9 then stood
+dead still. Now the decaying holds (`recoil rattle ring wobble still roll arc sputter`) carry a LIFE from the sound family
+(`motion.mjs` `LIFE`, `lifePose`): `echo` (dry hit: small sharp echoes over a slow push), `settle` (heavy, crash, crumble: dull
+aftershocks that squash the word onto its base), `hum` (metal, electric: width against height), `sag` (break: it leans, creaks, a
+piece shifts), `slosh` (water), `rumble` (boom: a low tremor), `breath` (the rest). It starts partly from half the body (or when a
+short hold a caller pins on a long sound is spent) and fully when the body ends; it stays inside `LIFE_REACH` (0.05 cap heights,
+4.5 % scale; `trackReach` covers it), is a function of the plan and age only (every seat alike), absent under reduced motion and for
+stream syllables, read on the shared grid in stepped mode. Checks: `check-holds.mjs`; manual 11a.
+
 ### What the sources say (digest, with sources)
 - **Stepped, not smooth.** Into the Spider-Verse is mostly animated on twos (each drawing held two frames of 24, about 12 a second),
   with holds stepping down to threes and longer where a pose should land; the team avoided motion that was "too splined"; the

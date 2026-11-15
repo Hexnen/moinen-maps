@@ -49,6 +49,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | FONTSEL (the invincible style in two faces: League Gothic, the default, and Anton; the GM's table setting `face`; each face tuned for its own shapes; optical sizes for small pictures) | 1.9.7 | API-CONTRACT 1.9.7 (v14) | `tactics-zones-fontsel` | pending merge (sections 13, 14, 15) |
 | KERNEX (punctuation never reads as a diacritic of its neighbour: a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; both faces) | 1.9.8 | API-CONTRACT 1.9.8 (v15) | `tactics-zones-kernex` | pending merge (sections 13, 18) |
 | KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
+| HOLDS (a held invincible word lives as long as it stands, in the manner of its sound: echo, settle, hum, sag, slosh, rumble, breath; inside its placement; every seat alike; still under reduced motion) | 1.9.10 | API-CONTRACT 1.9.10 (v17) | `tactics-zones-holds` | pending merge (section 11a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -583,6 +584,29 @@ Status: pending merge (`tactics-zones-motion2`). [V] = node checks (`check-motio
   `in` / `holdKind` / `out`. `L.play(w.text, w.play)` moves like `L.sfx`.
 - Not done: scatter emitters (rain, hail), orbit travel for the tornado (it swirls in place), doppler on a pass, the throttled-CPU
   entrance timing run (SPEC-MOTION 6.10).
+- **A held word lives as long as it stands** (1.9.10 HOLDS, `tactics-zones-holds`; [V] `check-holds.mjs` node + fake browser; seen
+  on offline films and a live two-seat take, see the contract). Cause of the dead holds (ADVX 11): a hit's hold envelope (recoil,
+  rattle, ring, wobble) is the SOUND's body and decays within the sound's own length (`plan.motion.bodyMs`, 260-1100 ms); the
+  engine's old breathing layer skips track words; and callers keep words up far longer to be read (token reactions pass `hold`
+  1000-1500 ms and pin rattle / wobble), so the rest of the hold stood still (THROOMF! ~1.3 s unchanged). Now the decaying holds
+  (`recoil rattle ring wobble still roll arc sputter`) carry a life chosen by the sound family (`LIFE` in `motion.mjs`):
+  | life | families | what it does |
+  |---|---|---|
+  | `echo` | dry hits, series | small sharp echoes of the hit (30 ms rise) every ~0.66 s over a slow push and give |
+  | `settle` | heavy hits, crash, crumble (token knock-down) | dull aftershocks that squash the word onto its base (~0.6 s), a slow list |
+  | `hum` | ringing metal, electric | width and height breathe against each other (0.7 s) |
+  | `sag` | breaks | the cracked word leans as it gives, creaks round the lean, a piece shifts now and then |
+  | `slosh` | water | height and width slosh (0.64 s) |
+  | `rumble` | booms (thunder's roll) | a low ~4.5 Hz tremor, swelling and easing |
+  | `breath` | the rest | a slow swell and bob (1.2 s) |
+  Timing: the life starts at half the body (or when a short hold pinned on a long sound is spent: recoil 220, rattle 340, wobble 520
+  ms), shows only partly inside the body (`LIFE_EARLY`, so a hit's envelope still falls) and fully once the body is over; a `still`
+  hold gets it at once. Limits [V]: inside `LIFE_REACH` (0.05 cap heights, 4.5 % scale, 0.03 rad) of the rest pose, and
+  `trackReach` (keepInView) covers it, so a caller's placement holds; no corner moves over 0.02 cap heights per 60 fps frame; no
+  1.5-3 s hold of any kind x pinned hold stands still over 480 ms (1 px at a 150 px cap). Same on every seat: a function of the plan
+  and the word's age only (two fake seats at 60 / 144 fps, other clock origins: same poses). Reduced motion: no life (still);
+  stream syllables: none; legacy styles: untouched (no track). Stepped: the life's scale / squash / turn are read on the shared grid
+  of twos like every hold channel (checked), translation smooth. Cost: 40 standing words 0.01 ms of pose per frame, no painting.
 
 ## 12. Motion 1.5.0: travel, choreography, rates, escalation, sustain
 Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then changing (SPEC-MOTION).
@@ -1034,6 +1058,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   impact's second, no drawing skipped; `check-seats.mjs`; impact-render `--keep`), the stage table.
 - 2026-11-15 (SFXSIZE, moinen-maps caller `tactics-zones-sfxsize`, no engine change): rulings "everything is the GM's for the table" and
   the map lettering's size sliders (14); "A caller's size step" (6).
+- 2026-11-15 (HOLDS, 1.9.10, `tactics-zones-holds`): held words live as long as they stand (11a: cause, the lives per family,
+  timing, limits, seats, reduced, stepped, cost), the stage table; `check-holds.mjs`.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
