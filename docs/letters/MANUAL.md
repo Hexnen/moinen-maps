@@ -51,6 +51,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
 | HOLDS (a held invincible word lives as long as it stands, in the manner of its sound: echo, settle, hum, sag, slosh, rumble, breath; inside its placement; every seat alike; still under reduced motion) | 1.9.10 | API-CONTRACT 1.9.10 (v17) | `tactics-zones-holds` | pending merge (section 11a) |
 | ENGREG (plumbing: one copy rule on every seat with `L.build` / `L.seats()`; the table's own clock `L.clock` under the stepped grid and `L.net`; `ceil` reaches the size model; `L.measure`; a settle memo and faster mark rows) | 1.9.11 | API-CONTRACT 1.9.11 (v18) | `tactics-zones-engreg` | pending merge (sections 2, 5, 6, 8, 16, 17, 18, 20) |
+| ENGWORDS (both deny lists over both languages: `crossRefusal`, `CROSS`; the words that read as a word of the other language replaced, pl KA-DUMP -> KA-DUUM ...) | 1.9.13 | API-CONTRACT 1.9.13 | `tactics-zones-engwords` | pending merge (sections 9, 14, 20) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -510,6 +511,22 @@ L.stream({ kind: "gunfire", lang: "auto", at: () => muzzle(), to: target, every:
 - Adding (shared by every module using the engine): `L.vocab.add(lang, kind, words, { replace })` refuses dictionary words, words
   the fonts cannot letter and words over 22 letters (returned in `refused`, one warning) [V]; `L.vocab.define(kind, def)` adds or
   changes a kind [V]; namespace new ids (e.g. `pvfx-webshot`); `L.vocab.remove`, `L.vocab.reset`.
+- Both languages read every word (1.9.13 ENGWORDS): a table reads Polish and English, so a built-in word must not be a word or a
+  near-word of the OTHER language either. `crossRefusal(word, lang, { kind })` (exported by `words.mjs`, next to `refusal` and
+  `sayable`) reads a word with the other language's deny list: the literal spelling and the Polish SZ read as the English SH (and
+  back). It passes the word's own ICONIC / ALLOW syllables (the owner's picks: KA-KROOSH, KLANG, BOOM, KROOM), the reader's ICONIC (and
+  VOICE in voice kinds) and `CROSS`, the readings a reviewer read and kept, each with its reason (the owner rules on that list).
+  check-words section 22 reads every word the vocabulary makes (banks, variant rows, every tier, stretch, prefix, material, fire row,
+  flows, series, stream syllables, chains) [V node]. Callers that letter their own sound words should check them with both `refusal`
+  and `crossRefusal`. `L.vocab.add` still runs only the own-language refusal (question ENGWORDS-3).
+- Words replaced by ENGWORDS (the only pictures that change; every other kind, tier, seed and material letters the same text, proved
+  by a full vocabulary dump and plan + draw fingerprints): pl `thud` (the hero going down) m TUMP, GDUMP -> DUUM, TUUMF and l GDUMMP,
+  KA-DUMP -> GDRUUMF, KA-DUUM (the owner's landing word DUUM, like the English THOOM / KA-THOOM); pl `punch` m TWAK -> TWUP, l TWAKK ->
+  TWAPP; pl `slash` l SWISZK -> SZNIKKT; pl `bite` s SZNAP -> CZNAP; pl `bounce` m BOINNG -> BOJOINNG; pl `splash` l SPLASZ -> GLOOSZ;
+  pl `chime` m TINNG -> DZWINNG; pl `sigh` s HAH… -> FHUU…, m HUUH… -> HUUHF…; pl `cheer` s UUH -> WUUA; pl `meow` s MIII -> MNIII;
+  en `rifle` s PTAK -> KPAK; en `impact` stone s PTAK -> KPAK, m PTAKT -> KPAKT, flesh m SHTUK -> SHWUK; en `gunfire` BUDDA -> DAKKA (s, m,
+  stream); en `rumble` m GRROMM -> HRROMM, l GRRRROMM -> HRRRROMM; en `storm` l KRA-KA-GRROOMM -> KRA-KA-HRROOMM (and the flows and
+  mixes built from them: tornado). The owner may veto any of them (question ENGWORDS-1).
 
 ### 9a. Material, fire ladder, tails and chains (1.7.1 KINDS1)
 Status: new, on branch `tactics-zones-kinds1` [V node: check-words section 20].
@@ -857,6 +874,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Impact frames are the exception to the restraint: they may go all out and must be spectacular; a system other effects use (`L.impact`) | one `L.impact.play` per event, at its instant | keep it one call for every caller; section 21a |
 | 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
 | 2026-11-13 | BOOM / BUM only for a blast WITH fire; a blast without fire is KROOM / KRUUM; a hero landing THOOM / DUUM; a cave-in BTHOOM / BDUUM | use `concussion` for a fireless blast, `boom` only with fire | keep `FIRE_BLASTS`; check-words section 21 |
+| 2026-11-15 | (ENGWORDS, derived from the rulings above, not a new ruling) "No dictionary words, no near-words" holds in BOTH languages: a Polish word must not be an English word (KA-DUMP), an English word not a Polish one (PTAK); the hero going down letters the landing word (THOOM / DUUM) | check your own sound words with `refusal` AND `crossRefusal` | `crossRefusal` over every produced word (check-words section 22); a kept cross reading goes on `CROSS` with its reason for the owner |
 | 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
 | 2026-11-15 | EVERY option is chosen by the GM for the table («wszystko mg wybiera dla stołu. wszystko»): world scope, players read-only, live | a new option is born world-scoped; no client setting of your own (OS reduced motion / photosensitivity still honoured per seat) | the same for engine settings |
 | 2026-11-15 | The map's destruction lettering gets a size slider: 0 = none, 1, 2 = today's size (default), 3 («aktualna wielkość to 2. dodaj też 1 i 3», «0 to brak»); fire and weather lettering the same, as separate sliders («też z pogody i ognia. mogą być osobne») | step the size through the engine's own options (section 6, "A caller's size step"); at the default pass the options untouched | nothing (callers step the drawn size: `L.sizeOf` + `fit: "world"`, section 6); done in moinen-maps SFXSIZE (`scripts/sfx/sfx-size.mjs`, settings `sfxSizeDestruction` / `sfxSizeFire` / `sfxSizeWeather`) |
@@ -1068,6 +1086,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
 | `gridClock(fn \| null)`; setting `movement` (world); tools `applyPrefs` | 1.9.2 MODE | pending merge; sections 11a and 15 [V node] |
 | `build` (also `MoinenLetters.build`), `seats()`, `clock` (`now toPage toServer offset error ready state`), `measure(text, opts)`; play option `ceil` | 1.9.11 ENGREG | pending merge; sections 2, 5, 6, 8 [V node] |
+| `crossRefusal`, `CROSS` (exports of `words.mjs`, not on `L`) | 1.9.13 ENGWORDS | pending merge; section 9 [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -1120,6 +1139,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (ENGREG, 1.9.11, `tactics-zones-engreg`): which copy runs and `L.build` / `L.seats()` (2), measuring before placing
   with `L.measure` and the cost of planning many words at once (5), `ceil` (6), the table's clock `L.clock` (8), API index (20),
   stage table; `check-engreg.mjs` (16).
+- 2026-11-15 (ENGWORDS, 1.9.13, `tactics-zones-engwords`): both deny lists over both languages and the replaced words (9), the
+  derived both-languages row (14), API index (20), stage table.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

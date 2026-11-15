@@ -355,6 +355,12 @@ an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM
   front: PLOSK ~ PLUSK, TRZAK ~ TRZASK, KLYK ~ KLIK, SZWUM ~ SZUM, BWEEP ~ BEEP, THUM ~ THUMP, DLIP ~ DRIP), or a denied 3-letter
   word with K or T stuck on. A changed or added FIRST letter is not near (WRAM is not TRAM, CZUM is not SZUM). The final text
   (prefix + stretched word) goes through the same refusal, so a prefix cannot make a word (KA-POW = KAPOW is dropped).
+- **Both languages read every word** (ENGWORDS 1.9.13, `crossRefusal(word, lang, { kind })`): a table reads both languages, so a
+  Polish word must not be an English word or near-word (KA-DUMP, BOINNG, TINNG, HUUH, SPLASZ = SPLASH) and an English word not a Polish
+  one (PTAK = a bird, GRROMM = GROM, a thunderclap, BUDDA). The other language's refusal reads the literal spelling and the Polish SZ as
+  the English SH (and back). Passes: the word's own ICONIC / ALLOW syllables (the owner's picks), the reader's ICONIC (and VOICE in voice
+  kinds), and `CROSS`: readings a reviewer read and kept, each with its reason (KROOM is the owner's pick; TLING, SZING, PSZT read as
+  written). check-words section 22 reads every word the vocabulary makes in both languages and fails on an unused `CROSS` entry.
 - **The exception lists**, each entry with its reason, for the owner to rule on: `ICONIC` (at most 16; pl BUM, BAM, PAF, SZSZ, HA,
   BANG; en POW, THUD, BAM, BOOM, BANG, ZAP, WHAM, SHH, PLOP, PLUNK, SPLOOSH, BLAM, BEEP, VROOM, HA, GRR) pass everywhere, also with a
   cut-off added at their end (SZSZT), but a letter changed or put inside one is near (BWEEP, BRANG); `VOICE` (pl HE, HI, CHE, OCH,
@@ -367,7 +373,8 @@ an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM
 - **Each kind its own words**: a word (repeated letters collapsed) used by two kinds must be on `SHARED` with both kinds and a reason
   (SKRAKT is a crack and an impact, a storm's word is its thunder, a mech walks with DUM-DUM stomps); any other sharing fails the checks,
   so a punch word on a plane cannot come back.
-- **The water family** is fixed by the owner: pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ SPLASZ, bubbles
+- **The water family** (the owner: pl PLUP / PLUMP / SPLOOSZ / GLUB, en PLOP / PLOOP / PLUNK / SPLOOSH / GLUB; the rest the review's):
+  pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ GLOOSZ (SPLASZ is SPLASH in Polish letters: out, ENGWORDS), bubbles
   GLUB BLUB BULP; en PLOP PLOOP PLUNK SPLOOSH, bubbles GLUB BLUB. The laser pistol is ZAT, TZAT, ZARK, TZAK, FZAT, SKZARK, KTZAK,
   ZZARKT, ZAT-ZAT-ZAT (never PIU PIU). `gunshot` is merged into `pistol` (an alias).
 - **Playing with letters** where it fits the sound: muffled B-/G- onsets (BTHOOM, GDOOMF, BWUMF), hard K-/SK- (KTHOOM, SKROOMM),
