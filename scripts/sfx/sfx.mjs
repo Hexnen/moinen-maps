@@ -467,7 +467,8 @@ function pageWord(p, w, t, waited = 0) {
     // (THUNDERFIT: the way is chosen by a penalty only - live it ran past the left edge and under the controls column: it is held whole
     // inside the view and off the panels, its reach counted)
     const zm = canvas.stage?.scale?.x || 1;
-    spec.path = FIT.rideFit(wr.ride, v, uiBoxes(), spec.bw ?? G, spec.bh ?? G * 0.4, FIT.REACH.other, FIT.EDGE / zm); spec.x = spec.path[0].x; spec.y = spec.path[0].y;
+    spec.path = FIT.rideFit(wr.ride, v, [...uiBoxes(), ...pinBoxes(v), ...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)], spec.bw ?? G, spec.bh ?? G * 0.4, FIT.REACH.other, FIT.EDGE / zm);
+    spec.x = spec.path[0].x; spec.y = spec.path[0].y;
     // (a pressure front: the word travels upright - leaning along a downward way it read as a fallen column - and is gone soon after
     // the front breaks up, live it stood at the reach for two seconds and took the debris words' places)
     spec.orient = "none"; spec.stopAt = t + w.wave.rim + 180;
@@ -690,7 +691,8 @@ function reconcileBurn() {
 function burnOffsets(p, live, idx = null) {
   try {
     // (off the panels, and off the event words still up: a debris word that landed where the fire then catches)
-    const v = view(), ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
+    // (THUNDERFIT: and off the map's pins - live, a burning fire's phrases stood on the scene's skull pin)
+    const v = view(), ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
     const keep = new Set(idx ?? p.points.map((_, i) => i));
     return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
       // (a spot off this screen stays where it is: its words are not pulled into view; a spot not lettered stays too)

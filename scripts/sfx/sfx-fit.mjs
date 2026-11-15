@@ -138,7 +138,8 @@ export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (
 /**
  * A riding word's way (points { x, y, ms } in scene px) kept whole inside the view `v` and off the panels `ui` (pure): each point after
  * the first is held where the word's box (`bw` x `bh`) times its reach `rk` stays `m` inside the view, and a point whose box would stand
- * on a panel is drawn back along the way toward the start until it does not (the start point too is held inside the view). Live
+ * on an obstacle of `ui` (the panels; the caller adds the pins, the main word, the words up) is drawn back along the way toward the
+ * start until it does not, at most to a third of the way (the start point too is held inside the view). Live
  * (THUNDERFIT): a blast's wave word rode out past the left edge and under the controls column. A way that is clean already is returned
  * as it is (the same points: today's picture).
  */
@@ -152,9 +153,8 @@ export function rideFit(path, v, ui = [], bw = 0, bh = 0, rk = REACH.other, m = 
   const out = [p0];
   for ( let i = 1; i < path.length; i++ ) {
     const q = path[i]; let c = inV(q);
-    if ( hit(c) ) {
-      for ( let f = 0.9; f >= -1e-9; f -= 0.1 ) { const t = { x: p0.x + (c.x - p0.x) * f, y: p0.y + (c.y - p0.y) * f }; if ( !hit(t) || f < 0.05 ) { c = t; break; } }
-    }
+    // (in the way: drawn back toward the start to the first clean point - not nearer than a third of the way; none clean: where it was)
+    if ( hit(c) ) for ( let f = 0.9; f >= 0.3; f -= 0.1 ) { const t = { x: p0.x + (c.x - p0.x) * f, y: p0.y + (c.y - p0.y) * f }; if ( !hit(t) ) { c = t; break; } }
     if ( c.x !== q.x || c.y !== q.y ) changed = true;
     out.push({ ...q, x: c.x, y: c.y });
   }
