@@ -713,7 +713,7 @@ Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then ch
   Overlapping phrases, each a different treatment of the sound; `level` 0..1 (or a function of ms) live with `s.level(v)`.
   `mode: "ambient"`: one small hollow word now and then while its spot is in view, at most `L.ambientMax` (`{ world: 3, screen: 2 }`)
   up at once [V].
-- **The run's layout (1.9.15 SUSTAINGAP, invincible style; the legacy styles keep the 1.9.14 sustain)** [V node, `check-sustain.mjs`]:
+- **The run's layout (1.9.15 SUSTAINGAP, invincible style; the legacy styles keep the 1.9.14 sustain)** [V node, `check-sustain.mjs`; live on lane 5: a painted fire on The Warehouse, GM seat, 60 fps]:
   the cause of the piles (THUNDERFIT-E1): 1.9.14 seated the two seats 1.15 em apart (+0.1 / -1.05 em, `em` = the size before the
   cap factor) while a phrase's drawn ink is about 2.2 caps tall (hold box, entrance growth, keyline, rim, duplicate block, a few
   degrees of turn on a wide word); shed fragments of a one-syllable word were whole-word copies piling at the path's end, echo
