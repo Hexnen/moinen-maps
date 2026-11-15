@@ -22,6 +22,8 @@
       - smaller than READ_PX on this seat's screen (a far zoom): drawn at READ_PX cap height at its place ("read");
       - its reach (the whole entrance) bigger than this seat's view: made smaller to fit the view, at its place ("fit");
       - cut by this seat's view edge or under one of this seat's own panels: moved by the smallest shift that shows it whole ("shift");
+      - the words of one page or moment move and shrink TOGETHER (seatGroup: one scale about the event, one shift), and a word the move
+        put on a pin steps off it, off the words up with it and off this seat's panels (groupNudge, "pin");
       - a place this seat may not see (a player: fog, out of vision, a hidden shooter): unlocated on the screen (as before);
       - this seat's reduced motion and its performance mode (fewer words up) as before: they are this seat's needs, not its view.
       Words on the SCREEN (unlocated: thunder, a sound from a place this seat cannot see) are laid out once in the reference window

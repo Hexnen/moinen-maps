@@ -251,7 +251,13 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
   never reveal a hidden token or a fogged place), `read` (smaller than about 15 px on this screen: grown to read), `fit` (its reach is
   bigger than this window: smaller, the same factor for both axes), `shift` (moved off the view edge or this seat's own panels). Its
   own needs stay per seat: the engine's `scale` setting, reduced motion (no path), the performance mode's caps, "big only". A seat
-  with nothing in the way applies no rule, so it draws exactly the table's picture.
+  with nothing in the way applies no rule, so it draws exactly the table's picture;
+- **move a page as one**: the words of one event (a page, a moment) were placed off each other and beside what they letter; a seat
+  that must shift or shrink them does it to ALL of them at once (one scale about the event, one shift: `seatGroup`), then steps a word
+  off a pin the move put it on, keeping off the words up at the same time and the seat's panels (`groupNudge`). Live, word by word,
+  the player's smaller view shifted the wave word onto the main word, and a pin step put the main word on the challenges' panel.
+  The price: a seat zoomed in much closer than the reference sees the whole page smaller (live 0.4 at zoom 0.9 against the reference
+  0.43 on a 350 px grid), and a lasting sustain (burning fire) still starts when this seat got its event (request E2).
 Unlocated words (thunder) are laid out once in the reference window, then centred into this window and shifted off its panels.
 A seat-rule log (`api.sfx.log()` in the map) lets two seats be compared call by call.
 
