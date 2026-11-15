@@ -173,7 +173,8 @@ group("RIDEVIEW", () => {
   ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, view\(\)/.test(src("sfx/sfx.mjs")), "every story ride (pre, the plough's grind) is kept in view where it plays");
   ok(/if \( w\.from && !shooterSeen\(\[w\.from\.x, w\.from\.y\]\) \) \{ playScreen\(spec\); return; \}/.test(src("sfx/sfx.mjs")), "a launch word of a hidden shooter is unlocated");
   ok(/\.sort\(\(a, b\) => d\(a\) - d\(b\)\)\[0\];/.test(src("sfx/sfx.mjs")), "the shooter is the nearest token at the muzzle");
-  ok(/const at = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* innerWidth, fw\)/.test(src("sfx/sfx.mjs")), "an edge word is held whole on the screen");
+  // (THUNDERFIT: `let` - the spot is then refitted by the word's real box, screenPlace; dev/sfx-fit.test.mjs checks that it stays whole)
+  ok(/let at = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* innerWidth, fw\)/.test(src("sfx/sfx.mjs")) && /const fit = screenPlace\(spec\.text, o, at, fixed\);/.test(src("sfx/sfx.mjs")), "an edge word is held whole on the screen");
   ok(/alive: \[\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\), \.\.\.thisFlush\]/.test(src("sfx/sfx.mjs")) && /thisFlush\.push\(/.test(src("sfx/sfx.mjs")), "clusters of one flush avoid each other's words");
   ok(/w\.voice === "cavein" \? \{ \.\.\.w\.box, y1: w\.box\.y1 \+ \(w\.box\.y1 - w\.box\.y0\) \* 0\.5 \}/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");
 });

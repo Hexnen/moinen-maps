@@ -57,7 +57,8 @@ group("F2", () => {
   const sat = { ...w, role: "sec", x: 2800, y: 200, subject: null };       // a satellite with no free place but under the sidebar
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /place\(.*\{ view: v, ui, tokens/.test(sfx), "F2 the runtime measures this client's panels and places around them");
+  // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /placeFit\(.*\{ view: v, ui, tokens, pins/.test(sfx) && /function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and places around them");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
@@ -172,7 +173,7 @@ group("F13", () => {
   const ws = [{ role: "pre", t: 0 }, { role: "main", t: 230 }, { role: "sec", t: 400 }, { role: "sec", t: 500 }];
   const one = C.capWords(ws, 1), two = C.capWords(ws, 2);
   ok(one.length === 1 && one[0].role === "main" && two.map((w) => w.role).join() === "pre,main", "F13 one place: the main word; two: the pre word and the main word, in time order");
-  ok(/capWords\(C\.place\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
+  ok(/capWords\(placeFit\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
 });
 
 /* F14: no per-client word memory */
@@ -337,7 +338,8 @@ group("CROWD", () => {
   ok(pf.x === wave.x && pf.y === wave.y, "CROWD with nothing up it sets off where the wave starts");
   ok(C.burnCrowded([{ x: 100, y: 100 }], [{ x: 150, y: 120 }], 20) && !C.burnCrowded([{ x: 100, y: 100 }], [{ x: 400, y: 100 }], 20), "CROWD a fire's phrases next to a bigger fire's are left out; far apart both letter");
   ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
-  ok(sfx.includes("ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)]"), "CROWD a burning fire's phrases keep off the event words still up");
+  // (THUNDERFIT added the map's pins after the words up: the same obstacles, plus the pins)
+  ok(sfx.includes("ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)]"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
