@@ -164,7 +164,7 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], heard: !!w.heard, main: w.role === "main", sound: Number.isFinite(w.sx) && Number.isFinite(w.sy) ? { x: w.sx, y: w.sy } : null, ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
       // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
       // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
       ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
@@ -424,6 +424,18 @@ export function mainSide(w, d) {
     }
   } catch ( err ) { d.warn?.("main side", err); }
 }
+/** MAPSEATS3: where a page word's SOUND is - the point a seat must see to letter it on the map (sfx.mjs hereVisible): its own `at`, else
+    for a word that rides its way the end the way is tied to (a falling bomb's or a meteor's whistle: the impact - its start lies in the sky,
+    often off the scene, so a player's vision test of it failed and his seat drew the fall word unlocated on the screen while the GM's rode
+    the path: ADVM r2 item 10), else its place. `impact` (the page's main word: the impact) - a fall word sounds there: a meteor's far
+    whine hands over to its roar high in the sky, its own way's end off the scene (live 2026-11-15 the player still drew it on the screen). */
+export function soundAt(w, impact = null) {
+  if ( w.at && Number.isFinite(w.at.x) ) return { sx: w.at.x, sy: w.at.y };
+  const r = Array.isArray(w.ride) && w.ride.length > 1 ? w.ride : null;
+  if ( r && w.role === "pre" && impact && Number.isFinite(impact.x) && Number.isFinite(impact.y) ) return { sx: impact.x, sy: impact.y };
+  if ( r ) { const q = w.role === "pre" ? r.at(-1) : r[0]; if ( Number.isFinite(q?.x) ) return { sx: q.x, sy: q.y }; }
+  return { sx: w.x, sy: w.y };
+}
 /** One word of a page on the TABLE: its spot (a landing or a fire the reference view holds), its size, its box, its way, its place. */
 function pageWordPlan(p, w0, word, sd, env, d) {
   const G = d.grid, { vw, z, zr } = env;
@@ -438,7 +450,10 @@ function pageWordPlan(p, w0, word, sd, env, d) {
   const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
   const r = w.r ?? G * 0.4, grp = SZ.groupOfPageWord(w0, p.grp), lag = w0.gate ? CATCH_SHOW_MS : 0;
   const spec = { role, grp, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t: d.toPerf(w.t + lag), ts: w.t + lag, ms: w.ms ?? 700, seed: sd,
-    key: `${p.rec.id}|${w0.key}`, page: p.rec.id, z, zr, sx: w.at?.x ?? w.x, sy: w.at?.y ?? w.y,
+    key: `${p.rec.id}|${w0.key}`, page: p.rec.id, z, zr, ...soundAt(w, p.pg?.words?.find((q) => q.role === "main") ?? null),
+    // (MAPSEATS3: a sound heard all over the scene - a close thunder strike -: a seat whose view does not hold it letters it at its view's
+    // edge toward it, by the seat rule, instead of each seat deciding by its own view whether it is a map word or a screen word)
+    ...(w.heard ? { heard: true } : {}),
     // (EFFECTS2: a story's words are sized by rank as a share of the REFERENCE view: readable, a lower rank never bigger)
     rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},

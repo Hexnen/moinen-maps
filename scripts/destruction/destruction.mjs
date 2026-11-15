@@ -33,6 +33,7 @@ import * as Timed from "./timed-core.mjs";
 import { makeTk, validTk, unflatPath } from "../tokens/carry-core.mjs";
 import { frontPath } from "../tokens/plough-core.mjs";
 import { sharedNow, ageOf } from "../shared-clock.mjs";
+import { entryStart } from "./entry-join.mjs";
 
 /**
  * The destruction of the open scene: loads the mask from the scene flag, bakes it (worker) or takes a cached or published bake,
@@ -1398,9 +1399,11 @@ function playEntries(added, removed, taken, mask, first) {
     const dirOn = followsPath(g.objId) || (!g.objId && !!S.params.directional);   // (this stroke's own setting, not the scene's current one)
     if ( e && (first || !game.user.isGM) ) {
       // from the flag: the same moment for everyone who is here; a late arrival still sees it whole, an old one stays settled
-      const age = ageOf(e.t, sNow);
-      if ( age > ENTRY_WINDOW ) { display.swap(g, under); continue; }
-      display.enter(g, { start: pNow + Math.max(0, -age), o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under, simul: !dirOn,
+      // (MAPSEATS3, ADVM r2 item 3: a stroke the GM entered as he painted it carries his instant `s` - a seat that has it in time joins
+      // the GM's entry mid-life, the same frame at the same moment; entry-join.mjs, question MAPSEATS3-1)
+      const start = entryStart(e, sNow, pNow, ENTRY_WINDOW);
+      if ( start === null ) { display.swap(g, under); continue; }
+      display.enter(g, { start, o: dirOn ? e.o ?? null : null, dir: dirOn ? e.d ?? null : null, under, simul: !dirOn,
         path: dirOn ? pathOfObj(e.p) : null, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null });
       continue;
     }
@@ -1414,7 +1417,7 @@ function playEntries(added, removed, taken, mask, first) {
     const path = s0 && dirOn ? s0.path : null;
     realCarry = Cine.isPending(g.objId) ? null : g.objId;      // (painted just now: a carried token really moves at the end; a staged stroke's carry waits for its show)
     try { display.enter(g, { start: pNow, o, dir: d, under, path, simul: !dirOn, spine: g.info.type === "gash" ? pathOfObj(g.objId) : null }); } finally { realCarry = null; }
-    if ( game.user.isGM && !Cine.isPending(g.objId) ) entryLog.set(h, { h, o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
+    if ( game.user.isGM && !Cine.isPending(g.objId) ) entryLog.set(h, { h, s: Math.round(sNow), o: o && o.map((v) => Math.round(v)), d: d && d.map((v) => Math.round(v * 100) / 100), b: null, p: path ? s0.id : null });
   }
 }
 

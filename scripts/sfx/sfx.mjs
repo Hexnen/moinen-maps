@@ -514,7 +514,9 @@ function pageWord(p, w) {
   // (owner's answer 4: a sound whose source this seat cannot see - under the fog, out of vision, a hidden shooter - is shown generally
   // on the screen, never at the hidden place; a flash beyond this seat's view sounds at the edge toward it)
   if ( q.screenAt ) { playScreen(q, q.screenAt); return; }
-  if ( !hereVisible(q.sx ?? q.x, q.sy ?? q.y) ) { playScreen(q); return; }
+  // (MAPSEATS3: a close strike's thunder (`heard`) is lettered at the strike on every seat - its flash lights the scene, the fog does
+  // not hide it; question MAPSEATS3-4)
+  if ( !q.heard && !hereVisible(q.sx ?? q.x, q.sy ?? q.y) ) { playScreen(q); return; }
   if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(q); return; }
   play(q);
   lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box, ...(q.fitK !== undefined ? { fitK: q.fitK } : {}), clean: FIT.isClean(q.pen) });
@@ -993,11 +995,11 @@ function play(w) {
     if ( g0 !== gen || !L || mode() === "off" || !canvas?.ready || stepFor(grpOf(w)) === 0 ) return;
     if ( lifeOver(w) ) { stats.late++; seatSkip(w, "late"); return; }
     // a fire's catch / flare word whose fire went out (or was taken back) meanwhile: not lettered (FXLM 4)
-    if ( w.obj && !C.fireEventLive({ obj: w.obj, voice: w.voice }, Fire.allStrokes?.()?.get(w.obj), sharedNow()) ) { stats.stale++; return; }
+    if ( w.obj && !C.fireEventLive({ obj: w.obj, voice: w.voice }, Fire.allStrokes?.()?.get(w.obj), sharedNow()) ) { stats.stale++; seatSkip(w, "stale"); return; }   // (MAPSEATS3: logged - ADVM r2 item 7, a fire word one seat drew and the other left no trace of)
     let h, call = null;
     try {
       if ( w.stream ) h = playStream(w);
-      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, "off"); return; } h = L.play(w.text, call.o); }
+      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, call.fit?.rule === "noroom" ? "noroom" : "off"); return; } h = L.play(w.text, call.o); }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;

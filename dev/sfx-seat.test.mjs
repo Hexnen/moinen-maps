@@ -279,7 +279,7 @@ function drawSeat(S, step, prev = false) {
     const items = T.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 });
     const lay = SEAT.seatLayout(items, { view, panels, pins: [PIN], tokens: [], zoom: S.z });
     for ( const it of items ) { const f = lay.get(it.key), sk = it.w.size / (T.optsOf(it.w, d).size || 1);
-      out.set(it.key, { cap: f.cap / sk, box: f.box, ink: inkBox(f.box, it.ink), rules: f.rules, ok: f.ok, w: it.w, item: it, sub: it.sub, way: f.way ?? null, f: f.f }); }
+      out.set(it.key, { cap: f.cap / sk, box: f.box, ink: inkBox(f.box, it.ink), rules: f.rules, ok: f.ok, w: it.w, item: it, sub: it.sub, way: f.way ?? null, f: f.f, share: f.share ?? 1 }); }
     return { out, view, panels };
   }
   // (the previous rule, as its runtime did it: sfx.mjs wordGeom + groupFit + seatCall at eab7e02)
@@ -333,7 +333,9 @@ await group("SEAT2", async () => {
       const pq = p.out.get(key);
       if ( pq && shown(pq, p.view) && pq.cap < before * 0.995 ) lessPrev++;
       if ( q.w.role === "main" ) rows.push(`${sn} ${q.w.text} before ${before.toFixed(1)} prev ${pq?.cap.toFixed(1)} now ${q.cap.toFixed(1)} ${q.rules.join("+")}`);
-      if ( q.cap >= before * 0.995 ) continue;
+      // (MAPSEATS3: a word of a page draws the share its main word's room left it (`share`, 1 when the main word stands at its own size):
+      // smaller than before by that share only - the proportions between the page's words - and no more, unless its own room holds it down)
+      if ( q.cap >= before * Math.min(1, q.share ?? 1) * 0.995 ) continue;
       // (smaller only by the rule "small": no spot of this view holds it at its step-2 size off the pin, inside the view, its panels'
       // and earlier words' share at most SOFT_OK - checked here by brute force over the whole view, not by the layout's own candidates)
       // (MAPSAME: "room" - its envelope is the largest clean size on its side, step 2 its share of it: proven one size up by brute force in
