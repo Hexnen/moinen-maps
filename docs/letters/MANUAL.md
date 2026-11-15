@@ -327,7 +327,7 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
       above a blast that a closer seat has not;
     - every seat keeps every word on the table's side (`sideOfBox`; a rider's way measured with the word at its largest size, its way
       moved, turned or shortened only within that side); another side only where its own side holds nothing clean even at its floor
-      ("side": 3 % of the spread's word x seat x step, none on the take's seats);
+      ("side": 3 % of the spread's word x seat x step in node; live on the take one debris word, PFWOOOOFF, on the player at steps 2-3);
     - ONE layout per seat for all steps: a word's ENVELOPE is the largest size up to its step-3 size (`nom`) standing clean on its
       side, searched from the table's step-2 box (`box2`, `u2`); step 3 draws the envelope, step 2 its own size but at most the
       envelope / 1.15, step 1 its own but at most step 2 / 1.15, none under the floor ("room" when under its own size, "floor"),
