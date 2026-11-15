@@ -678,6 +678,15 @@ a union-keyline pair the reader cannot read parts by at most 0.04 cap (`UNION_PA
 **Numbers.** `-1`, `+4`, `x2`, `12%` get a calm, even, untreated hand so digits and signs always read.
 **Outline.** The light outer outline goes around the whole word only, never between overlapping letters; a duplicated block
 (extrusion) is used more often than the outline; the outline stays a style (`look.outline: "sticker"`).
+**Rim under the lettering (RIMUNDER, invincible style).** `look.rim: "ink" | "paper" | "none"` (default `"auto"`): the letterer's
+holding line round the WHOLE lettering, the letters and their coloured duplicate block together, painted under it, so the approved look
+stays whole on top (the old `look.outline: "sticker"` strokes its light outline over the block, which vanishes). It follows the
+outer outlines only (round joins, counters stay open) and sweeps along the block's offset in one stroke. `"auto"`: `"ink"` for a word
+in world space (`space: "world"`, every world layer) without a backdrop, `"none"` on the screen. The ink rim (0.07 cap, at least 2.5 px,
+at most 16 px, past the keyline) adapts to the ground by itself: on a dark floor ink on dark is next to invisible, on bright, mid, busy
+or fire-lit ground it is the black edge that separates the word. `"paper"`: a paper band (0.05 cap, 2-12 px) with an ink line
+(0.022 cap, 1.25-4 px) round it, the knock-out of the impact frames' kept word, for a word that must also stand off a dark ground.
+Not on a MOVE echo; legacy styles ignore it. Tables `INV_RIM` / `invRim` (design.mjs), `rimPx` / `paintRim` (paint.mjs); check-rim.mjs.
 **Legibility.** legibility.mjs reads every treated letter against the font's plain letters (Polish marks and digits included:
 Ł keeps its bar, Ę its ogonek, a covered 1 is caught, $ is not S, lower-case look-alikes are caught); the settle step turns,
 pushes or opens letters until each reads. check-look.mjs L1-L17 hold this (ADVT and dice-review cases among them); check-look2.mjs

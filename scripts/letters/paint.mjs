@@ -4,6 +4,7 @@ import { bbox, crackLines } from "./geom.mjs";
 import { rng } from "./rng.mjs";
 import { pictureGeometry, settleCenter, CRACK_W, crackSeed } from "./shape.mjs";
 import { paintShards, SHARD_MARGIN } from "./shards.mjs";
+import { INV_RIM } from "./design.mjs";
 
 export const MAX_SIDE = 2048;
 
@@ -34,9 +35,9 @@ const hsl = (h, s, l, a = 1) => `hsla(${((h % 360) + 360) % 360},${Math.max(0, M
 const rot = (hex, dh, dl = 0) => { const [h, s, l] = hexToHsl(hex); return hsl(h + dh, s, l + dl); };
 
 /* the extents (word units) a picture needs around its letters */
-function extents(plan, geo, p, back) {
+function extents(plan, geo, p, back, S = 0) {
   const H = plan.hand, b = bbox(geo.flatMap((l) => l.cs));
-  const outer = H.inflate + H.inkW + H.out2W + 0.05;
+  const outer = H.inflate + H.inkW + H.out2W + 0.05 + (H.halo && S > 0 ? rimReach(H, S) : 0);
   const dx = Math.cos(H.depthAng) * H.depth, dy = Math.sin(H.depthAng) * H.depth;
   const sx = H.shadow ? Math.cos(H.shadow.ang) * H.shadow.d : 0, sy = H.shadow ? Math.sin(H.shadow.ang) * H.shadow.d : 0;
   let x0 = b.x0 - outer + Math.min(0, dx, dx + sx), x1 = b.x1 + outer + Math.max(0, dx, dx + sx);
@@ -440,7 +441,7 @@ export function paintPicture(plan, bank, p, S, make) {
   }
   const geo = pictureGeometry(plan, bank, p, S);   // FONTSEL: at its size (a face's optical sizes)
   const back = p.impact ? null : backdropOf(plan, p);
-  const ext = extents(plan, geo, p, back);
+  const ext = extents(plan, geo, p, back, S);
   let w = (ext.x1 - ext.x0) * S, h = (ext.y1 - ext.y0) * S;
   const k = Math.min(1, MAX_SIDE / Math.max(w, h, 1));
   S *= k; w = Math.ceil(w * k) + 2; h = Math.ceil(h * k) + 2;
@@ -625,6 +626,44 @@ export function paintPicture(plan, bank, p, S, make) {
    5. interlocked rings: the ring under at the top crossing is painted again over the lower half, so they pass through each other.
    Line weights are in cap units with pixel floors (the keyline stays visible at token size). */
 const UNION_RIM = 0.6, UNION_INNER = 0.45;
+/* RIMUNDER: the rim under the lettering (`hand.halo`, design.mjs INV_RIM / invRim), in px at S px per cap height. `key` = the keyline's own
+   half width (the rim starts where the keyline ends), `paper` = the paper band (paper rim only), `ink` = the ink band outside it,
+   `outer` = how far the whole rim reaches past the letters' outline */
+export function rimPx(H, S) {
+  const cl = (v, a, b) => Math.min(b, Math.max(a, v));
+  const key = Math.max(1, H.inkW * UNION_RIM * S);
+  if ( H.halo === "paper" ) {
+    const R = INV_RIM.paper, paper = cl(R.w * S, R.min, R.max), ink = cl(R.line * S, R.lineMin, R.lineMax);
+    return { key, paper, ink, outer: key + paper + ink };
+  }
+  const R = INV_RIM.ink, ink = cl(R.w * S, R.min, R.max);
+  return { key, paper: 0, ink, outer: key + ink };
+}
+/* how far the rim reaches in cap units, for the picture's extents: at S, and at least its share without the pixel cap (a picture too big
+   for MAX_SIDE is painted at a smaller S, where the capped band is a bigger share of the cap) */
+function rimReach(H, S) {
+  const R = H.halo === "paper" ? INV_RIM.paper.w + INV_RIM.paper.line : INV_RIM.ink.w;
+  return Math.max(rimPx(H, S).outer / S, H.inkW * UNION_RIM + R);
+}
+/* the outer outlines of the lettering (a letter's counters left out: an O's hole and an A's eye still show the ground), and the same
+   outlines along the duplicate's offset (every `step` px, so the rim's round joins close the swept block without gaps) */
+function paintRim(ctx, H, geo, S, ox, oy) {
+  const r = rimPx(H, S);
+  const outer = [];
+  for ( const g of geo ) {
+    let big = 0; for ( const c of g.cs ) if ( Math.abs(signedArea(c)) > Math.abs(big) ) big = signedArea(c);
+    for ( const c of g.cs ) if ( signedArea(c) * big >= 0 ) outer.push(c);
+  }
+  if ( !outer.length ) return;
+  const ddx = H.depth > 0 ? Math.cos(H.depthAng) * H.depth * S : 0, ddy = H.depth > 0 ? Math.sin(H.depthAng) * H.depth * S : 0;
+  const n = Math.max(1, Math.ceil(Math.hypot(ddx, ddy) / Math.max(1, (r.outer - r.key) * 0.9)));
+  ctx.save(); ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const all = () => { ctx.beginPath(); for ( let k = 0; k <= n; k++ ) path(ctx, outer, S, ox + ddx * k / n, oy + ddy * k / n); };
+  const band = (w, colour) => { all(); ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = 2 * w; ctx.stroke(); };
+  band(r.outer, H.ink);
+  if ( r.paper > 0 ) band(r.key + r.paper, INV_RIM.paperColor);
+  ctx.restore();
+}
 function paintUnion(ctx, plan, geo, all, wb, S, ox, oy, canvas, make, p) {
   const H = plan.hand, Ls = plan.layout.letters, pre = plan.layout.pre ?? 0, vertical = plan.layout.arrange === "vertical";
   const rim = Math.max(1, H.inkW * UNION_RIM * S), inner = Math.max(0.75, H.inkW * UNION_INNER * S);
@@ -632,6 +671,8 @@ function paintUnion(ctx, plan, geo, all, wb, S, ox, oy, canvas, make, p) {
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   const isRing = (g) => !!Ls[g.i]?.ring;
   const holesOf = (cs) => { let big = 0; for ( const c of cs ) if ( Math.abs(signedArea(c)) > Math.abs(big) ) big = signedArea(c); return cs.filter((c) => signedArea(c) * big < 0); };
+  /* 0. RIMUNDER: the rim under everything (never on a MOVE echo) */
+  if ( H.halo && !plan.hollow ) paintRim(ctx, H, geo, S, ox, oy);
   /* 1. the duplicate / block */
   if ( H.depth > 0 ) {
     const ddx = Math.cos(H.depthAng) * H.depth, ddy = Math.sin(H.depthAng) * H.depth;
