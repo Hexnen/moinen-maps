@@ -200,6 +200,11 @@ await group("RULE", async () => {
   ok(L1({ ...it, sub: null }, { view: { x0: 0, y0: 0, x1: 500, y1: 500 }, zoom: 1 }).rule === "off", "off the view: not drawn");
   const rd = L1({ ...it, sizes: [60], ride: true, path: [{ x: 2000, y: 1490 }] }, { view, panels: [panel], zoom: 1 });
   ok(rd.rule === "ride" && rd.dx === 0 && rd.dy === 0 && rd.f === 1.5, "a rider keeps the table's way, only its size is this seat's");
+  // (MAPSFXSEAT2 live: the blast's wave word rode half off the GM's screen - the table holds a way inside the REFERENCE view; each seat
+  // holds it inside its own: the anchor's rectangle keeps the word whole in this view, and the runtime clamps the way's points to it)
+  const rr = rd.ride, vv = { x0: view.x0 + SEAT.SEAT_EDGE, y0: view.y0 + SEAT.SEAT_EDGE, x1: view.x1 - SEAT.SEAT_EDGE, y1: view.y1 - SEAT.SEAT_EDGE };
+  ok(rr && rr.x0 >= vv.x0 && rr.x1 <= vv.x1 && rr.y0 >= vv.y0 && rr.y1 <= vv.y1 && rr.x1 > rr.x0, "a rider's way is held inside this seat's view");
+  ok(/else if \( o\.path\?\.points && f\.ride \) \{[\s\S]{0,400}oo\.path = \{ \.\.\.o\.path, points: o\.path\.points\.map\(kp\) \}; oo\.at = kp\(at\);/.test(SRC), "the runtime clamps a rider's way to it");
   // (two words of one picture up at the same time: the second keeps off the first)
   const lay = SEAT.seatLayout([{ ...it, key: "a", life: [0, 1000] }, { ...it, key: "b", prio: 1, life: [500, 1500], box: { x0: 1950, y0: 1460, x1: 2150, y1: 1540 } }], { view, zoom: 1 });
   ok(on2(inkBox(lay.get("a").box, it.ink), inkBox(lay.get("b").box, it.ink)) === 0, "a word never lands on another word up with it");

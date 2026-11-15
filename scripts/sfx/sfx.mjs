@@ -857,6 +857,11 @@ function seatCall(w) {
   // (the size this seat draws: its cap over the table's, this seat's own size setting counted once - the engine applies it itself)
   if ( Number.isFinite(o.size) && w.size > 0 ) oo.size = (o.size * f.cap) / (w.size * sc);
   if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
+  else if ( o.path?.points && f.ride ) {
+    // (a rider keeps the table's way, held inside this seat's view - sfx-seat seatLayout `ride`)
+    const r = f.ride, kp = (q) => ({ ...q, x: r.x1 > r.x0 ? Math.min(Math.max(q.x, r.x0), r.x1) : (r.x0 + r.x1) / 2, y: r.y1 > r.y0 ? Math.min(Math.max(q.y, r.y0), r.y1) : (r.y0 + r.y1) / 2 });
+    oo.path = { ...o.path, points: o.path.points.map(kp) }; oo.at = kp(at);
+  }
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;

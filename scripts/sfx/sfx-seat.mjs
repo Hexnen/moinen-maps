@@ -233,7 +233,15 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     if ( small < min - 1e-9 ) sizes.push(small);
     if ( sizes.every((c) => c > fitCap) ) { sizes = [fitCap]; rules.push("fit"); } else sizes = sizes.filter((c) => c <= fitCap + 1e-9);
     // (a word that rides keeps its table way: only its size is this seat's)
-    if ( it.ride ) { const f = sizes[0] / u; out.set(it.key, { cap: sizes[0], k: f, f, px: p.x, py: p.y, dx: 0, dy: 0, box: at(f), rules: [...rules, "ride"], rule: "ride", clean: true }); continue; }
+    // (its way is the table's, held inside THIS view: the table kept it inside the reference view, which a seat zoomed closer does not
+    // show whole - live, the blast's wave word rode half off the GM's screen; `ride`: the rectangle its anchor keeps to, sfx-page
+    // rideInView's margins at this seat's size)
+    if ( it.ride ) {
+      const f = sizes[0] / u, bw = (it.w?.bw > 0 ? it.w.bw : B.x1 - B.x0) * f, bh = (it.w?.bh > 0 ? it.w.bh : B.y1 - B.y0) * f;
+      const mx = Math.min(bw * 0.55, vw * 0.45), my = Math.min(bh * 0.75, vh * 0.45);
+      out.set(it.key, { cap: sizes[0], k: f, f, px: p.x, py: p.y, dx: 0, dy: 0, box: at(f), rules: [...rules, "ride"], rule: "ride", clean: true, ride: { x0: v.x0 + mx, y0: v.y0 + my, x1: v.x1 - mx, y1: v.y1 - my } });
+      continue;
+    }
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
     const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
