@@ -290,11 +290,20 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     below the source; unconstrained its shed fragments drift ~12 caps up) and it does not compress: a room shorter than the run is
     overflowed downward. The map gives every run the engine's `room` (`RUN`: 3.6 up, 4.2 down, 3.5 half-width, in caps) and
     `maxWidth` 5 caps, and keeps clear the block round it (`runReserve`: + 0.1-0.2 cap smooth, + 1.15 across / 0.3 up and down
-    stepped: the boil leaves the room by that much), whole in the view, off pins and tokens and the runs laid out before it, at most
-    6 % under panels and words up; else moved the least; else smaller on this seat (x0.9 steps down to its legibility floor), laid
-    out from the lower steps up so no run is smaller at a higher step; else not lettered on this seat. A seat whose size for a run
-    changes restarts it on the shared clock (`startAt`). Before, the map reserved -3.1 .. +1.1 caps and passed no room: live the run
-    stood on the macro bar and the pin and two fires lettered into each other (`dev/sfx-burn.test.mjs`, `sfx-seat.test.mjs` BURN).
+    stepped: the boil leaves the room by that much), whole in the view, off pins, tokens, this seat's panels (no share: 6 % of a
+    tall block is a whole phrase) and the runs laid out before it, at most 6 % on the table's words up and the words this seat drew
+    (a run gives way to an event word: the runs are laid out again 60 ms after a word is drawn); else moved the least; else smaller
+    on this seat (x0.9 steps down to its legibility floor), laid out from the lower steps up so no run is smaller at a higher step;
+    else not lettered on this seat. A seat whose size for a run changes restarts it on the shared clock (`startAt`); a live run joins
+    only once the seat's clock error is under 30 ms (at most 20 s after load). Before, the map reserved -3.1 .. +1.1 caps and passed
+    no room: live the run stood on the macro bar and the pin and two fires lettered into each other (`dev/sfx-burn.test.mjs`,
+    `sfx-seat.test.mjs` BURN).
+  - *a clocked run's start*: the engine replays a clocked run's past phrases from `startAt` (at most 10 000, ~3 h, then one timer per
+    past phrase): a fire painted two days before never lettered. The map's run clock is its group's start carried forward by whole
+    30-minute epochs (`runClock`); every seat restarts the run at the same epoch instant.
+  - *a word's life on the table* (`lifeOf`) counts the engine's own hold (`L.measure(...).plan.holdMs`) + 450 ms + 450 ms: the old
+    `hold / ms + 450` ended a shock wave's life at 1.25 s while the engine kept it legible 1.9 s, and a debris word was laid onto it
+    (`sfx-seat.test.mjs` LIFE).
   - *far thunder after a storm is cleared* (MAPRIDE): the far-flash count is keyed on the storm's previous level too
     (`EV.farIndex`, window `FAR_WIN` 30 s), and a page whose flash the storm no longer holds when it draws (`flashStill`) is skipped
     on every seat; before, a seat that saw the clear first lettered a rumble the others did not.

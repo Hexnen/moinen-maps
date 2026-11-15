@@ -151,7 +151,10 @@ export function makeLedger(max = 200) {
   };
 }
 /** a word's life on the table (shared ms): its sound, its hold, an exit */
-export const lifeOf = (w, t) => ({ t0: t, t1: t + Math.max(600, Number(w.hold) || 0, Number(w.ms) || 0) + 450 });
+// (MAPRIDE: and the engine's own hold `holdMs` (L.measure plan) + its entrance and exit: measured on 1.9.17 a word stays legible up to
+// ~0.85 s past its hold - a shock wave 1.9 s, KA-BOOOOM 2.3 s, a debris word 1.0 s)
+export const LIFE_PAST_HOLD = 450;
+export const lifeOf = (w, t) => ({ t0: t, t1: t + Math.max(600, Number(w.hold) || 0, Number(w.ms) || 0, (Number(w.holdMs) || 0) + LIFE_PAST_HOLD) + 450 });
 
 /* ---------------------------------------------------------------- the seat rule */
 

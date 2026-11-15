@@ -202,7 +202,7 @@ export function measureOf(text, o, d) {
     const m = d.L?.measure?.(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 } });
     if ( !(m?.unit > 0) || !(m.hold?.w > 0) ) return null;
     const u = m.unit;
-    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u } };
+    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, holdMs: Number(m.plan?.holdMs) || 0 };
   } catch { return null; }
 }
 /** The word's TABLE box (scene px) at its table size and its reach (the engine's own measure): the table's placement keeps the box free,
@@ -219,6 +219,9 @@ export function measure(w, d) {
     w.bw = b.bw; w.bh = b.bh;
     // (the reach the engine itself reports for THIS word, instead of a factor per entrance that goes stale with the engine's motion)
     w.reachU = md?.reach ?? null; w.rk = md ? FIT.reachFactor(hb, md.reach) : FIT.reachOf(o.in);
+    // (MAPRIDE: the hold the engine gives the word - its sound family's own body: a shock wave holds 1.3 s, KA-BOOOOM 1.4 s - so its life
+    // on the table (sfx-seat lifeOf) is as long as it really stands: live a wave word still stood when a debris word was laid onto it)
+    w.holdMs = md?.holdMs ?? 0;
     if ( w.drift ) { w.rise = d.grid * DRIFT[1]; w.riseX = d.grid * DRIFT[0]; }
   } catch { /* the estimate stands */ }
 }

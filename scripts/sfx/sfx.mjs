@@ -690,7 +690,9 @@ function burnRooms(want) {
     const v = { x0: v0.x0 + m, y0: v0.y0 + m, x1: v0.x1 - m, y1: v0.y1 - m };
     // (panels are hard for a run, not a 6 % share as for a word: 6 % of a run's tall block is a whole phrase hidden at its edge - live, the
     // player's FOOOOOMF ran under the challenges panel)
-    const soft = [...ledger.boxes(now, now + 1000)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
+    // (and off the words THIS seat drew where they stand here - the seat layout moves them from the table's place: live the player's
+    // KA-BOOOOM!! stood where a run then lettered; a run that started first moves off within its next second)
+    const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
     const maxShift = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45;
     for ( const [key, w] of want ) {
       const p = w.plan, sc = L?.prefs?.scale ?? 1, k = burnSize(p, w.live) * sc, arr = [], st = stepFor("fire");
@@ -979,6 +981,9 @@ function play(w) {
     const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
+    // (MAPRIDE: a burning run gives way to an event word at once - burnRooms keeps the runs off the words this seat drew; live a close
+    // strike's KRRRMMM! stood a second on a run's phrase)
+    if ( burns.size && bx ) scheduleBurn(60);
   };
   const wait = w.t - performance.now();
   if ( wait > 4 ) later(`w|${w.seed}|${w.role}|${w.t}`, wait, go, { obj: w.obj, voice: w.voice }); else go();

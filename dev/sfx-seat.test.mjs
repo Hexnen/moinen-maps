@@ -536,6 +536,30 @@ await group("BURN", async () => {
   ok(sig4() === sig4(), "a seat lays its runs out the same twice");
 });
 
+/* ---------------------------------------------------------------- LIFE (MAPRIDE) */
+// A word's life on the table (the ledger, and what the seat layout keeps later words off) is as long as the engine keeps it legible: live
+// (take 2026-11-15, step 3, GM) a debris word was laid onto the blast's shock-wave word, which the table thought gone after 1.25 s while
+// the engine held it 1.9 s. Each word is played on the engine and its last legible instant compared with its table life.
+await group("LIFE", async () => {
+  const { drawnOf, LEGIBLE_ALPHA } = await import(pathToFileURL(path.join(root, "scripts/letters/check-sustain.mjs")).href);
+  const short = [], shortPrev = [];
+  for ( const [kind, wo] of [["shockwave", { loud: 0.9 }], ["debris", { pieces: "large", material: "stone", loud: 0.7 }], ["boom", { loud: 1, prefix: true }], ["thud", { loud: 0.9 }], ["crack", { loud: 0.5 }]] ) {
+    const word = L.word(kind, { ...wo, seed: `life-${kind}`, lang: "en" });
+    const w = { role: "sec", text: word.text, word, x: 2000, y: 1500, magnitude: 0.9, area: 150, seed: `life-${kind}`, shrink: 1, stage: { in: "slam" }, ms: 800, zr: 0, voice: kind, alive: 0 };
+    globalThis.innerWidth = SEAT.REF_VW; globalThis.innerHeight = SEAT.REF_VH; canvas.stage.scale.x = SEAT.refZoom(G, 0);
+    const d = A.deps(SEAT.makeLedger()), o = T.baseOpts(w, d); T.measure(w, d);
+    const E2 = await setup({ gm: true }), L2 = E2.engine; L2.lookStyle("invincible");
+    const h = await L2.play(w.text, { ...o, at: { x: 2000, y: 1500 }, keepInView: false });
+    let last = 0; for ( let t = 0; t < 6000; t += 33 ) { await E2.tick(33, 33); const dd = drawnOf(h); if ( dd && dd.a >= LEGIBLE_ALPHA ) last = t; }
+    E2.restoreWarn?.();
+    const life = SEAT.lifeOf(w, 0).t1, prev = SEAT.lifeOf({ ...w, holdMs: 0 }, 0).t1;
+    if ( life < last ) short.push(`${w.text} ${life} < ${last}`);
+    if ( prev < last ) shortPrev.push(`${w.text} ${prev} < ${last}`);
+  }
+  ok(shortPrev.length > 0, `the previous life (hold / ms + 450) ended before the engine's word did: ${shortPrev.join("; ")}`);
+  ok(!short.length, `every word's table life lasts as long as the engine keeps it legible (${short.join("; ") || "all"})`);
+});
+
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900; canvas.stage.scale.x = 1;
 if ( failed.length ) { console.error(failed.join("\n")); console.error(`sfx-seat: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }
 console.log(`sfx-seat: ${n} checks passed`);
