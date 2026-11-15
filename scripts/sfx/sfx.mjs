@@ -444,7 +444,13 @@ function groundAt(rec) {
     by the seat rule only (pageWord -> play / playScreen). */
 function tablePage(p) {
   if ( p.table || !L ) return p.table ?? null;
-  return (p.table = T.planPage(p, tdeps()));
+  p.table = T.planPage(p, tdeps());
+  // (the page's located words are one picture: a seat moves and scales them together - seatGroup)
+  const at = Array.isArray(p.rec?.at) ? { x: Number(p.rec.at[0]), y: Number(p.rec.at[1]) } : null, r = grid();
+  p.group = { words: [...(p.table?.values() ?? [])].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y)), anchor: at,
+    subject: at && Number.isFinite(at.x) ? { x0: at.x - r, y0: at.y - r, x1: at.x + r, y1: at.y + r } : null };
+  for ( const q of p.group.words ) q.group = p.group;
+  return p.table;
 }
 /** One word of a page, at its moment, on THIS seat: the table's word, shown by the seat rule (its view, its panels, what it may see). */
 function pageWord(p, w) {
@@ -794,6 +800,11 @@ function flushMoment(due) {
     const secs = mine.filter((w) => w.role === "sec").sort((a, b) => a.t - b.t).slice(0, caps.sec);
     mine = C.capWords([...mine.filter((w) => w.role !== "sec"), ...secs], caps.alive - alive.size);
     for ( const w of placed ) if ( !mine.includes(w) ) seatSkip(w, big ? "big" : "perf");
+    // (the moment's located words are one picture: a seat moves and scales them together - seatGroup; the table's whole group, not
+    // this seat's filtered share, so every seat applies its rule to the same picture)
+    const grp = { words: placed.filter((w) => !w.stream && Number.isFinite(w.x) && Number.isFinite(w.y)), anchor: Number.isFinite(g?.x) ? { x: g.x, y: g.y } : null };
+    grp.subject = grp.anchor ? { x0: grp.anchor.x - (g.span ?? grid()), y0: grp.anchor.y - (g.span ?? grid()), x1: grp.anchor.x + (g.span ?? grid()), y1: grp.anchor.y + (g.span ?? grid()) } : null;
+    for ( const w of grp.words ) w.group = grp;
     for ( const w of mine ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     trimPlaced();
   }
@@ -822,23 +833,41 @@ const lifeOver = (w) => performance.now() > w.t + lifeMs(w) - 250;
  * its reduced motion changes how it moves - both this seat's needs. -> { o (the play options), fit, box (this seat's box) } | null (off).
  */
 function seatCall(w) {
-  const o = optsOf(w), at = o.at ?? { x: w.x, y: w.y };
-  const sc = L.prefs?.scale ?? 1, u = (w.size ?? 0) * sc;
-  let box = scaleBox(w.box ?? C.boxOf(w, at.x, at.y), sc, at.x, at.y);
-  let reach = w.reachU ? unionBox(box, { x0: at.x - w.reachU.l * u, y0: at.y - w.reachU.u * u, x1: at.x + w.reachU.r * u, y1: at.y + w.reachU.d * u }) : scaleBox(box, w.rk ?? 1, at.x, at.y);
-  // (a word that rides: its whole way is its reach - the seat moves the whole way at once)
-  const pts = o.path?.points ?? (o.path?.from ? [o.path.from, o.path.to] : null);
-  if ( pts ) for ( const q of pts ) reach = unionBox(reach, moveBox(reach, q.x - at.x, q.y - at.y));
-  const f = SEAT.seatFit({ box, reach, view: view(), panels: uiBoxes(), zoom: canvas.stage?.scale?.x || 1, cap: u, subject: w.subject ?? null });
+  const { o, at, u, box, reach } = wordGeom(w);
+  const vw = view(), ui = uiBoxes(), zoom = canvas.stage?.scale?.x || 1;
+  // (a word of a page or a moment: the group's one seat rule - all its words moved and scaled together, so they keep off each other and
+  // their places in the story; a word on its own: its own)
+  const f = w.group ? groupFit(w.group, vw, ui, zoom) : SEAT.seatFit({ box, reach, view: vw, panels: ui, zoom, cap: u, subject: w.subject ?? null });
   if ( f.rule === "off" ) return { o: null, fit: f, box };
-  const sh = (q) => ({ ...q, x: q.x + f.dx, y: q.y + f.dy });
+  const g = w.group ? f : { k: f.k, dx: f.dx, dy: f.dy, ax: (box.x0 + box.x1) / 2, ay: (box.y0 + box.y1) / 2 };
+  const sh = (q) => SEAT.groupAt(q, g);
   const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
   if ( f.k !== 1 && Number.isFinite(o.size) ) oo.size = o.size * f.k;
   if ( o.path?.points ) oo.path = { ...o.path, points: o.path.points.map(sh) };
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
-  return { o: oo, fit: f, box: scaleBox(moveBox(box, f.dx, f.dy), f.k, at.x + f.dx, at.y + f.dy), table: { size: o.size, at } };
+  return { o: oo, fit: f, box: SEAT.groupBox(box, g), table: { size: o.size, at } };
+}
+/** a table word's play options and its box and reach on this seat (world units, this seat's engine scale applied) */
+function wordGeom(w) {
+  const o = optsOf(w), at = o.at ?? { x: w.x, y: w.y };
+  const sc = L.prefs?.scale ?? 1, u = (w.size ?? 0) * sc;
+  const box = scaleBox(w.box ?? C.boxOf(w, at.x, at.y), sc, at.x, at.y);
+  let reach = w.reachU ? unionBox(box, { x0: at.x - w.reachU.l * u, y0: at.y - w.reachU.u * u, x1: at.x + w.reachU.r * u, y1: at.y + w.reachU.d * u }) : scaleBox(box, w.rk ?? 1, at.x, at.y);
+  // (a word that rides: its whole way is its reach - the seat moves the whole way at once)
+  const pts = o.path?.points ?? (o.path?.from ? [o.path.from, o.path.to] : null);
+  if ( pts ) for ( const q of pts ) reach = unionBox(reach, moveBox(reach, q.x - at.x, q.y - at.y));
+  return { o, at, u, box, reach };
+}
+/** the seat rule of a group (a page's or a moment's located words), once per view of this seat: the same move for every word of it */
+function groupFit(grp, vw, ui, zoom) {
+  const key = vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${L.prefs?.scale ?? 1}` : "";
+  if ( grp.seat && grp.seatKey === key ) return grp.seat;
+  const items = [];
+  for ( const q of grp.words ) { try { const gq = wordGeom(q); items.push({ box: gq.box, reach: gq.reach, cap: gq.u }); } catch {} }
+  grp.seatKey = key;
+  return (grp.seat = SEAT.seatGroup({ items, anchor: grp.anchor, view: vw, panels: ui, zoom, subject: grp.subject ?? null }));
 }
 /** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
 function logCall(w, call) {

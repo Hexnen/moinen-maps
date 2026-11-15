@@ -162,18 +162,54 @@ export function seatFit({ box, reach = null, view, panels = [], zoom = 1, cap = 
   if ( Math.abs(d.dx) > 1e-6 || Math.abs(d.dy) > 1e-6 ) rules.push("shift");
   return { rule: rules.length ? rules.at(-1) : "ok", rules, k, dx: d.dx, dy: d.dy };
 }
-/** the smallest shift that brings reach `r` inside `v` and the box `b` off every panel (inside the view first; panels as far as they
-    let it stay inside the view; nothing clean: the least covered) */
+/**
+ * THE SEAT RULE FOR A GROUP: the words of one page or one moment are one picture (placed off each other, beside what they letter, off
+ * the shared pins): a seat that must move or shrink them moves and shrinks them TOGETHER - one scale about the event's anchor, one
+ * shift - so no word lands on another or loses its place in the story. items: [{ box, reach, cap }] (world units, this seat's scale
+ * applied); anchor { x, y } (the event); subject: the event's box. -> { rule, rules, k, dx, dy, ax, ay } (apply with groupAt / groupBox).
+ * Live (two seats, 2026-11-15): moved word by word, the player's FHWOOOOMMFF! was shifted onto the main word.
+ */
+export function seatGroup({ items, anchor = null, view, panels = [], zoom = 1, read = READ_PX, edge = SEAT_EDGE, subject = null }) {
+  const its = (items ?? []).filter((q) => q?.box);
+  if ( !view || !its.length ) return { rule: "ok", rules: [], k: 1, dx: 0, dy: 0, ax: 0, ay: 0 };
+  const U = (bs) => bs.reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }));
+  const R = U(its.map((q) => q.reach ?? q.box));
+  const ax = Number.isFinite(anchor?.x) ? anchor.x : (R.x0 + R.x1) / 2, ay = Number.isFinite(anchor?.y) ? anchor.y : (R.y0 + R.y1) / 2;
+  if ( inter(R, view) <= 0 && !(subject && inter(subject, view) > 0) ) return { rule: "off", rules: ["off"], k: 1, dx: 0, dy: 0, ax, ay };
+  const rules = [];
+  let k = 1;
+  // (the group's smallest word under the readable floor at this zoom: the whole group grows to it)
+  const caps = its.map((q) => q.cap).filter((c) => c > 0), cmin = caps.length ? Math.min(...caps) : 0;
+  if ( cmin > 0 && cmin * zoom < read ) { k = read / (cmin * zoom); rules.push("read"); }
+  const m = edge / Math.max(1e-4, zoom);
+  const v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
+  const sc = (b, f) => ({ x0: ax + (b.x0 - ax) * f, y0: ay + (b.y0 - ay) * f, x1: ax + (b.x1 - ax) * f, y1: ay + (b.y1 - ay) * f });
+  let r = sc(R, k);
+  // (the group's whole reach bigger than this seat's view: all smaller together, to fit)
+  const kv = Math.min(1, (v.x1 - v.x0) / Math.max(1e-6, r.x1 - r.x0), (v.y1 - v.y0) / Math.max(1e-6, r.y1 - r.y0));
+  if ( kv < 1 - 1e-6 ) { k *= kv; r = sc(R, k); rules.push("fit"); }
+  const d = shiftClear(r, its.map((q) => sc(q.box, k)), panels, v);
+  if ( Math.abs(d.dx) > 1e-6 || Math.abs(d.dy) > 1e-6 ) rules.push("shift");
+  return { rule: rules.length ? rules.at(-1) : "ok", rules, k, dx: d.dx, dy: d.dy, ax, ay };
+}
+/** a point of the group's table picture as this seat draws it (seatGroup) */
+export const groupAt = (p, g) => ({ ...p, x: g.ax + (p.x - g.ax) * g.k + g.dx, y: g.ay + (p.y - g.ay) * g.k + g.dy });
+/** a box of the group's table picture as this seat draws it */
+export const groupBox = (b, g) => ({ x0: g.ax + (b.x0 - g.ax) * g.k + g.dx, y0: g.ay + (b.y0 - g.ay) * g.k + g.dy, x1: g.ax + (b.x1 - g.ax) * g.k + g.dx, y1: g.ay + (b.y1 - g.ay) * g.k + g.dy });
+
+/** the smallest shift that brings reach `r` inside `v` and the box `b` (or every box of a group) off every panel (inside the view
+    first; panels as far as they let it stay inside the view; nothing clean: the least covered) */
 export function shiftClear(r, b, panels, v) {
+  const bs = Array.isArray(b) ? b : [b];
   const into = (lo, hi, a, z) => (hi - lo > z - a ? (a + z) / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > z ? z - hi : 0);
   const d0 = { dx: into(r.x0, r.x1, v.x0, v.x1), dy: into(r.y0, r.y1, v.y0, v.y1) };
   const mv = (q, d) => ({ x0: q.x0 + d.dx, y0: q.y0 + d.dy, x1: q.x1 + d.dx, y1: q.y1 + d.dy });
-  const hit = (d) => panels.reduce((s, p) => s + inter(mv(b, d), p), 0) + (area(mv(r, d)) - inter(mv(r, d), v)) * 4;
+  const hit = (d) => panels.reduce((s, p) => s + bs.reduce((t, q) => t + inter(mv(q, d), p), 0), 0) + (area(mv(r, d)) - inter(mv(r, d), v)) * 4;
   if ( hit(d0) <= 1e-6 ) return d0;
   let best = { ...d0, h: hit(d0), dist: Math.hypot(d0.dx, d0.dy) };
   const cands = [];
-  for ( const p of panels ) {
-    const q = mv(b, d0); if ( inter(q, p) <= 0 ) continue;
+  for ( const p of panels ) for ( const b1 of bs ) {
+    const q = mv(b1, d0); if ( inter(q, p) <= 0 ) continue;
     cands.push({ dx: d0.dx + p.x0 - q.x1 - 1, dy: d0.dy }, { dx: d0.dx + p.x1 - q.x0 + 1, dy: d0.dy }, { dx: d0.dx, dy: d0.dy + p.y0 - q.y1 - 1 }, { dx: d0.dx, dy: d0.dy + p.y1 - q.y0 + 1 });
   }
   for ( const c of cands ) { const h = hit(c), dist = Math.hypot(c.dx, c.dy); if ( h < best.h - 1e-6 || (Math.abs(h - best.h) <= 1e-6 && dist < best.dist) ) best = { ...c, h, dist }; }

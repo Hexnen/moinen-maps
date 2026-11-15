@@ -8,9 +8,11 @@
 //   MOMENT    a destruction moment (a collapse, its debris, a blast): equal words, sizes, places, instants on both seats; a replay equal
 //   PAGE      a preset firing's page (blast, wave, debris, fire catch, fire out): the same; its debris ground from the map, not a seat
 //   LATE      a seat that gets the moment late gathers the same chunks and joins each word at the same point of its life (startAt)
-//   RULE      the seat rule: only place shift and size factor change, logged; a seat with nothing in the way draws the table unchanged
+//   RULE      the seat rule: only place shift and size factor change, logged; a seat with nothing in the way draws the table unchanged;
+//             a page's / moment's words move and scale TOGETHER (seatGroup), never one onto another
 //   GROUND    the ground classes from map pixels (the destruction bake's rule)
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as C from "../scripts/sfx/sfx-core.mjs";
@@ -24,6 +26,7 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
 const failed = [];
 const group = async (id, fn) => { try { await fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SRC = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
 const { setup } = await import(pathToFileURL(path.join(root, "scripts/letters/testenv.mjs")).href);
 const { sizeFor } = await import(pathToFileURL(path.join(root, "scripts/letters/size.mjs")).href);
 const E = await setup({ gm: true });
@@ -177,6 +180,32 @@ await group("RULE", async () => {
   ok(f3.rules.includes("fit") && f3.k < 1, "its reach bigger than the view: smaller to fit");
   // (off this seat's view: not drawn)
   ok(SEAT.seatFit({ box, reach, view: { x0: 0, y0: 0, x1: 500, y1: 500 }, panels: [], zoom: 1, cap: 40 }).rule === "off", "off the view: not drawn");
+  // A GROUP (a page's words): live (two seats, 2026-11-15) the player's view was smaller than the table's and each word was shifted into
+  // it on its own: FHWOOOOMMFF! landed on the main word. The group rule moves and scales the whole page together.
+  const d = A.deps(SEAT.makeLedger()), { rec, strokes } = firing();
+  const pg = PG.firingPage(rec, { grid: G, strokes, lift: 0.5 });
+  const tb = T.planPage({ rec, pg, ground: "stone" }, d);
+  const ws = [...tb.values()].filter((q) => q && !q.dropped && !q.screenAt && q.box && Number.isFinite(q.x));
+  const items = ws.map((q) => ({ box: q.box, reach: q.box, cap: q.size }));
+  const ov = (bs) => { let s = 0; for ( let i = 0; i < bs.length; i++ ) for ( let j = i + 1; j < bs.length; j++ ) { const a = bs[i], b = bs[j]; s += Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)); } return s; };
+  const U = items.reduce((a, q) => ({ x0: Math.min(a.x0, q.box.x0), y0: Math.min(a.y0, q.box.y0), x1: Math.max(a.x1, q.box.x1), y1: Math.max(a.y1, q.box.y1) }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
+  const anchor = { x: rec.at[0], y: rec.at[1] };
+  ok(items.length >= 4, `the page has located words (${items.length})`);
+  // (nothing in the way: unchanged)
+  const g0 = SEAT.seatGroup({ items, anchor, view: { x0: U.x0 - 400, y0: U.y0 - 400, x1: U.x1 + 400, y1: U.y1 + 400 }, panels: [], zoom: 0.62 });
+  ok(g0.rule === "ok" && g0.k === 1 && g0.dx === 0 && g0.dy === 0, "a seat whose view holds the whole page draws it as the table planned it");
+  // (a view smaller than the page and off to one side, a panel at its left: one scale, one shift for all; no word onto another)
+  const W0 = U.x1 - U.x0, H0 = U.y1 - U.y0;
+  const vw = { x0: U.x0 + W0 * 0.3, y0: U.y0 + H0 * 0.2, x1: U.x0 + W0 * 0.9, y1: U.y0 + H0 * 0.8 };
+  const panel = { x0: vw.x0, y0: vw.y0, x1: vw.x0 + (vw.x1 - vw.x0) * 0.1, y1: vw.y1 };
+  const g1 = SEAT.seatGroup({ items, anchor, view: vw, panels: [panel], zoom: 1.35 });
+  const after = items.map((q) => SEAT.groupBox(q.box, g1));
+  ok(g1.rules.includes("fit") && g1.k < 1, `the page bigger than this view: all its words smaller together (k ${g1.k.toFixed(2)})`);
+  ok(ov(after) <= ov(items.map((q) => q.box)) * g1.k * g1.k + 1e-6, "no word moved onto another: their overlap only scales with them");
+  ok(after.every((b) => b.x0 >= vw.x0 - 1e-6 && b.x1 <= vw.x1 + 1e-6 && b.y0 >= vw.y0 - 1e-6 && b.y1 <= vw.y1 + 1e-6), "every word whole in this seat's view");
+  const one = items.map((q) => { const f = SEAT.seatFit({ box: q.box, reach: q.box, view: vw, panels: [panel], zoom: 1.35, cap: q.cap }); const cx = (q.box.x0 + q.box.x1) / 2, cy = (q.box.y0 + q.box.y1) / 2; return SEAT.groupBox(q.box, { k: f.k, dx: f.dx, dy: f.dy, ax: cx, ay: cy }); });
+  if ( process.env.SEAT_VERBOSE ) console.log("group overlap: table", ov(items.map((q) => q.box)).toFixed(0), "group rule", ov(after).toFixed(0), "word by word", ov(one).toFixed(0));
+  ok(/const f = w\.group \? groupFit\(w\.group, vw, ui, zoom\)/.test(SRC) && /p\.group = \{ words:/.test(SRC) && /for \( const w of grp\.words \) w\.group = grp;/.test(SRC), "the runtime applies the group rule to every page and moment");
 });
 
 /* ---------------------------------------------------------------- GROUND */

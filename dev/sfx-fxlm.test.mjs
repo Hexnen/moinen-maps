@@ -59,7 +59,7 @@ group("F2", () => {
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
   // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /SEAT\.seatFit\(\{ box, reach, view: view\(\), panels: uiBoxes\(\)/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift)");
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /const vw = view\(\), ui = uiBoxes\(\)/.test(sfx) && /SEAT\.seatFit\(\{ box, reach, view: vw, panels: ui,/.test(sfx) && /SEAT\.seatGroup\(\{ items, anchor: grp\.anchor, view: vw, panels: ui,/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift, a page / moment as one group)");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
