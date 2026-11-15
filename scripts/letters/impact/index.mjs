@@ -74,7 +74,8 @@ export function createImpact(L, tools = null) {
       const c = toClient(t.center), m = t.mesh;
       const w = Math.abs(m?.width ?? t.w ?? 100) * zoom, h = Math.abs(m?.height ?? t.h ?? 100) * zoom;
       const tex = m?.texture;
-      return { cx: c.x, cy: c.y, R: Math.max(w, h) / 2, sil: silOf(tex?.baseTexture?.resource?.source, tex?.frame, w, h, m?.rotation ?? 0) };
+      return { cx: c.x, cy: c.y, R: Math.max(w, h) / 2, sil: silOf(tex?.baseTexture?.resource?.source, tex?.frame, w, h, m?.rotation ?? 0),
+        flipX: (m?.scale?.x ?? 1) < 0, flipY: (m?.scale?.y ?? 1) < 0 };
     }
     if ( a && typeof a.getBoundingClientRect === "function" ) {
       const r = a.getBoundingClientRect();
@@ -97,6 +98,34 @@ export function createImpact(L, tools = null) {
     }
     return { cx: W / 2, cy: H * 0.45, R: 0, sil: null };
   }
+  /* IMPACT3: a figure that takes part beside the struck one (the attacker a `from` names, the tokens `also` names): a token this seat may
+     see (the same rule as the subject: a hidden token is never drawn, so its outline tells nothing), or an element with a picture */
+  function figOf(a, spec, role) {
+    try {
+      if ( isTokenRef(a) ) {
+        const t = tokenObj(a);
+        if ( !t || !globalThis.canvas?.ready || !seesToken(t, spec) ) return null;
+        const s = subjectOf({ ...spec, subject: t });
+        return s.sil ? { role, cx: s.cx, cy: s.cy, sil: s.sil, flipX: s.flipX, flipY: s.flipY, id: t.id ?? t.document?.id ?? null } : null;
+      }
+      if ( a && typeof a.getBoundingClientRect === "function" ) {
+        const r = a.getBoundingClientRect(), sil = silOf(a, null, r.width, r.height);
+        return sil ? { role, cx: r.left + r.width / 2, cy: r.top + r.height / 2, sil } : null;
+      }
+    } catch {}
+    return null;
+  }
+  const FIGS_MAX = 8;
+  function figsOf(spec, sub) {
+    if ( spec.figures === false ) return [];
+    const out = [];
+    if ( sub.sil ) out.push({ role: "target", cx: sub.cx, cy: sub.cy, sil: sub.sil, flipX: !!sub.flipX, flipY: !!sub.flipY, id: (() => { const t = isTokenRef(spec.subject ?? spec.at) ? tokenObj(spec.subject ?? spec.at) : null; return t ? t.id ?? t.document?.id ?? null : null; })() });
+    const seen = new Set(out.map((g) => g.id).filter(Boolean));
+    const add = (a, role) => { if ( out.length >= FIGS_MAX ) return; const g = figOf(a, spec, role); if ( g && !(g.id && seen.has(g.id)) ) { out.push(g); if ( g.id ) seen.add(g.id); } };
+    if ( spec.from ) add(spec.from, "from");
+    for ( const a of (Array.isArray(spec.also) ? spec.also : spec.also ? [spec.also] : []) ) add(a, "also");
+    return out;
+  }
   function envOf(spec, plan, sub) {
     const W = innerWidth, H = innerHeight, m = Math.min(W, H) * 0.04;
     const cx = Math.max(m, Math.min(W - m, sub.cx)), cy = Math.max(m, Math.min(H - m, sub.cy));
@@ -107,11 +136,12 @@ export function createImpact(L, tools = null) {
       try {
         /* a token this user cannot see gives no direction (it would tell where it stands): the blow is then radial */
         const ft = isTokenRef(from) ? tokenObj(from) : null;
-        const p = isTokenRef(from) ? (ft && seesToken(ft, spec) ? toClient(ft.center) : null) : (spec.space === "world" && globalThis.canvas?.ready ? toClient(from) : from);
+        const p = isTokenRef(from) ? (ft && seesToken(ft, spec) ? toClient(ft.center) : null) : typeof from.getBoundingClientRect === "function" ? (() => { const r = from.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })() : (spec.space === "world" && globalThis.canvas?.ready ? toClient(from) : from);
         if ( p && Number.isFinite(p.x) && Math.hypot(sub.cx - p.x, sub.cy - p.y) > 1 ) dir = Math.atan2(sub.cy - p.y, sub.cx - p.x);
       } catch {}
     }
-    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false,   /* ENGTABLE: the guard is always on (red stays rationed) */
+    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false,
+      figs: figsOf(spec, sub), rimTone: plan.rimTone,   /* IMPACT3: the figures that take part on this seat (the ones it may see) */   /* ENGTABLE: the guard is always on (red stays rationed) */
       /* the gentle panel: round the subject, sized from it (FIN-ENGINE FXIT-E2: a far-zoom token gets a panel of a few token widths) */
       local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, R > 0 ? Math.min(Math.min(W, H) * 0.2, Math.max(R * 6, Math.min(W, H) * 0.06)) : Math.min(W, H) * 0.2)) },
       chromaBack: chromaOk !== false,

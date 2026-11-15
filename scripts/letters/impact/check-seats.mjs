@@ -69,7 +69,7 @@ async function seat(cfg) {
     for ( const x of live ) {
       if ( x.h.idx !== x.last && x.h.idx >= 0 ) {
         const f = x.h.plan.frames[x.h.idx];
-        rec[x.i].shown.push(f.type + (f.quieted ? "~" : ""));
+        rec[x.i].shown.push(f.type + (f.fig ? ":" + f.fig : "") + (f.quieted ? "~" : ""));   // IMPACT3: with the figures' part
         x.last = x.h.idx;
       }
     }
