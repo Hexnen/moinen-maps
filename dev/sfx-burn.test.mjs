@@ -72,5 +72,19 @@ for ( const motion of ["smooth", "stepped"] ) for ( const size of [58, 82] ) {
   ok(cmp >= 15 && words === cmp && same >= cmp - 4 && worst <= 0.75 * 58 && [...a.shots.values()].some((w) => w), `LATE a seat joining 2.5 s late letters the same phrases at the same instants (${words}/${cmp}), at the same places within 3 px at ${same}, at most ${worst} px apart${first ? `; first differing ${first}` : ""}`);
 }
 
+/* EPOCH: a fire burning for hours - live, a fire painted two days before never lettered: the engine replays a clocked run's past
+   phrases (at most 10 000); sfx.mjs runClock carries the run's clock forward by RUN_EPOCH, and a run clocked a whole epoch ago letters */
+{
+  const ep = Number(SRC.match(/const RUN_EPOCH = (\d+) \* 60000;/)?.[1]) * 60000;
+  ok(/t0 = runClock\(p\), startAt = live && clockOk && Number\.isFinite\(t0\) \? toPerf\(t0\)/.test(SRC) && ep > 0, `EPOCH the live run is clocked by runClock (epoch ${ep / 60000} min)`);
+  const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+  const start = E.now() - ep + 500;
+  const s = L.sustain({ kind: "fire", lang: "en", space: "world", at: () => AT, seed: "burn-epoch", size: 58, keepInView: false, treatments: TREAT, glow: "auto", area: 120, level: () => 0.8, startAt: start, room: () => SEAT.runBox(AT, 58), maxWidth: SEAT.RUN.mw * 58 });
+  let seen = 0;
+  for ( let t = 0; t < 4000; t += 33 ) { await E.tick(33, 33); if ( s.handles.some((h) => h.sprite?.visible && (h.sprite.alpha ?? 1) >= LEGIBLE_ALPHA) ) seen++; }
+  s.stop({ quick: true }); E.restoreWarn?.();
+  ok(seen > 30, `EPOCH a run clocked a whole epoch ago letters at once (${seen} frames of 121 with a legible phrase)`);
+}
+
 if ( failed.length ) { console.error(failed.join("\n")); console.error(`sfx-burn: ${failed.length} failed, ${n} passed`); process.exit(1); }
 console.log(`sfx-burn: ${n} checks passed`);

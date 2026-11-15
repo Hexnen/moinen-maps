@@ -48,6 +48,7 @@ import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
+const RUN_EPOCH = 30 * 60000;  // ms: a burning run's clock moves on by this much at a time (runClock)
 const CLOCK_OK = 30, CLOCK_WAIT = 20000;  // ms: a seat's shared clock error a run joins on; how long after load a run waits for it
 const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
 const CATCH_SHOW_MS = T.CATCH_SHOW_MS;   // MAPSFXSEAT: a catch word sounds this long after its fire's shared moment (question MAPSFXSEAT-2)
@@ -657,7 +658,7 @@ function reconcileBurn() {
   // (MAPRIDE: this seat's room for every run, in the table's order: a run never letters into one laid out before it; a spot with no clean
   // room on this seat is not lettered here)
   const rooms = burnRooms(want);
-  for ( const w of want.values() ) { const r = rooms.get(w.plan.key) ?? []; w.seat = w.idx.filter((i) => r[i]?.ok !== false); w.sig = w.seat.map((i) => `${i}:${Math.round((r[i]?.f ?? 1) * 100)}`).join(); }
+  for ( const w of want.values() ) { const r = rooms.get(w.plan.key) ?? []; w.seat = w.idx.filter((i) => r[i]?.ok !== false); w.sig = `${w.seat.map((i) => `${i}:${Math.round((r[i]?.f ?? 1) * 100)}`).join()}@${runClock(w.plan)}`; }
   for ( const [k, b] of burns ) {
     const w = want.get(k);
     // (MAPRIDE: a run this seat now letters at another size - the room round it changed - starts again at the new size, on the shared clock)
@@ -707,6 +708,13 @@ function burnRooms(want) {
 /** The cap height (scene px) of a burning fire's words: a share of the REFERENCE view's height at the reference zoom (MAPSFXSEAT: the
     same size on every seat; live: 3.5..6 %, by the fire's level; ambient: 3 %) - its phrases sit over the flames for as long as they
     burn, so they stay a size under the event words (the engine's ceiling share, ceilK, does not reach continuous sounds: REQUESTS lmap) */
+/** MAPRIDE: the clock a live run is lettered on: its group's shared start, carried forward by whole RUN_EPOCHs - the engine replays a
+    clocked run's past phrases from its start (at most 10 000 of them, ~3 h; live a fire painted two days before never lettered at all),
+    so a fire burning longer starts its run again at each epoch, on every seat at the same shared instant (reconcileBurn) */
+function runClock(p, now = sharedNow()) {
+  if ( !Number.isFinite(p.start) ) return NaN;
+  return p.start + Math.floor(Math.max(0, now - p.start) / RUN_EPOCH) * RUN_EPOCH;
+}
 function burnSize(p, live, step = stepFor("fire")) {
   // (MAPRIDE: the level at the run's shared start, not this seat's now: the same size on every seat, one joining late too)
   const zoom = SEAT.refZoom(grid(), 0), lv = p.level(Number.isFinite(p.start) ? p.start : sharedNow());
@@ -725,10 +733,10 @@ function startBurn(p, live, idx = null) {
       // (MAPRIDE: a live run on the shared clock - `startAt` the instant its group began to burn, its level read at the phrase's own instant
       // of that clock (the engine passes ms since startAt) -, so every seat letters the same phrases at the same instants, a late one joins
       // mid-phrase; take startAt only once this seat's clock is good (moinen-letters lesson), else the run starts here as before)
-      const clockOk = !(L?.clock?.error?.() > CLOCK_OK) || performance.now() >= CLOCK_WAIT, startAt = live && clockOk && Number.isFinite(p.start) ? toPerf(p.start) : undefined;
+      const clockOk = !(L?.clock?.error?.() > CLOCK_OK) || performance.now() >= CLOCK_WAIT, t0 = runClock(p), startAt = live && clockOk && Number.isFinite(t0) ? toPerf(t0) : undefined;
       return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
           return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
-        level: startAt !== undefined ? (ms) => p.level(p.start + (Number.isFinite(ms) ? ms : sharedNow() - p.start)) : () => p.level(sharedNow()),
+        level: startAt !== undefined ? (ms) => p.level(t0 + (Number.isFinite(ms) ? ms : sharedNow() - t0)) : () => p.level(sharedNow()),
         ...(startAt !== undefined ? { startAt } : {}),
         // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width)
         room: () => burns.get(p.key)?.off?.[i]?.room ?? null, maxWidth: SEAT.RUN.mw * k,
