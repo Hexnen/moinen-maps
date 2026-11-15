@@ -363,6 +363,22 @@ What each kind of caller should pass: dice splash (screen) `magnitude` from the 
 the damage relative to the track; map destruction and fire `area` + `magnitude`; pixel-vfx `span` or `area` + `magnitude` from the
 power level.
 
+**A caller's size step** (moinen-maps SFXSIZE, 2026-11-15; the table's size sliders of the map lettering) [V node + lane, C]: to make a
+group of words smaller or bigger without breaking their hierarchy, step the size the engine DRAWS the word at, not its natural size.
+Trap: the engine drops a caller's `ceilK` (engine.mjs `sizeCtx` passes none to the size model, so only `L.stream`'s own share in
+size.mjs exists on paper), and its clamp holds a word at its ceiling whatever its natural size: a big blast's main word stood at
+0.94 x at a smaller `scale` and 1.0 x at a bigger one (live, lane 5). What works: `z = L.sizeOf(text, opts)` (today's drawn cap
+height `z.px`, mood factor `z.sizeK`), step `z.px` yourself, then play with `{ ...opts, fit: "world", size: px / (z.sizeK * zoom * scale) }`
+(`fit: "world"` = no second clamp; the size still follows the zoom). Keep a smaller step over the legibility floor
+(`L.sizeModel`: floorVh / floorMin / floorMax / quietFloorK) and a bigger one under a cap you read from the engine: ask `L.sizeOf` for a
+far too big word (`size: 20 * innerHeight / zoom, magnitude: 2, fit: "legible"`) and divide its `px` by `L.sizeModel.hardHi`: that is the
+engine's own ceiling for the loudest word of THIS text on THIS screen (height, width over the word's real shape, a crowd's share).
+Measure the box you place with the same options. A `fit: "screen"` word is unclamped: step its `size` and cap it the same way. `L.stream`
+takes no `scale` (pass the stepped syllable unit as `size`: the engine's unit is `sizeOf(..., { fit: "world" }).natural * 0.62`) and
+`L.sustain` takes `size`; both stay under the engine's clamp. At the default step pass the options untouched (the same object), so
+today's words stay byte-identical (SFXSIZE proved it with a play log of every option for a fixed firing, base vs new: 8 of 8 equal).
+(Engine wish, not needed for SFXSIZE: honour `ceilK` in `sizeCtx`, or give `L.sizeOf` the word's hold-box width.)
+
 ## 7. Layers and who sees a word
 Status: stable. [R] for the draw order, [V] for the ids.
 
@@ -771,6 +787,8 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
 | 2026-11-13 | BOOM / BUM only for a blast WITH fire; a blast without fire is KROOM / KRUUM; a hero landing THOOM / DUUM; a cave-in BTHOOM / BDUUM | use `concussion` for a fireless blast, `boom` only with fire | keep `FIRE_BLASTS`; check-words section 21 |
 | 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
+| 2026-11-15 | EVERY option is chosen by the GM for the table («wszystko mg wybiera dla stołu. wszystko»): world scope, players read-only, live | a new option is born world-scoped; no client setting of your own (OS reduced motion / photosensitivity still honoured per seat) | the same for engine settings |
+| 2026-11-15 | The map's destruction lettering gets a size slider: 0 = none, 1, 2 = today's size (default), 3 («aktualna wielkość to 2. dodaj też 1 i 3», «0 to brak»); fire and weather lettering the same, as separate sliders («też z pogody i ognia. mogą być osobne») | step the size through the engine's own options (section 6, "A caller's size step"); at the default pass the options untouched | nothing (callers step the drawn size: `L.sizeOf` + `fit: "world"`, section 6); done in moinen-maps SFXSIZE (`scripts/sfx/sfx-size.mjs`, settings `sfxSizeDestruction` / `sfxSizeFire` / `sfxSizeWeather`) |
 
 ## 15. Tools: settings, authoring, designer, accessibility
 Status: stable (TOOL, contract v6). [V] where marked, else [C].
@@ -1014,6 +1032,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (KEEPBOX, 1.9.9, `tactics-zones-keepbox`): section 21a (the kept word drawn on the impact with a rim; one at a time on
   time windows with a timed cut; the same pictures on every seat: the guard on every planned call, words' flashes giving way inside an
   impact's second, no drawing skipped; `check-seats.mjs`; impact-render `--keep`), the stage table.
+- 2026-11-15 (SFXSIZE, moinen-maps caller `tactics-zones-sfxsize`, no engine change): rulings "everything is the GM's for the table" and
+  the map lettering's size sliders (14); "A caller's size step" (6).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
