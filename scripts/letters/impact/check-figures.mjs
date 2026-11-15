@@ -39,7 +39,12 @@ export async function run(ok) {
     ok(jumps.every((v, i) => i === 0 || v >= jumps[i - 1]), `figures: ${id}: the figures' palette jumps do not build with the strength (${jumps})`);
     /* the strongest is plainly the most: the longest, the most palette jumps, a full hit-stop */
     const st5 = K.steps[5];
-    ok(st5.reduce((a, s) => a + s.ticks, 0) === LIMITS.maxTicks && st5.filter((s) => s.stop).reduce((a, s) => a + s.ticks, 0) >= 3, `figures: ${id} step 5 is not the longest held cut`);
+    /* IMPACT4 (the owner: one roll, a show the table watches for minutes): step 5 is a cut of at least 20 ticks with a hold of at least 4, the
+       one-on-one blows (hit, heavy, crit, ko) the whole second (was: exactly 12 ticks, the old limit) */
+    const len5 = st5.reduce((a, s) => a + s.ticks, 0);
+    ok(len5 >= 20 && len5 <= LIMITS.maxTicks && (!["hit", "heavy", "crit", "ko"].includes(id) || len5 === LIMITS.maxTicks) && st5.filter((s) => s.stop).reduce((a, s) => a + s.ticks, 0) >= 4, `figures: ${id} step 5 is not the longest held cut (${len5} ticks)`);
+    /* step 3 stays short enough that a rapid series (blows ~0.48 s apart) still plays: at most 11 ticks */
+    ok(K.steps[3].reduce((a, s) => a + s.ticks, 0) <= 11, `figures: ${id} step 3 is longer than 11 ticks`);
   }
   { const c5 = KINDS.crit.steps[5], spect = (st) => st.filter((s) => s.fig).length + st.filter((s) => s.punch > 0).length + st.filter((s) => FRAMES[s.type].full).length;
     ok(KIND_IDS.every((id) => spect(KINDS[id].steps[5]) <= spect(c5)), "figures: the strongest critical is the most spectacular picture of all kinds"); }
@@ -84,10 +89,12 @@ export async function run(ok) {
     const small = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }]);
     ok(figTreat(small, f).each[0] === "i", "figures: a token of 100 px keeps its negative");
     const big = env([{ role: "target", cx: 800, cy: 450, sil: sil(320), area: 0.78 }]);
-    ok(figTreat(big, f).each[0] === "r", "figures: a token of 320 px on a 1600 x 900 view (over figArea) gets the rim only");
+    /* IMPACT4: over the cap a bright treatment becomes its luminance-held twin (no area), with a slice of the bright art from what is left */
+    { const tb = figTreat(big, f); ok(tb.each[0] === "n" && tb.slices[0] > 0 && tb.area <= LIMITS.figArea * W * H + 1e-6, `figures: a token of 320 px on a 1600 x 900 view (over figArea) gets its hue negative with a slice of the negative (${tb.each[0]} ${tb.slices[0]})`);
+      ok(figTreat(big, { ...f, fig: "p" }).each[0] === "d" && figTreat(big, { ...f, fig: "k" }).each[0] === "d", "figures: over the cap posterised and inked become the duotone"); }
     const many = env([0, 1, 2, 3].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(140), area: 0.78 })));
     const tm = figTreat(many, f);
-    ok(tm.each[0] === "i" && tm.each.includes("r") && tm.area <= LIMITS.figArea * 1600 * 900, `figures: four tokens share the area cap, the struck one first, the rest get the rim (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
+    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: four tokens share the area cap, the struck one first, the rest get the held twin (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
     for ( const n of [1, 2, 3, 5, 8] ) for ( const w of [40, 90, 150, 260] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
       ok(tt.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: ${n} figures of ${w} px: art changes over ${(tt.area / (1600 * 900) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`); }
     ok(figTreat({ ...small, local: { r: 100 } }, f).each.every((x) => x === "r"), "figures: the gentle panel draws rims only");
