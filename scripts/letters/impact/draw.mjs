@@ -306,7 +306,10 @@ const hexRgb = (c) => { const m = /^#([0-9a-f]{6})/i.exec(String(c)); return m ?
    (check-figures measures every pixel). */
 const LIN = new Float32Array(256);
 for ( let i = 0; i < 256; i++ ) { const c = i / 255; LIN[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }
-const toS = (v) => { const c = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055; return Math.max(0, Math.min(255, Math.round(c * 255))); };
+/* linear -> 8-bit sRGB, the code whose luminance is NEAREST (a table and the midpoints between codes: no pow per pixel) */
+const MIDL = new Float32Array(255); for ( let i = 0; i < 255; i++ ) MIDL[i] = (LIN[i] + LIN[i + 1]) / 2;
+const TOS = new Uint8Array(4097); for ( let i = 0, c = 0; i <= 4096; i++ ) { while ( c < 255 && i / 4096 > MIDL[c] ) c++; TOS[i] = c; }
+const toS = (v) => { if ( !(v > 0) ) return 0; if ( v >= 1 ) return 255; let c = TOS[Math.round(v * 4096)]; while ( c < 255 && v > MIDL[c] ) c++; while ( c > 0 && v < MIDL[c - 1] ) c--; return c; };
 export const relY = (r, g, b) => 0.2126 * LIN[r] + 0.7152 * LIN[g] + 0.0722 * LIN[b];
 /* linear rgb -> the same hue and saturation as far as possible, at luminance Y exactly; -> 8-bit [r, g, b], never saturated red */
 export function fitY(lr, lg, lb, Y) {
@@ -342,17 +345,25 @@ function rgbOfHsl(h, s, l) {
 export function heldPixels(d, mode, o = {}) {
   const out = new Uint8ClampedArray(d.length), n = d.length / 4;
   let mid = 0.18;
-  if ( mode === "d" ) { const ys = []; for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) ys.push(relY(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])); ys.sort((a, b) => a - b); mid = ys.length ? ys[ys.length >> 1] : 0.18; }
+  if ( mode === "d" ) {   // the median luminance of the figure (a histogram of 1024 bins, no sort)
+    const hg = new Uint32Array(1025); let cnt = 0;
+    for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { hg[Math.round(relY(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) * 1024)]++; cnt++; }
+    if ( cnt ) { let acc = 0, k = 0; for ( ; k <= 1024; k++ ) { acc += hg[k]; if ( acc > cnt >> 1 ) break; } mid = Math.min(1024, k) / 1024; }
+  }
   const A = o.a ?? [255, 212, 0], B = o.b ?? [25, 168, 255], turn = mode === "n" ? 0.5 : (o.turn ?? 0.33);
+  const memo = new Map();   // token art repeats its colours: each colour is turned once
   for ( let i = 0; i < n; i++ ) {
     const j = i * 4, r = d[j], g = d[j + 1], b = d[j + 2];
     if ( !(d[j + 3] > 40) ) continue;
+    const key = (r << 16) | (g << 8) | b, hit = memo.get(key);
+    if ( hit !== undefined ) { out[j] = hit >>> 16; out[j + 1] = (hit >>> 8) & 255; out[j + 2] = hit & 255; out[j + 3] = 255; continue; }
     const Y = relY(r, g, b);
     let c;
     if ( mode === "d" ) c = Y < mid ? A : B;
     else { const [hh, ss, ll] = hsl(r, g, b); c = ss < 0.04 ? [r, g, b] : rgbOfHsl((hh + turn) % 1, Math.min(1, ss * 1.35 + 0.08), ll); }
     const f = fitY(LIN[Math.round(Math.max(0, Math.min(255, c[0])))], LIN[Math.round(Math.max(0, Math.min(255, c[1])))], LIN[Math.round(Math.max(0, Math.min(255, c[2])))], Y);
     out[j] = f[0]; out[j + 1] = f[1]; out[j + 2] = f[2]; out[j + 3] = 255;
+    memo.set(key, (f[0] << 16) | (f[1] << 8) | f[2]);
   }
   return out;
 }

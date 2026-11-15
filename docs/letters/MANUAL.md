@@ -57,6 +57,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | ENGVIEW (one table picture from the public API: an explicit `view` for sizeOf / measure / play / stream / sustain; `L.measure` stand / inkReach / ink / rim / life; `L.streamUnit`; legacy sustain on `startAt`; `L.impact.tierOf` / `stepOf` / `tiers` / `seriesBoost`; `ceilK` named as unread) | 1.9.18 | API-CONTRACT 1.9.18 (v22) | `tactics-zones-engview` | pending merge (sections 5, 6, 6a, 8, 10, 12, 18, 20) |
 | ENGDROP (no bridge to plus-ultra's old mirror, no legacy settings description; migration reads plus-ultra's old copy from its document; an older plus-ultra handled; the settings window redesigned) | 1.9.19 | API-CONTRACT 1.9.19 (v23) | `tactics-zones-engdrop` | pending merge (section 15) |
 | IMPACT3 (the tokens take part in the impact frames: negative, posterised, inked, own colours, lit rims on their true outline, echoes, flares; ladders rebuilt in hand-drawn timing inside the guard; `also`, `figures`, per-frame `fig` / `kick`) | 1.9.20 | API-CONTRACT 1.9.20 (v24) | `tactics-zones-impact3` | pending merge (section 21a) |
+| IMPACT4 (the tokens' colours turned at their own luminance on every size and zoom: hue negative, hue cycle, duotone; a slice of the true negative along the blow; pops; the enlarged frames in the token's own art; figures follow their tokens; the strongest impacts a one-second cut, hit-stop 8, still 2 flashes) | 1.9.21 | API-CONTRACT 1.9.21 (v25) | `tactics-zones-impact4` | pending merge (section 21a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -1539,6 +1540,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: IMPACT3 (1.9.20, `tactics-zones-impact3`): section 21a (the tokens take part in the impact frames: figure treatments,
   `fig` / `cracks`, the rebuilt ladders, the figures' area cap, `also` / `figures` / `fig` / `kick`, caller lessons); impact README
   "The figures" and "Kinds"; `check-figures.mjs`.
+- 2026-11-15: IMPACT4 (1.9.21, `tactics-zones-impact4`): section 21a (held colours `n` / `h` / `d`, slices, pops `z`, own-art enlarged
+  frames, figures that follow their tokens, one-second cuts, the length and hit-stop limits); impact README "The figures", "Kinds",
+  "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
@@ -1614,6 +1618,20 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   seats frame by frame; no frame over 16.7 ms inside any directly called impact; a photosensitive seat drew `local` with rims while
   the GM drew `full`. Caller notes from the take: a crowd in plus-ultra passes only its heaviest target (the others could be `also`);
   no maps caller plays an impact for a map blast today.
+- (1.9.21 IMPACT4) The tokens ARE the picture at every size (owner: «odwrócenia kolorów na tokenach, akcent na ich krawędziach ...
+  dynamiczniej» and «jeden rzut i animacja na kilka minut»). In 1.9.20 an ordinary token at the table's zoom (262 px at 0.75 on The
+  Warehouse = 4.8 % of a 1600 x 900 view) was over the 2.5 % cap and got rims only; a full-square token (the minion's blue square)
+  stayed a blue square. Now: (1) three treatments that turn the colours but keep EVERY pixel's relative luminance (WCAG measures a
+  flash in it): `n` hue negative, `h` hue cycle (an angle per drawing), `d` duotone in the impact's accents; they move ink, not light,
+  need no area and no flash slot, never give saturated red (measured within 0.004 of luminance on 20 000 pixels); (2) over the cap a
+  bright treatment becomes its held twin (`i` -> `n`, `p` / `k` -> `d`) plus a SLICE of the true bright art along the blow with what
+  area is left; (3) pops: a drawing's `z` draws the figures bigger at their place (small ones more, at most 2.2 x), counted against
+  the cap on non-flash drawings; (4) `shadow` / `glare` / `swap` show the token's own art (negative / posterised / inked) instead of a
+  flat silhouette; (5) a portrait's own cut-out figure gets an inner ink + accent edge; (6) the figures follow their tokens while they
+  react (full mode: one canvas per figure moved each frame by the token mesh's world transform); (7) the strongest blows are a
+  one-second cut: `maxTicks` 24 (was 12), hit-stop up to 8 ticks (was 4), steps 4-5 15-24 ticks, step 3 at most 11 so a rapid series
+  still plays; still at most 2 flash drawings. Caller option: `z` per step of your own `frames`, `fig` also `n d h`. Callers that
+  capped an impact at 500 ms must read `plan.ms` (plus-ultra tokenreact and splash: reported). `[V node, V render, V live]`
 
 **Frame types** (20): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`, and
 (1.9.20) `fig cracks`. Full-field:
@@ -1630,7 +1648,8 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
   (no full frame, no inverted scene, no hit-stop, everything inside a panel of at most 20 % of the viewport; its panels still counted).
 - reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
   `enabled` off or `impact = off`: nothing.
-- an impact is at most 12 ticks, one drawing 4 ticks, hit-stop 4 ticks; a watchdog timer removes it even when the frame loop died.
+- an impact is at most 24 ticks (1 s; 1.9.21, was 12), one drawing 4 ticks, hit-stop 8 ticks (1.9.21, was 4); a watchdog timer removes
+  it even when the frame loop died.
 - one impact at a time: an impact whose time window overlaps another's is shown only when stronger than all of them (1.9.9: decided on
   the windows of every planned call, on every seat alike; the stronger one cuts the others at its start).
 - Film check (1.9.1): the five-blow ladder on dark, mid-grey and bright scenes gave at most 1.5 whole-picture flashes in any second

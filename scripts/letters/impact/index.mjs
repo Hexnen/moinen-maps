@@ -179,7 +179,7 @@ export function createImpact(L, tools = null) {
         if ( p && Number.isFinite(p.x) && Math.hypot(sub.cx - p.x, sub.cy - p.y) > 1 ) dir = Math.atan2(sub.cy - p.y, sub.cx - p.x);
       } catch {}
     }
-    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false, figLayers: true,
+    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false, figLayers: plan.mode === "full",   // IMPACT4: figure layers follow their tokens; the gentle panel keeps its figures inside its clip
       figs: figsOf(spec, sub), rimTone: plan.rimTone,   /* IMPACT3: the figures that take part on this seat (the ones it may see) */   /* ENGTABLE: the guard is always on (red stays rationed) */
       /* the gentle panel: round the subject, sized from it (FIN-ENGINE FXIT-E2: a far-zoom token gets a panel of a few token widths) */
       local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, R > 0 ? Math.min(Math.min(W, H) * 0.2, Math.max(R * 6, Math.min(W, H) * 0.06)) : Math.min(W, H) * 0.2)) },
