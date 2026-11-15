@@ -93,7 +93,9 @@ function drawSeat(S, step, prev = false, extra = {}) {
     const wayBox = (way, k) => { const bw = it.w.bw * k, bh = it.w.bh * k; let b = null; for ( const q of way ) { const r = { x0: q.x - bw / 2, y0: q.y - bh / 2, x1: q.x + bw / 2, y1: q.y + bh / 2 }; b = b ? { x0: Math.min(b.x0, r.x0), y0: Math.min(b.y0, r.y0), x1: Math.max(b.x1, r.x1), y1: Math.max(b.y1, r.y1) } : r; } return b; };
     if ( ride ) {
       if ( !f.way ) { out.set(it.key, { rules: f.rules, shown: false, w: it.w }); continue; }
-      const k3 = (it.nom?.[2] ?? it.sizes[0]) / it.u;
+      // (MAPEDGE: at the largest size this seat may draw it - its step-3 size times the page's share here (MAPSEATS3), the size rideLayout
+      // keeps its way's side at: `wayCap`)
+      const k3 = (f.wayCap ?? it.nom?.[2] ?? it.sizes[0]) / it.u;
       drawn = sideOf(wayBox(f.way, k3), sub);
       table = sideOf(wayBox(it.path, k3), sub);
     } else {
@@ -187,9 +189,13 @@ for ( const S of ['gm', 'p1'] ) { const r = mainRows.filter((q) => q.S === S); o
       const clean = (cx, cy) => {
         const b = { x0: cx - bw / 2, y0: cy - bh / 2, x1: cx + bw / 2, y1: cy + bh / 2 };
         if ( b.x0 < v.x0 || b.y0 < v.y0 || b.x1 > v.x1 || b.y1 > v.y1 || sideOf(b, sub) !== q.table ) return false;
+        // (MAPEDGE: its standing ink - the engine's measure, `reach` in cap heights from its centre - whole in the view too)
+        const R = it.reach;
+        if ( R && (cx - R.l * cap < v.x0 || cy - R.u * cap < v.y0 || cx + R.r * cap > v.x1 || cy + R.d * cap > v.y1) ) return false;
         const k = inkBox(b, it.ink);
         if ( on(k, PIN) > 0 || on(k, sub) > cov * area(sub) + 1e-6 ) return false;
-        return [...r.panels, ...before].reduce((s, o) => s + on(k, o), 0) <= SEAT.SOFT_OK * area(k) * 0.9;
+        // (MAPEDGE: a panel on at most PANEL_OK of its ink, the words before it at most SOFT_OK)
+        return r.panels.reduce((s, o) => s + on(k, o), 0) <= SEAT.PANEL_OK * area(k) * 0.9 + 1e-6 && before.reduce((s, o) => s + on(k, o), 0) <= SEAT.SOFT_OK * area(k) * 0.9;
       };
       let room = null;
       for ( let cy = v.y0 + bh / 2; cy <= v.y1 - bh / 2 && !room; cy += bh / 10 ) for ( let cx = v.x0 + bw / 2; cx <= v.x1 - bw / 2 && !room; cx += bw / 20 ) {
@@ -253,7 +259,7 @@ for ( const S of ['gm', 'p1'] ) { const r = mainRows.filter((q) => q.S === S); o
 {
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
   const prep = src.slice(src.indexOf("function prepPage(p) {"), src.indexOf("function prepPage(p) {") + 500);
-  ok(src.includes("later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));") && prep.includes("tablePage(p);") && prep.includes("groupLayout(p.group, view(),"),
+  ok(src.includes("later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));") && prep.includes("tablePage(p);") && prep.includes("groupLayout(p.group, mapView(),"),
     "a page's table and this seat's layout are made in an idle moment before its first word (prepPage)");
 }
 // ---- a fire whose source is off this seat's view: lettered only when its run's whole block is off it too (live 2026-11-15 the second
@@ -265,7 +271,7 @@ for ( const S of ['gm', 'p1'] ) { const r = mainRows.filter((q) => q.S === S); o
   ok(PREVoff(below) === "lettered" && SEAT.offSpot(below, k, v) === "cut" && SEAT.offSpot(side, k, v) === "cut" && SEAT.offSpot(far, k, v) === "out",
     "PREV lettered a run whose source is just off the view (its block reaching in, cut by the edge); now such a spot is \"cut\" - not lettered on this seat -, one wholly off it \"out\"");
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
-  ok(src.includes("ok: SEAT.offSpot(p.at(i, now), k, v0, motion) === \"out\", off: true"), "burnRooms letters an off-view spot only when offSpot says its run lies wholly outside the view");
+  ok(src.includes("const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === \"out\", off: true }"), "burnRooms letters an off-view spot only when offSpot says its run lies wholly outside the view");
 }
 // ---- seeded, nothing per seat at random
 const sig = () => JSON.stringify([...drawSeat(REC.p1, 3).out].map(([k, q]) => [k, q.cap, q.box]));

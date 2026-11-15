@@ -207,7 +207,7 @@ export function seatFit({ box, reach = null, view, panels = [], zoom = 1, cap = 
  *          box's cap), min (cap), full (cap), small (cap), life: [t0, t1] | null, ride, cover, ink: [kx, ky] (its ink's share of its box) }]
  * -> Map(key -> { cap, k (cap / u), px, py (pivot), f, dx, dy, box, rules, clean, side })   map a table point q: px + (q.x - px) * f + dx
  */
-export function seatLayout(items, { view, panels = [], pins = [], tokens = [], zoom = 1, edge = SEAT_EDGE } = {}) {
+export function seatLayout(items, { view, panels = [], pins = [], tokens = [], zoom = 1, edge = SEAT_EDGE, up = [] } = {}) {
   const out = new Map();
   if ( !view ) { for ( const it of items ?? [] ) out.set(it.key, { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }); return out; }
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
@@ -218,7 +218,10 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
   const inV = panels.filter((o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1);
   const strips = mergeRects(inV, RIDE_PANEL_GAP / Math.max(1e-4, zoom), 1.3);
   panels = mergeRects(inV, PANEL_GAP);
-  const placed = [];
+  // (MAPEDGE: the words THIS seat drew for other moments that are still up - `up`: their boxes as drawn here, { box, life } - are words up
+  // with every word of this picture: the seat moves words far from the table's place (into its view), and two moments a beat apart were
+  // laid out each on its own - live 2026-11-15 the detonate's second area's KRROOOOMM!! stood on its first area's KA-KRROOOOMM!!)
+  const placed = (up ?? []).filter((q) => q?.box).map((q) => ({ box: q.box, life: q.life ?? null }));
   // (MAPSEATS3: the share of its table size this seat draws the page's MAIN word at - its own size for this window and zoom, less what its
   // room took -: every other word of the page draws the same share of ITS table size, so the words keep the table's proportions on
   // every seat (ADVM r2 item 4: the GM's rocket KA-BOOOOM! drawn smaller than its own debris word, one word shrunk for room, the next not))
@@ -259,7 +262,13 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const nom0 = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
     const nomS = nom0 && gA.some((g) => g !== 1) ? nom0.map((c, i) => c * gA[i]) : nom0;
     // (its sizes, the first that fits the view whole; a word bigger than the view: the size that fits)
-    const fitCap = (B2.x1 - B2.x0) > 0 && (B2.y1 - B2.y0) > 0 ? u2 * Math.min(vw / (B2.x1 - B2.x0), vh / (B2.y1 - B2.y0)) : Infinity;
+    // (MAPEDGE: its INK too - `reach` { l, r, u, d } in cap heights from its box's centre, the engine's inkReach: turned, its entrance, a
+    // tucked prefix, the duplicate block - is whole inside the view, not only its box)
+    const R = it.reach && ["l", "r", "u", "d"].every((k) => Number.isFinite(it.reach[k]) && it.reach[k] >= 0) ? it.reach : null;
+    const outer = (b, cap) => { if ( !R ) return b; const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+      return { x0: Math.min(b.x0, cx - R.l * cap), y0: Math.min(b.y0, cy - R.u * cap), x1: Math.max(b.x1, cx + R.r * cap), y1: Math.max(b.y1, cy + R.d * cap) }; };
+    const fitBox = (B2.x1 - B2.x0) > 0 && (B2.y1 - B2.y0) > 0 ? u2 * Math.min(vw / (B2.x1 - B2.x0), vh / (B2.y1 - B2.y0)) : Infinity;
+    const fitCap = R ? Math.min(fitBox, vw / Math.max(1e-6, R.l + R.r), vh / Math.max(1e-6, R.u + R.d)) : fitBox;
     let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0).map((c) => c * gS);
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
@@ -294,7 +303,8 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         if ( small < min - 1e-9 ) sizes.push(small);
       }
       const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels: strips, placed, meet, sub });
-      const o = { ...r.out, px: p.x, py: p.y, share: gS };
+      // (`wayCap`: the size its way's side is kept at - its largest here, MAPSAME)
+      const o = { ...r.out, px: p.x, py: p.y, share: gS, wayCap: sizes[0] };
       if ( nomR && o.way ) {
         const st = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2, env = o.cap, G = MIN_GAIN, fl = Math.min(it.floor > 0 ? it.floor : Infinity, nomR[0], env);
         const d2 = Math.max(fl, Math.min(nomR[1], env / G)), d1 = Math.max(fl, Math.min(nomR[0], d2 / G)), dr = Math.min(env, [d1, d2, env][st - 1]);
@@ -310,7 +320,10 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       for ( const s2 of r.samples ) placed.push(s2);
       continue;
     }
-    const softList = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), hardG = grid(hardList, view), softG = grid(softList, view);
+    // (MAPEDGE: this seat's panels may lie on a word's box margin, never on more than PANEL_OK of its INK - ADVM r2 item 6: the thunder's
+    // KRA-KA- lead-in stood on the GM's party panel within the old 6 % share; the words up with it keep their SOFT_OK share)
+    const panList = panels.filter(near), panG = grid(panList, view);
+    const softList = placed.filter((q) => meet(q.life, it.life)).map((q) => q.box).filter(near), hardG = grid(hardList, view), softG = grid(softList, view);
     const cover = sub ? Math.max(it.cover ?? 0.3, Number.isFinite(it.cov2) ? it.cov2 : inter(B, sub) / Math.max(1, area(sub))) + 0.02 : 0;
     // (what may not be covered is the word's INK - its hold picture with the rim under it (`ink`: shares of its box) -, not the room its
     // box keeps for the entrance and the outline: the box stays whole inside the view)
@@ -331,14 +344,14 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // side; the nearest free moves (exact, in move space) from the table's place and from its side's touching spot; and, from every
     // candidate that meets an obstacle, just past that obstacle on each side (so a word between two obstacles finds the gap)
     const trySize = (cap, prune, strict, scan = false) => {
-      const f = cap / u, b0 = at2(cap), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
-      const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
-      const A = { x0: Math.min(d0.dx, v.x0 - b0.x0), x1: Math.max(d0.dx, v.x1 - b0.x1), y0: Math.min(d0.dy, v.y0 - b0.y0), y1: Math.max(d0.dy, v.y1 - b0.y1) };
-      const F = prune ? forbOf(inkOf(b0), A, hardList, softList) : [];
+      const f = cap / u, b0 = at2(cap), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0, ob0 = outer(b0, cap);
+      const d0 = { dx: into(ob0.x0, ob0.x1, v.x0, v.x1), dy: into(ob0.y0, ob0.y1, v.y0, v.y1) };
+      const A = { x0: Math.min(d0.dx, v.x0 - ob0.x0), x1: Math.max(d0.dx, v.x1 - ob0.x1), y0: Math.min(d0.dy, v.y0 - ob0.y0), y1: Math.max(d0.dy, v.y1 - ob0.y1) };
+      const F = prune ? forbOf(inkOf(b0), A, PANEL_OK > 0 ? hardList : [...hardList, ...panList], softList) : [];
       // (MAPRIDE cost: a size whose ink has no spot in the view off every pin and token - proven exactly - has no clean spot)
       // (checked lazily - once the nearest candidates found nothing clean: a size that stands clean near its place skips the sweep)
       let proven = !prune;
-      const clampD = (d) => { const q = mv(b0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
+      const clampD = (d) => { const q = mv(ob0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
       const queue = [], seen = new Set();
       const add = (d, g = false) => {
         const c = clampD(d), k = Math.round(c.dx) * 2097152 + Math.round(c.dy);
@@ -402,10 +415,13 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         for ( const o of hardG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { hh2 += a; met.push(o); } }
         const metSoft = [];
         for ( const o of softG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { soft += a; metSoft.push(o); } }
-        const subX = sub ? Math.max(0, inter(k, sub) - cover * area(sub)) : 0, off = offView(q), ia = area(k);
-        // (clean: whole in the view, off every pin and token, its own subject covered no more than allowed, and at most SOFT_OK of its ink
-        // under this seat's panels / words up with it - an edge under a panel is read, a word made smaller is weaker: MAPSFXSEAT2-1)
-        const clean = hh2 <= 1e-6 && off <= 1e-6 && subX <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
+        let pan = 0;
+        for ( const o of panG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { pan += a; metSoft.push(o); } }
+        const subX = sub ? Math.max(0, inter(k, sub) - cover * area(sub)) : 0, off = offView(mv(ob0, d)), ia = area(k);
+        // (clean: whole in the view (its ink reach too: MAPEDGE), off every pin and token, its own subject covered no more than allowed, at
+        // most SOFT_OK of its ink under the words up with it (MAPSFXSEAT2-1) and at most PANEL_OK of it under this seat's panels (MAPEDGE))
+        const clean = hh2 <= 1e-6 && off <= 1e-6 && subX <= 1e-6 && soft <= SOFT_OK * ia + 1e-6 && pan <= PANEL_OK * ia + 1e-6;
+        soft += pan;
         const score = c.base + (soft / Math.max(1, ia)) * 40;
         if ( clean ) {
           if ( !best || score < best.score - 1e-9 ) best = { cap, f, d, q, score, fl, soft };
@@ -418,7 +434,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
           const fs = ((soft + subX + hh2 * 1000 + off * 4) / Math.max(1, area(q))) * 100 + fl * 20 + score;
           if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs, fl };
         }
-        if ( soft > SOFT_OK * ia + 1e-6 ) met.push(...metSoft);
+        if ( soft - pan > SOFT_OK * ia + 1e-6 || pan > PANEL_OK * ia + 1e-6 ) met.push(...metSoft);
         for ( const o of met ) { add({ dx: d.dx + o.x0 - k.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - k.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - k.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - k.y0 + 1 }); }
         if ( sub && subX > 1e-6 ) {
           // (too much of its subject under it: away from the thing, or along its side by as much (MAPSAME: a word that must also clear a
@@ -724,6 +740,101 @@ export const SOFT_OK = 0.06;
 /** MAPSEATS3: the share of its size a seat draws a word at whose thing it does not see (laid out at its view's edge toward it): smaller than
     on a seat that sees it, still read (question MAPSEATS3-2) */
 export const OFF_K = 0.6;
+/** MAPEDGE: the share of a standing word's INK (its hold picture with the rim, not its box's margin) a seat's own interface panel may lie
+    on before the word moves farther or is made smaller (ADVM r2 item 6: the thunder's lead-in on the party panel, a fire word under the
+    challenges panel). 0: a panel may cover the box's margin only (question MAPEDGE-1; the words up keep SOFT_OK). */
+export const PANEL_OK = 0;
+/** MAPEDGE: the part of a seat's view a WORLD word may stand in - its view inside the scene's rectangle (`rect` { x, y, width, height },
+    canvas.dimensions.sceneRect): the padding round the map is no map, a word there letters nothing the table sees (ADVM r2 item 6: H's
+    fire-out word on the player's black padding). A view wholly off the scene: the view as it is. */
+export function sceneView(view, rect) {
+  if ( !view || !rect || !(rect.width > 0) || !(rect.height > 0) ) return view;
+  const v = { x0: Math.max(view.x0, rect.x), y0: Math.max(view.y0, rect.y), x1: Math.min(view.x1, rect.x + rect.width), y1: Math.min(view.y1, rect.y + rect.height) };
+  return v.x1 - v.x0 > 1 && v.y1 - v.y0 > 1 ? v : view;
+}
+/**
+ * MAPEDGE: how THIS seat draws a STREAM (a gun's report at the muzzle, its rattle or impacts along the hits: one syllable per round,
+ * sfx.mjs playStream) - before, streams bypassed the seat rule: a shooter above the player's view lettered its DRRT from beyond the top
+ * edge, cut (ADVM r2 item 5). `src` the stream's source now (scene px), `view` this seat's map view (sceneView), `unit` a syllable's cap
+ * (scene px), `panels` this seat's panels (scene px), `dir` the stream's direction (degrees). A source whose syllables have room in the
+ * view (less the edge and a syllable): "ok", as asked. A source off it: "away" - at the view's edge toward the source (the words' rule:
+ * MAPSEATS3), OFF_K of its size, its syllables running INTO the view; moved along that edge off this seat's panels. Pure.
+ * -> { rule, at, dir, k }
+ */
+export function streamSeat(src, { view, unit, panels = [], dir = -90, zoom = 1, edge = SEAT_EDGE, rows = 1, scale = null } = {}) {
+  if ( !src || !view || !Number.isFinite(src.x) || !Number.isFinite(src.y) ) return { rule: "ok", at: src, dir, k: 1 };
+  const u = unit > 0 ? unit : 0, e = edge / Math.max(1e-4, zoom);
+  const v = { x0: view.x0 + e, y0: view.y0 + e, x1: view.x1 - e, y1: view.y1 - e };
+  if ( v.x1 <= v.x0 || v.y1 <= v.y0 || !(u > 0) ) return { rule: "ok", at: src, dir, k: 1 };
+  // (off this view - beyond which edge most: at that edge, the syllables running away from it, into the view, OFF_K of their size)
+  const away = !(src.x >= v.x0 && src.x <= v.x1 && src.y >= v.y0 && src.y <= v.y1);
+  let d2 = dir, k = 1;
+  if ( away ) {
+    const ex = src.x < v.x0 ? v.x0 - src.x : src.x > v.x1 ? src.x - v.x1 : 0, ey = src.y < v.y0 ? v.y0 - src.y : src.y > v.y1 ? src.y - v.y1 : 0;
+    d2 = ey >= ex ? (src.y < v.y0 ? 90 : -90) : (src.x < v.x0 ? 0 : 180); k = OFF_K;
+  }
+  // (the whole stack - every row of syllables up at once, both lane columns - inside the view: the source moved the least to fit; a view
+  // too short for it at this size: the syllables smaller until it fits, never under STREAM_MIN_K of the size)
+  const ext = (kk) => streamFoot({ x: 0, y: 0 }, d2, u * kk, rows);
+  let f = ext(k);
+  const fitK = Math.min(1, (v.x1 - v.x0) / Math.max(1e-6, f.x1 - f.x0), (v.y1 - v.y0) / Math.max(1e-6, f.y1 - f.y0));
+  if ( fitK < 1 ) { k = Math.max(k * STREAM_MIN_K, k * fitK); f = ext(k); }
+  // (a stream already playing keeps the size it was called at - the engine takes `scale` once: its later seats use that size)
+  if ( Number.isFinite(scale) && scale > 0 ) { k = scale; f = ext(k); }
+  const R = { x0: v.x0 - f.x0, x1: v.x1 - f.x1, y0: v.y0 - f.y0, y1: v.y1 - f.y1 };
+  const into = (p) => ({ x: R.x0 <= R.x1 ? clamp(p.x, R.x0, R.x1) : (R.x0 + R.x1) / 2, y: R.y0 <= R.y1 ? clamp(p.y, R.y0, R.y1) : (R.y0 + R.y1) / 2 });
+  const at = into(src);
+  // (off this seat's panels: the nearest place in the room whose stack lies on none)
+  const foot = (p) => ({ x0: p.x + f.x0, y0: p.y + f.y0, x1: p.x + f.x1, y1: p.y + f.y1 });
+  const hit = (p) => panels.reduce((t, o) => t + inter(foot(p), o), 0);
+  if ( panels.length && hit(at) > 0 ) {
+    const sx = Math.max(0, R.x1 - R.x0), sy = Math.max(0, R.y1 - R.y0), stp = Math.max(u * k * 0.5, Math.max(sx, sy) / 30, 1);
+    const cand = [];
+    for ( let x = R.x0; x <= R.x0 + sx + 1e-6; x += stp ) for ( let y = R.y0; y <= R.y0 + sy + 1e-6; y += stp ) cand.push({ x, y });
+    for ( const p of [{ x: at.x, y: R.y0 }, { x: at.x, y: R.y0 + sy }, { x: R.x0, y: at.y }, { x: R.x0 + sx, y: at.y }] ) cand.push(p);
+    cand.sort((a, b) => Math.hypot(a.x - at.x, a.y - at.y) - Math.hypot(b.x - at.x, b.y - at.y));
+    const best = cand.find((p) => hit(p) <= 0);
+    if ( best ) Object.assign(at, best);
+  }
+  const moved = Math.hypot(at.x - src.x, at.y - src.y) > 0.5;
+  return { rule: away ? "away" : moved ? "shift" : "ok", at, dir: d2, k };
+}
+/** MAPEDGE: a stream's syllables never smaller than this share of their size to fit a short view (a stack that still does not fit
+    stands centred on the view; the engine's own legible floor applies after) */
+export const STREAM_MIN_K = 0.5;
+/** MAPEDGE: how long an invincible stream syllable takes a LANE (the engine's LEGIBLE_MS: its life 340 ms + 260; engine.mjs stream()) */
+export const STREAM_LEG_MS = 600;
+/** MAPEDGE: the most syllables of one stream legible at once - its rows; more lanes than the view's room in front of the source go
+    BEHIND it in the engine with no room check (live: the heli run's 6 lanes, rows below the window) */
+export const STREAM_ROWS = 3;
+/** MAPEDGE: the stream's beats thinned on the table's data (the same on every seat) so that at most `max` syllables take a lane at once:
+    a beat is kept while fewer than `max` kept beats are still legible at its moment; the first and the last beat stay */
+export function thinBeats(beats, legMs = STREAM_LEG_MS, max = STREAM_ROWS) {
+  const bs = (beats ?? []).filter(Number.isFinite).slice().sort((a, b) => a - b), out = [];
+  for ( const b of bs ) if ( out.filter((t) => t + legMs > b).length < max ) out.push(b);
+  if ( bs.length && out.at(-1) !== bs.at(-1) ) { if ( out.length > 1 ) out.pop(); out.push(bs.at(-1)); }
+  return out;
+}
+/** the most beats legible at once (the lanes the engine opens) */
+export function streamRows(beats, legMs = STREAM_LEG_MS) {
+  const bs = (beats ?? []).filter(Number.isFinite);
+  return bs.reduce((m, b) => Math.max(m, bs.filter((t) => t <= b && t + legMs > b).length), bs.length ? 1 : 0);
+}
+/**
+ * MAPEDGE: the box (scene px) the ink of a stream's stack covers, its source at `at`, running `dir` degrees, syllable cap `s`, `rows`
+ * syllables up at once - from the engine's lanes (engine.mjs stream(): row r at 0.5 cap + 0.45 cap of travel + r half-steps along the run,
+ * two columns half a lane width either side of it), measured live (the heli run at zoom 0.5: half-step 1.57 caps, columns 2.05 caps out,
+ * a syllable's ink 1.5 caps high, about 2.8 wide). Pure.
+ */
+export const STREAM_FOOT = { ahead: 0.95, half: 1.6, inkH: 0.8, lat: 2.05, inkW: 1.4 };
+export function streamFoot(at, dir, s, rows = 1) {
+  const F = STREAM_FOOT, r = Math.max(1, Math.round(rows) || 1);
+  const fwd = s * (F.ahead + (r - 1) * F.half + F.inkH), back = s * Math.max(0, F.inkH - F.ahead + 0.5), lt = s * (F.lat + F.inkW);
+  const a = (dir * Math.PI) / 180, fx = Math.cos(a), fy = Math.sin(a), nx = -fy, ny = fx;
+  const xs = [], ys = [];
+  for ( const p of [fwd, -back] ) for ( const q of [lt, -lt] ) { xs.push(at.x + fx * p + nx * q); ys.push(at.y + fy * p + ny * q); }
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
 /**
  * Is there a move d inside `A` ({ x0, x1, y0, y1 }: the moves allowed) that puts the box `k` on none of `obs` (touching allowed)? Exact:
  * every obstacle forbids one open rectangle of moves; the allowed rectangle is swept in x-slabs and each slab's forbidden y-intervals

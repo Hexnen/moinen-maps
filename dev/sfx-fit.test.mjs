@@ -185,7 +185,7 @@ await group("RIDE", () => {
   const r2 = FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) });
   ok(r2[0].fitK === 0, "a step-3 main word with no clean place anywhere stands at the size that covers least");
   // (MAPSFXSEAT2: seatLayout's `pins`, beside this seat's panels and the screen words still up on it)
-  ok(/panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.screenUp\.filter\(/.test(sfx) && /pins: pinRects\(\), zoom: 1 \}\)/.test(sfx), "an unlocated word keeps off the map's pins too (this seat's: the seat rule)");
+  ok(/panels: uiCache\.rects \?\? \[\], up: screenUp\.filter\(/.test(sfx) && /pins: pinRects\(\), zoom: 1 \}\)/.test(sfx), "an unlocated word keeps off the map's pins too (this seat's: the seat rule)");
   // (MAPSFXSEAT: with no clean size the BIGGEST size within LADDER_SLACK of the least covering one - not today's size by default)
   const fake2 = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.45 : w.fitK > 0.4 ? 0.42 : 0.4) }));
   ok(FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake2, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) })[0].fitK === undefined, "a step-3 main word with no clean place keeps its stepped size when it covers barely more than today's");

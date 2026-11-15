@@ -164,7 +164,7 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], heard: !!w.heard || !!w.hint, main: w.role === "main", sound: Number.isFinite(w.sx) && Number.isFinite(w.sy) ? { x: w.sx, y: w.sy } : null, ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], reach: w.inkU ?? null, heard: !!w.heard || !!w.hint, main: w.role === "main", sound: Number.isFinite(w.sx) && Number.isFinite(w.sy) ? { x: w.sx, y: w.sy } : null, ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
       // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
       // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
       ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
@@ -203,12 +203,20 @@ export function holdOf(text, o, d) {
 }
 /** The engine's own measure of a word (L.measure, LETR 1.9.11: the box it will draw and the whole reach of its entrance and hold), in
     units of its cap height (no seat's own size setting is in it), with the table's motion (reduced false). null without L.measure. */
+const INK_VIEW = { vw: SEAT.REF_VW, vh: SEAT.REF_VH, zoom: 1, alive: 0, dpr: 1 };
 export function measureOf(text, o, d) {
   try {
     const m = d.L?.measure?.(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 } });
     if ( !(m?.unit > 0) || !(m.hold?.w > 0) ) return null;
     const u = m.unit;
-    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, holdMs: Number(m.plan?.holdMs) || 0,
+    // (MAPEDGE: the INK the word really puts down from its first entrance drawing on - turned by its rotation, its entrance poses, a
+    // tucked prefix, the duplicate block and rim (engine 1.9.18 inkReach) - in cap heights from its centre: what the seat keeps whole
+    // inside its view. Live 2026-11-15 a detonate word turned a few degrees stood with its box in the view and its ink cut by the edge.)
+    // (read from a measure on the REFERENCE view - its pixel floors at a fixed scale, not this seat's zoom: the ink of a live-zoom measure
+    // differs per seat by its floors, and the engine's shared picture memo then gave the next word of the table a place 1 px apart)
+    let ink = null;
+    try { const ir = d.L.measure(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 }, view: INK_VIEW })?.stand; if ( ir && ["l", "r", "u", "d"].every((k) => Number.isFinite(ir[k])) ) ink = { l: ir.l / u, r: ir.r / u, u: ir.u / u, d: ir.d / u }; } catch { ink = null; }
+    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, ink, holdMs: Number(m.plan?.holdMs) || 0,
       exitMs: (m.plan?.timeline?.exit ?? []).reduce((a, p) => a + (Number(p.ticks) || 0) * TICK_MS, 0) };
   } catch { return null; }
 }
@@ -226,6 +234,7 @@ export function measure(w, d) {
     w.bw = b.bw; w.bh = b.bh;
     // (the reach the engine itself reports for THIS word, instead of a factor per entrance that goes stale with the engine's motion)
     w.reachU = md?.reach ?? null; w.rk = md ? FIT.reachFactor(hb, md.reach) : FIT.reachOf(o.in);
+    w.inkU = md?.ink ?? null;
     // (MAPRIDE: the hold the engine gives the word - its sound family's own body: a shock wave holds 1.3 s, KA-BOOOOM 1.4 s - so its life
     // on the table (sfx-seat lifeOf) is as long as it really stands: live a wave word still stood when a debris word was laid onto it)
     w.holdMs = md?.holdMs ?? 0;

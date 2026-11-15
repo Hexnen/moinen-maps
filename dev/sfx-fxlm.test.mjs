@@ -60,7 +60,7 @@ group("F2", () => {
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
   // (MAPSFXSEAT2: the seat rule is sfx-seat seatLayout over a page's / moment's words - was seatFit + seatGroup)
   // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /const ui = uiBoxes\(\);/.test(sfx) && /SEAT\.seatLayout\(items, \{ view: vw, panels: ui, pins, tokens: sharedTokens\(vw\), zoom \}\)/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift, a page / moment as one group)");
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /const ui = uiBoxes\(\);/.test(sfx) && /SEAT\.seatLayout\(items, \{ view: vw, panels: ui, pins, tokens: sharedTokens\(vw\), zoom, up \}\)/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift, a page / moment as one group)");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
@@ -210,7 +210,7 @@ group("F15", () => {
   ok(b.length === 3 && b[0] === 0 && b[2] === 240 && b.every((x, i) => i === 0 || x > b[i - 1]), "F15 a three-round walk rattles on three beats over its length");
   const long = Array.from({ length: 20 }, (_, i) => ({ x: i, y: 0, ms: i * 90 }));
   ok(C.streamBeats(long).length === 8 && C.streamBeats(long).at(-1) === 1710 && C.streamBeats([{ x: 0, y: 0, ms: 0 }]).length >= 1, "F15 a long burst: at most eight syllables to its last round; a single round still sounds");
-  ok(/const beats = C\.streamBeats\(W\)/.test(sfx), "F15 the runtime uses them");
+  ok(/const beats = SEAT\.thinBeats\(C\.streamBeats\(W\)\)/.test(sfx), "F15 the runtime uses them (MAPEDGE: thinned to the stream's rows)");
 });
 
 /* F16: a scene change leaves nothing behind */
@@ -298,7 +298,7 @@ group("SHOT", () => {
   ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "impact" && hit.mat === "stone" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
   ok(!C.isEcho(C.cluster([me], G)[0], [{ x: me.x + 300, y: me.y, reach: 2000, t: me.t + 20, prio: 7, voice: "gunhit" }], G), "SHOT the report is never swallowed as an echo of its impacts (live: it was)");
   ok(C.planCluster(C.cluster([free], G)[0], { grid: G, known: KINDS })[0].kind === C.kindOf("gun", KINDS, null, C.gunKinds(walk)), "SHOT a gun with no shooter rattles in the gun kind of its own walk");
-  ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /dir: Number\.isFinite\(w\.stream\.dir\)/.test(sfx),
+  ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /const dir = Number\.isFinite\(w\.stream\.dir\) \? w\.stream\.dir : -90/.test(sfx) && /to, dir, beats, startAt: t0/.test(sfx),
     "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
 });
 

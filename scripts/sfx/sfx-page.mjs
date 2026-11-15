@@ -52,6 +52,24 @@ export function unrepeated(write, seed, used, n = REWORD) {
 /** The material word of the destruction layer's ground (sfx-core MATS) -> the engine's material (words.mjs MATERIALS). */
 export const GROUND_MAT = { grass: "earth", earth: "earth", sand: "earth", snow: "earth", stone: "stone", wood: "wood", metal: "metal", water: "water", auto: "earth" };
 
+/**
+ * MAPEDGE: may a firing be told as a page, from its RECORD alone (before its fire-layer strokes are here)? firingPage's MAIN comes from a
+ * burst (a stroke keyed `burst.<id>`), a landing or strike accent, or a shock wave (a dust stroke - its layer `shock`). A gun's walk with
+ * none of them has no page: its damage areas (the pocks) are NOT the page's, they letter the IMPACT where the rounds land (sfx.mjs onEntry
+ * - the gunhit at the target with a shooter, the rattle at the hits without one). Before, every firing's areas were silenced from the
+ * moment its record came (MAPSFXSEAT), and a burst of gunfire lettered only the muzzle (review 2026-11-15 item 5). A firing that is
+ * neither (an unknown custom preset) keeps the old rule: its record owns its areas.
+ */
+export function mayPage(rec) {
+  if ( !rec ) return false;
+  const keys = (rec.f ?? []).map((e) => String(e?.key ?? ""));
+  if ( keys.some((k) => /^burst\./.test(k) || /^shock\./.test(k)) ) return true;
+  const acc = rec.pending?.accent ?? [];
+  if ( acc.some((a) => a?.kind === "landing" || a?.kind === "strike") ) return true;
+  if ( rec.walk?.hits?.length ) return false;
+  return true;
+}
+
 const keyOf = (s) => String(s?.key ?? "");
 const isFire = (st) => st?.k === "fire";
 
