@@ -1606,6 +1606,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
 - 2026-11-15: ENGPINK (1.9.22, `tactics-zones-engpink`): section 13 "No pink" (the band, the replaced colours, the computed shades),
   section 14 ruling row, section 15 palette row; `check-pink.mjs` (check.mjs 8g and 16).
+- 2026-11-15: IMPACT5 (1.9.23, `tactics-zones-impact5`): section 21a (the cut-in, the open area rule for ordinary seats, the same picture
+  on every seat, figures on every drawing, rim by contrast, no pink from turned colours, warm-up and the stall rule, `I.seatMode`,
+  `I.warm`, `handle.trace`); impact README "The cut-in", "Safety"; `check-figures.mjs` (area rule, cut-in, pink).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
@@ -1695,6 +1698,20 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   one-second cut: `maxTicks` 24 (was 12), hit-stop up to 8 ticks (was 4), steps 4-5 15-24 ticks, step 3 at most 11 so a rapid series
   still plays; still at most 2 flash drawings. Caller option: `z` per step of your own `frames`, `fig` also `n d h`. Callers that
   capped an impact at 500 ms must read `plan.ms` (plus-ultra tokenreact and splash: reported). `[V node, V render, V live]`
+- (1.9.23 IMPACT5) A sakuga cut for its whole length (owner again: «bardziej jak sakuga mad ... Dynamiczniej»; and on the 2.5 % limit
+  for ordinary seats: «Poluzuj»). Measured before: after ~200 ms only token-sized changes were left (a few px at a far zoom); a closer
+  seat got the luminance-held twin where the far one got the negative; splashes and rings without figures covered the struck token.
+  Now: (1) the CUT-IN: every drawing carries `cu` and `kb`; the star (the struck figure, with no target the attacker `from`, else the
+  first `also`) is drawn enlarged at its own place to about 34 % of the view's short side (at least 1.3 x, at most `cutMax` 44 %),
+  the others up to 16 %; it grows over the lead-in, stands through the hold, eases back over the release, winds up against the blow and
+  drifts along it, stays in the view; the ink (stars, rings, flares, panels, echoes) is laid round the cut-in; (2) the NEW RULE for
+  ordinary seats: the figures' brightness changes and enlargements share 25 % of min(W, H)^2 per drawing (`figAreaOpen`), each
+  figure counted at its cut-in cap, so every seat decides alike at any zoom; photosensitive and reduced-motion seats unchanged (rims
+  only / one still); the scene's flash rationing unchanged; (3) every drawing of a ladder carries the figures; (4) the rim's accent
+  stands off the art's own edge colour (a yellow-ringed portrait gets blue or paper, not yellow); (5) turned colours (negative, hue
+  negative, hue cycle) never land in the pink band; (6) the figures' art is worked out at the call and for visible tokens while idle
+  (`I.warm`), two drawings are painted ahead, and a flash or hit-stop drawing shown in a frame that ran long stays one more frame.
+  New: `I.seatMode()` (what this seat shows; `I.mode()` stays the table's), `I.warm(tokens?)`, `handle.trace`. `[V node]`
 
 **Frame types** (20): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`, and
 (1.9.20) `fig cracks`. Full-field:
@@ -1721,6 +1738,11 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
   setting any more and always on; this line is history.)
 - (1.9.20) The figures: brightness-changing art (`i p k`) at most 2.5 % of the view per drawing in all, never a flash by itself;
   rims only on a gentle or reduced seat; red in a figure's art drawn as the safe crimson; the rim's accent never red. `[V node]`
+- (1.9.23 IMPACT5, the owner: «Poluzuj») **The rule now:** on an ORDINARY seat the figures' brightness changes and cut-in enlargements
+  share at most 25 % of the view's short side squared per drawing (`LIMITS.figAreaOpen`; 14 % of a 16:9 view), each figure counted at
+  its largest possible size, so every seat with the token in view shows the same; a PHOTOSENSITIVE seat (gentle variant) still draws
+  rims only and a REDUCED-MOTION seat one still drawing, exactly as before; the scene's flashes stay 2 per impact and 2 per second for
+  everyone. The 2.5 % line above is history. `[V node]`
 
 **Cost.** IMPACT measured live 2026-11-13 (1600x900, GM seat): no animation frame over 25 ms through any frame type or whole impact;
 one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.9.1 (film clock off):

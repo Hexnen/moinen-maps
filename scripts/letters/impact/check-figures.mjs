@@ -7,7 +7,7 @@
 // Run from check-impact.mjs (`run`), or alone: node scripts/letters/impact/check-figures.mjs -> "impact figures: N checks, F failed".
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK } from "./plan.mjs";
-import { paintFrame, paintFigLayers, figTreat, popOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED } from "./draw.mjs";
+import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, starOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb } from "./draw.mjs";
 
 const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
 const MAGS = [0.2, 0.45, 0.7, 1.1, 1.5, 1.9];   // one per step
@@ -82,27 +82,45 @@ export async function run(ok) {
     for ( const t of log ) ok(log.filter((x) => x >= t && x < t + LIMITS.windowMs).length <= LIMITS.fullPerSec, `figures: ${kind} m=${m} more than ${LIMITS.fullPerSec} flash drawings in a second`);
     ok(b.frames.every((f) => f.fig === undefined || Object.hasOwn(FIG, f.fig)), "figures: a thinned impact keeps valid figure treatments");
   }
-  /* the area cap: the figures' art may change brightness only while they cover at most figArea of the view */
-  { const W = 1600, H = 900, sil = (w) => ({ src: {}, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
+  /* the area cap. IMPACT5 (1.9.23, the owner on the old 2.5 % limit for ordinary seats: «Poluzuj»): on an ordinary seat the figures may
+     change the brightness of LIMITS.figAreaOpen of min(W, H)^2 per drawing, each counted at its largest (cut-in) size, so the decision does
+     not depend on the zoom: the closer seat shows the same treatment as the far one (IMPACT3/4 pinned 2.5 % of the view at the size on that
+     screen, which gave the closer seat the held twin). The calm seats keep rims only (pinned below, unchanged) */
+  { const W = 1600, H = 900, u = 900, cap = LIMITS.figAreaOpen * Math.min(u * u, W * H), sil = (w) => ({ src: {}, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
     const env = (figs, o = {}) => ({ W, H, figs, local: null, ...o });
-    const f = { type: "fig", fig: "i", seed: 1 };
+    const f = { type: "fig", fig: "i", seed: 1, cu: 1, kb: 0.5 };
+    ok(LIMITS.figAreaOpen > LIMITS.figArea && LIMITS.figAreaOpen <= 0.25 && LIMITS.cutMax ** 2 <= LIMITS.figAreaOpen, "figures: the open cap is the owner's relaxed limit (at most a quarter), the star's cut-in always fits in it");
     const small = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }]);
     ok(figTreat(small, f).each[0] === "i", "figures: a token of 100 px keeps its negative");
     const big = env([{ role: "target", cx: 800, cy: 450, sil: sil(320), area: 0.78 }]);
-    /* IMPACT4: over the cap a bright treatment becomes its luminance-held twin (no area), with a slice of the bright art from what is left */
-    { const tb = figTreat(big, f); ok(tb.each[0] === "n" && tb.slices[0] > 0 && tb.area <= LIMITS.figArea * W * H + 1e-6, `figures: a token of 320 px on a 1600 x 900 view (over figArea) gets its hue negative with a slice of the negative (${tb.each[0]} ${tb.slices[0]})`);
-      ok(figTreat(big, { ...f, fig: "p" }).each[0] === "d" && figTreat(big, { ...f, fig: "k" }).each[0] === "d", "figures: over the cap posterised and inked become the duotone"); }
-    const many = env([0, 1, 2, 3].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(140), area: 0.78 })));
+    { const tb = figTreat(big, f); ok(tb.each[0] === "i" && tb.slices[0] === 0 && tb.area <= cap + 1e-6, `figures: a token of 320 px (a close zoom) keeps its negative like the far seat (${tb.each[0]} ${tb.slices[0]})`); }
+    { const seen = new Set(); for ( const w of [20, 40, 80, 160, 320, 390] ) { const t1 = figTreat(env([{ role: "target", cx: 800, cy: 450, sil: sil(w), area: 0.78 }]), f); seen.add(t1.each.join()); ok(t1.area <= cap + 1e-6, `figures: a struck token of ${w} px changes ${(t1.area / (W * H) * 100).toFixed(2)} % of the view (open cap)`); }
+      ok(seen.size === 1, `figures: the struck token gets the same treatment at every zoom (${[...seen]})`); }
+    const many = env([0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(100), area: 0.95 })));
     const tm = figTreat(many, f);
-    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: four tokens share the area cap, the struck one first, the rest get the held twin (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
-    for ( const n of [1, 2, 3, 5, 8] ) for ( const w of [40, 90, 150, 260] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
-      ok(tt.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: ${n} figures of ${w} px: art changes over ${(tt.area / (1600 * 900) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`); }
-    ok(figTreat({ ...small, local: { r: 100 } }, f).each.every((x) => x === "r"), "figures: the gentle panel draws rims only");
+    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.zs[0] > 1 && tm.area <= cap + 1e-6, `figures: eight tokens share the open cap, the struck one first, the rest get the held twin (${tm.each}, ${(tm.area / (W * H) * 100).toFixed(2)} %)`);
+    ok(figTreat(many, { ...f, fig: "p" }).each.includes("d") && figTreat(many, { ...f, fig: "k" }).each.includes("d"), "figures: over the cap posterised and inked become the duotone");
+    for ( const n of [1, 2, 3, 5, 8] ) { const seen = new Set(); for ( const w of [30, 60, 90, 130] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
+      seen.add(tt.each.join() + "|" + tt.slices.join());
+      ok(tt.area <= cap + 1e-6, `figures: ${n} figures of ${w} px: art changes over ${(tt.area / (W * H) * 100).toFixed(2)} % of the view (open cap ${(cap / (W * H) * 100).toFixed(1)} %)`); }
+      ok(seen.size === 1, `figures: ${n} figures get the same treatments at every zoom (${[...seen].join(" / ")})`); }
+    ok(figTreat({ ...small, local: { r: 100 } }, f).each.every((x) => x === "r") && figTreat({ ...small, local: { r: 100 } }, f).zs.every((z) => z === 1), "figures: the gentle panel draws rims only, nothing enlarged");
     ok(figTreat(small, { ...f, fig: "o" }).each[0] === "o" && figTreat(big, { ...f, fig: "o" }).each[0] === "o", "figures: their own colours are no change of their art (no cap)");
     ok(figTreat(small, { ...f, fig: undefined }) === null && figTreat(env([]), f) === null, "figures: no treatment or no figure = nothing");
     for ( const t of ENLARGED ) ok(figTreat(small, { ...f, type: t }) === null, `figures: ${t} shows the struck figure enlarged: no second copy at its place`);
     const two = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }, { role: "from", cx: 300, cy: 450, sil: sil(100), area: 0.78 }]);
     ok(figTreat(two, { ...f, type: "shadow" }).list.length === 1 && figTreat(two, { ...f, type: "shadow" }).list[0].role === "from", "figures: on a black frame the attacker stands at its place beside the enlarged struck figure");
+    /* IMPACT5: the cut-in: the star (struck figure, else the attacker) is enlarged by cu, at least 1.3 x, never past cutMax of the short side;
+       the others by less, never past cutMaxOther; nothing on a calm seat; the star stays in the view (pulled in by at most half its size) */
+    for ( const w of [12, 30, 60, 120, 250, 380, 500] ) {
+      const g = { role: "target", cx: 800, cy: 450, sil: sil(w) }, e1 = env([g, { role: "from", cx: 300, cy: 450, sil: sil(w) }], { dir: 0 });
+      const s1 = cutScale(e1, g, f), s0 = cutScale(e1, g, { ...f, cu: 0 }), so = cutScale(e1, e1.figs[1], f);
+      ok(s0 === 1 && (w >= LIMITS.cutMax * u ? s1 === 1 : s1 >= Math.min(1.3, LIMITS.cutMax * u / w) - 1e-9) && w * s1 <= Math.max(w, LIMITS.cutMax * u) + 1e-6, `figures: the cut-in of a ${w} px star is ${s1.toFixed(2)} x`);
+      ok(w * so <= Math.max(w, LIMITS.cutMaxOther * u) + 1e-6 && so <= s1 + 1e-9, `figures: a figure beside the star is enlarged less (${so.toFixed(2)} x)`);
+      ok(cutScale({ ...e1, local: { r: 100 } }, g, f) === 1, "figures: no cut-in on a calm seat");
+    }
+    { const g = { role: "from", cx: 20, cy: 450, sil: sil(40) }, e2 = env([g], { dir: Math.PI }), s = cutScale(e2, g, f), [dx] = cutOffset(e2, g, f, s);
+      ok(starOf(e2) === g && s > 1.3 && 20 + dx - 40 * s * 0.5 >= -1e-6 - 40 * s * 0.06, `figures: with no struck figure the attacker is the star, kept in the view (${s.toFixed(2)} x, dx ${dx.toFixed(0)})`); }
   }
   /* no saturated red from any art: a cyan costume inverts to red, a red one stays red: both become the deep crimson */
   { const px = [[0, 255, 255, 255], [255, 0, 0, 255], [20, 230, 220, 255], [250, 60, 70, 255], [255, 255, 255, 255], [12, 12, 16, 255], [200, 30, 30, 0], [90, 200, 60, 255], [255, 120, 140, 255]];
@@ -139,10 +157,25 @@ export async function run(ok) {
     }
     ok(FIG_HELD.has("n") && FIG_HELD.has("d") && FIG_HELD.has("h") && [...FIG_HELD].every((t) => !FIG_BRIGHT.has(t)) && Object.entries(FIG_TWIN).every(([a, b]) => FIG_BRIGHT.has(a) && FIG_HELD.has(b)), "figures: every bright treatment has a held twin");
   }
+  /* 2b'. IMPACT5 (ENGPINK, the owner: «Nie chcę żeby najczęstsze napisy były różowe»): a colour the engine turns (negative, hue negative,
+     hue cycle) is never in the pink band, on any colour, for any turn; the held ones still keep luminance (2b) */
+  { const { isPink } = await import("../design.mjs");
+    const hex = (o, j) => "#" + [o[j], o[j + 1], o[j + 2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+    let sd = 7; const rnd = () => ((sd = (Math.imul(sd, 1103515245) + 12345) >>> 0) >>> 13) & 255;
+    const n = 30000, d = new Uint8ClampedArray(n * 4);
+    for ( let i = 0; i < n; i++ ) d.set([rnd(), rnd(), rnd(), 255], i * 4);
+    d.set([0, 200, 40, 255, 40, 255, 60, 255, 30, 160, 20, 255], 0);   // greens: their negative is magenta
+    for ( const [m, out] of [["i", invPixels(d)], ["n", heldPixels(d, "n")], ...[0.08, 0.25, 0.42, 0.58, 0.75, 0.92].map((t) => [`h${t}`, heldPixels(d, "h", { turn: t })])] ) {
+      let pink = 0; for ( let i = 0; i < n; i++ ) if ( isPink(hex(out, i * 4)) ) pink++;
+      ok(pink === 0, `figures: the engine's ${m} turns ${pink} colours pink`);
+    }
+    ok(unpinkRgb(255, 55, 255) && !isPink(hex(unpinkRgb(255, 55, 255), 0)) && unpinkRgb(25, 168, 255) === null, "figures: a magenta is turned out of the pink band, a blue is left alone");
+  }
   /* 2c. IMPACT4: the pops and the bright art stay inside the figures' area cap on every drawing that is not itself a flash, at every step,
      mode, figure size (a far zoom to a close one) and count; a flash drawing takes no area only when it IS a flash; gentle / reduced: rims,
      no pop */
-  { const W = 1600, H = 900, cap = LIMITS.figArea * W * H, sil = (w) => ({ src: {}, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
+  /* IMPACT5 (the owner: «Poluzuj»): the cap is LIMITS.figAreaOpen of min(W, H)^2 on ordinary seats (was figArea of the view) */
+  { const W = 1600, H = 900, cap = LIMITS.figAreaOpen * 900 * 900, sil = (w) => ({ src: {}, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
     let draws = 0, popped = 0, held = 0;
     for ( const kind of KIND_IDS ) for ( const m of MAGS ) for ( const pr of [P0, { ...P0, impact: "local" }, { ...P0, flashes: false }, { ...P0, motion: "gentle" }, { ...P0, motion: "reduced" }] ) {
       const p = safety(planImpact({ kind, magnitude: m, seed: `c:${kind}:${m}`, dir: 30 }), pr, { flashLog: [], now: 0, t0: 0 });
@@ -155,7 +188,7 @@ export async function run(ok) {
           if ( !tr ) continue;
           draws++;
           ok(tr.flash === (!gentle && isFlash(f)), `figures: ${kind} m=${m} ${f.type}: a drawing takes the flash exemption without being a flash`);
-          if ( !tr.flash ) ok(tr.area <= cap + 1e-6, `figures: ${kind} m=${m} ${f.type} ${cnt} x ${w} px: the figures change ${(tr.area / (W * H) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`);
+          if ( !tr.flash ) ok(tr.area <= cap + 1e-6, `figures: ${kind} m=${m} ${f.type} ${cnt} x ${w} px: the figures change ${(tr.area / (W * H) * 100).toFixed(2)} % of the view (open cap)`);
           if ( gentle ) ok(tr.each.every((t) => t === "r") && tr.zs.every((z) => z === 1), `figures: ${kind} m=${m} ${p.mode}: the gentle panel pops or turns a figure`);
           if ( tr.zs.some((z) => z > 1) ) popped++;
           if ( tr.each.some((t) => FIG_HELD.has(t)) ) held++;
@@ -173,7 +206,7 @@ export async function run(ok) {
     const figs = [{ role: "target", cx: 800, cy: 450, sil: sl(90) }, { role: "from", cx: 400, cy: 450, sil: sl(90) }];
     const e = { W: 1600, H: 900, cx: 800, cy: 450, R: 45, dir: 0, mag: 1.6, step: 4, kind: "hit", tone: TONES.hero, rimTone: "a", sil: figs[0].sil, figs, local: null, redOk: false, makeCanvas: fake };
     const L = paintFigLayers(e, { type: "fig", seed: 3, fig: "i", z: 1.55 });
-    ok(L.length === 2 && L.every((x) => x.canvas.width >= 90 && Math.abs(x.x + x.size / 2 - x.g.cx) < 1e-6), `figures: one canvas per figure, centred on it (${L.length})`);
+    ok(L.length === 2 && L.every((x) => x.canvas.width >= 90 && Math.abs(x.x + x.size / 2 - x.g.cx - x.dx) < 1e-6), `figures: one canvas per figure, centred on it (with its cut-in offset) (${L.length})`);
     ok(L[0].size >= 90 * 1.55, `figures: the struck figure's canvas holds its pop (${L[0].size})`);
     ok(paintFigLayers(e, { type: "shadow", seed: 3, fig: "i" }).every((x) => x.g.role !== "target"), "figures: an enlarged frame has no second struck figure on a layer");
     ok(paintFigLayers(e, { type: "fig", seed: 3 }).length === 0, "figures: no treatment, no layers");

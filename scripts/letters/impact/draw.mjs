@@ -6,6 +6,7 @@
    (a dark busy scene as much as a pale one). */
 import { INK, PAPER, FRAMES, LIMITS, isRed, safeColor, SAFE_RED, FIG_BRIGHT, FIG_TWIN, isFlash } from "./plan.mjs";
 import { rng } from "../rng.mjs";
+import { PINK, oklchOf } from "../design.mjs";
 import * as G from "./shapes.mjs";
 
 const TAU = Math.PI * 2;
@@ -266,11 +267,49 @@ export function redSafePixels(o) {
   }
   return o;
 }
+/* IMPACT5 (ENGPINK, the owner: «Nie chcę żeby najczęstsze napisy były różowe»): a colour the ENGINE turns (a token's negative, its hue
+   negative or hue cycle) never lands in the pink band (design.mjs PINK: OKLCH hue 290..360 / 0..15, chroma >= 0.04, lightness >= 0.3): a
+   green costume's negative is magenta. Such a colour is turned out of the band at its own OKLCH lightness: to blue-violet (hue 284) from
+   the band's violet half, to red-orange (hue 22, then red-safe) from its red half; chroma is lowered only as far as sRGB needs. The token's
+   OWN colours (the treatment "o") are its art and stay as painted. -> [r, g, b] (8-bit) or null when the colour is not pink */
+const isPinkLch = (o) => o.C >= PINK.minC && o.L >= PINK.minL && (o.h >= PINK.from || o.h < PINK.to);
+const okLin = (L, A, B) => {
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3, m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3, s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+};
+const UNPINK_PIX = new Map();
+export function unpinkRgb(r, g, b) {
+  const key = (r << 16) | (g << 8) | b;
+  if ( UNPINK_PIX.has(key) ) return UNPINK_PIX.get(key);
+  const o = oklchOf(r / 255, g / 255, b / 255);
+  let out = null;
+  if ( isPinkLch(o) ) {
+    const h = ((o.h >= 340 || o.h < PINK.to) ? 22 : 284) * Math.PI / 180;
+    let C = o.C;
+    for ( let k = 0; k < 40; k++, C *= 0.92 ) {
+      const v = okLin(o.L, C * Math.cos(h), C * Math.sin(h));
+      if ( v.every((x) => x >= -1e-4 && x <= 1.0001) || k === 39 ) { out = v.map((x) => toS(Math.max(0, Math.min(1, x)))); break; }
+    }
+    if ( out && out[0] / Math.max(1, out[0] + out[1] + out[2]) >= 0.7 ) { const k = Math.min(255 / SAFE_RGB[0], (0.299 * out[0] + 0.587 * out[1] + 0.114 * out[2]) / SAFE_L); out = SAFE_RGB.map((c) => Math.round(c * k)); }
+    if ( out && isPinkLch(oklchOf(out[0] / 255, out[1] / 255, out[2] / 255)) ) { const y = Math.round(0.299 * out[0] + 0.587 * out[1] + 0.114 * out[2]); out = [y, y, y]; }
+  }
+  if ( UNPINK_PIX.size > 65536 ) UNPINK_PIX.clear();
+  UNPINK_PIX.set(key, out);
+  return out;
+}
+export function unpinkPixels(o) {
+  for ( let i = 0; i < o.length; i += 4 ) {
+    if ( !(o[i + 3] > 0) ) continue;
+    const u = unpinkRgb(o[i], o[i + 1], o[i + 2]);
+    if ( u ) { o[i] = u[0]; o[i + 1] = u[1]; o[i + 2] = u[2]; }
+  }
+  return o;
+}
 /* the art's colour negative (alpha kept) */
 export function invPixels(d) {
   const o = new Uint8ClampedArray(d.length);
   for ( let i = 0; i < d.length; i += 4 ) { o[i] = 255 - d[i]; o[i + 1] = 255 - d[i + 1]; o[i + 2] = 255 - d[i + 2]; o[i + 3] = d[i + 3] > 40 ? 255 : 0; }
-  return redSafePixels(o);
+  return unpinkPixels(redSafePixels(o));
 }
 /* the art in its own colours (alpha made hard, red made safe) */
 export function origPixels(d) {
@@ -361,7 +400,9 @@ export function heldPixels(d, mode, o = {}) {
     let c;
     if ( mode === "d" ) c = Y < mid ? A : B;
     else { const [hh, ss, ll] = hsl(r, g, b); c = ss < 0.04 ? [r, g, b] : rgbOfHsl((hh + turn) % 1, Math.min(1, ss * 1.35 + 0.08), ll); }
-    const f = fitY(LIN[Math.round(Math.max(0, Math.min(255, c[0])))], LIN[Math.round(Math.max(0, Math.min(255, c[1])))], LIN[Math.round(Math.max(0, Math.min(255, c[2])))], Y);
+    let f = fitY(LIN[Math.round(Math.max(0, Math.min(255, c[0])))], LIN[Math.round(Math.max(0, Math.min(255, c[1])))], LIN[Math.round(Math.max(0, Math.min(255, c[2])))], Y);
+    /* IMPACT5: a turned colour out of the pink band, fitted back to the pixel's luminance (a grey of it if the fit drifts back in) */
+    if ( mode !== "d" && unpinkRgb(f[0], f[1], f[2]) ) { const u = unpinkRgb(f[0], f[1], f[2]); f = fitY(LIN[u[0]], LIN[u[1]], LIN[u[2]], Y); if ( unpinkRgb(f[0], f[1], f[2]) ) f = fitY(Y, Y, Y, Y); }
     out[j] = f[0]; out[j + 1] = f[1]; out[j + 2] = f[2]; out[j + 3] = 255;
     memo.set(key, (f[0] << 16) | (f[1] << 8) | f[2]);
   }
@@ -394,6 +435,20 @@ function figPix(e, s) {
   e._figs.set(s, P); sh?.set(sk, P);
   return P;
 }
+/* IMPACT5 (item 2 / 11.1): the first use of a token's picture works its art out (cut-out, negative, inked, posterised, hue negative: tens
+   of ms on a 256 px picture). Done in the frame that first showed a figure, that frame ran long and the drawing due then stood late or never
+   showed. warmFigs does the work ahead (at the call, and for the visible tokens while the browser is idle): -> ms spent */
+export function warmFigs(e, list = e.figs) {
+  const t0 = globalThis.performance?.now?.() ?? Date.now();
+  for ( const g of list ?? [] ) {
+    if ( !g?.sil ) continue;
+    const P = figPix(e, g.sil);
+    if ( !P.pixels ) continue;
+    edgeOf(P); heldArt(e, P, "n");
+    const lit = rimFor(e, P); if ( !P.post.get(lit) ) P.post.set(lit, P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))));
+  }
+  return (globalThis.performance?.now?.() ?? Date.now()) - t0;
+}
 /* the held art of a figure (IMPACT4), cached per treatment and parameter */
 function heldArt(e, P, t, turn = 0.33) {
   if ( !P.pixels ) return null;
@@ -425,6 +480,31 @@ function cutTint(e, P, color) {
 }
 /* the accent that lights the rims (seeded per impact: tone a or b; never saturated red under the guard) */
 export const rimColor = (e) => { const c = e.rimTone === "b" ? e.tone.b : e.tone.a; return e.redOk ? c : isRed(c) ? (isRed(e.tone.b) ? PAPER : e.tone.b) : c; };
+/* IMPACT5 (item 8): the rim lit on a figure must stand off ITS edge: a ringed portrait with a yellow ring got a yellow rim (nothing read).
+   The figure's outer edge colour (the mean of its art's edge pixels: the same on every seat) is compared with the seeded accent, the other
+   accent and paper; the seeded one stays unless it is close to the edge, then the one that stands off it most */
+const lum8 = (v) => 0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2];
+function edgeOf(P) {
+  if ( P.edge !== undefined ) return P.edge;
+  let r = 0, g = 0, b = 0, n = 0;
+  const A = P.alpha, w = P.w, h = P.h;
+  for ( let y = 1; y < h - 1; y++ ) for ( let x = 1; x < w - 1; x++ ) {
+    const i = y * w + x;
+    if ( !A[i] || (A[i - 1] && A[i + 1] && A[i - w] && A[i + w]) ) continue;
+    for ( const j of [i, i + 1, i - 1, i + w, i - w] ) if ( A[j] ) { r += P.d[j * 4]; g += P.d[j * 4 + 1]; b += P.d[j * 4 + 2]; n++; }
+  }
+  P.edge = n ? [r / n, g / n, b / n] : null;
+  return P.edge;
+}
+export function rimFor(e, P) {
+  const c0 = rimColor(e);
+  if ( !P?.pixels ) return c0;
+  const edge = edgeOf(P); if ( !edge ) return c0;
+  const score = (c) => { const v = hexRgb(c); return Math.abs(lum8(v) - lum8(edge)) * 1.5 + Math.hypot(v[0] - edge[0], v[1] - edge[1], v[2] - edge[2]) * 0.5; };
+  if ( score(c0) >= 120 ) return c0;
+  const c1 = rimColor(Object.assign(Object.create(e), { rimTone: e.rimTone === "b" ? "a" : "b" }));
+  return [c0, c1, PAPER, INK].reduce((best, c) => (score(c) > score(best) ? c : best), c0);
+}
 export const ENLARGED = new Set(["shadow", "glare", "swap"]);
 /* how much a figure pops on a drawing with `z` (IMPACT4): the struck figure by z, the others by half as much; a figure small on this screen
    pops more (a token of a few dozen px at a far zoom), at most 2.2 x */
@@ -441,27 +521,75 @@ export const popOf = (e, g, z) => {
    (i -> n, p / k -> d: colours turned, luminance kept, no area taken) and gets a SLICE of the bright one cut along the blow with what area
    is left (a share of its own area, at least 8 %), else none. On a flash drawing (a full-field frame, a scene change that the guard
    counted) the figures take no area: that drawing is already one of the rationed flashes. The gentle variant: rims only, no pop. */
+/* ---------- IMPACT5 (1.9.23): the cut-in ----------
+   The star of the cut (the struck figure; with no struck figure the attacker; else the first figure `also` names) is drawn ENLARGED at its
+   own place for the whole impact by the drawing's `cu` (plan.mjs cutIn): up to CUT_WANT of the view's short side (at least 1.3 x its token),
+   never past LIMITS.cutMax; the other figures by a little (up to LIMITS.cutMaxOther). The contact's pop (`z`) adds on top, inside the same
+   cap. The star moves with `kb` (a wind-up against the blow, a drift along it) and stays in the view (pulled in by at most half its size: a
+   token off the screen stays off it). A token already larger than the cap on this screen (a very close zoom) is not enlarged. */
+const CUT_WANT = 0.34, CUT_WANT_OTHER = 0.13;
+export const starOf = (e) => { const L = e.figs ?? []; return L.find((g) => g.role === "target" && g.sil) ?? L.find((g) => g.role === "from" && g.sil) ?? L.find((g) => g.sil) ?? null; };
+const sizeOf = (g) => Math.max(1, Math.abs(g.sil.w), Math.abs(g.sil.h));
+export function cutScale(e, g, f) {
+  if ( e.local || !g?.sil ) return 1;
+  const star = g === starOf(e), u = unit(e), size = sizeOf(g), max = (star ? LIMITS.cutMax : LIMITS.cutMaxOther) * u;
+  if ( size >= max ) return 1;
+  const cu = Math.max(0, Math.min(1, Number(f?.cu) || 0)), want = (star ? CUT_WANT : CUT_WANT_OTHER) * u;
+  const top = Math.min(max / size, Math.max(want / size, 1.3));
+  let s = 1 + (top - 1) * (star ? cu : cu * 0.6);
+  const z = f?.z ?? 1;
+  if ( z > 1 ) s *= 1 + (z - 1) * (star ? 0.45 : 0.3);
+  return Math.min(s, max / size);
+}
+const pull = (v, lo, hi, lim) => (lo > hi ? v : v + Math.max(-lim, Math.min(lim, Math.max(lo, Math.min(hi, v)) - v)));
+export function cutOffset(e, g, f, s) {
+  if ( e.local || !g?.sil || g !== starOf(e) || !(s > 1.001) ) return [0, 0];
+  const size = sizeOf(g) * s, kb = Number(f?.kb) || 0, d = e.dir;
+  const x = g.cx + (d != null ? Math.cos(d) * kb * size * 0.22 : 0), y = g.cy + (d != null ? Math.sin(d) * kb * size * 0.22 : 0), half = size * 0.56;
+  return [pull(x, half, e.W - half, size * 0.5) - g.cx, pull(y, half, e.H - half, size * 0.5) - g.cy];
+}
+/* the drawing's own env: on a cut-in drawing the ink (stars, rings, splashes, flares, panels) is laid round the ENLARGED star, not round its
+   token (the ink of every frame type is sized from R and placed at cx / cy, hx / hy) */
+export function frameEnv(e, f) {
+  if ( e.local || !(f?.cu > 0) || !e.figs?.length ) return e;
+  const st = starOf(e); if ( !st ) return e;
+  const s = cutScale(e, st, f); if ( !(s > 1.001) ) return e;
+  const [dx, dy] = cutOffset(e, st, f, s), R = sizeOf(st) * s / 2, cx = st.cx + dx, cy = st.cy + dy;
+  const k = st.role === "target" && e.R > 0 ? R / e.R : 0;
+  return Object.assign(Object.create(e), { cx, cy, R: Math.max(e.R, R), hx: cx + (e.hx - e.cx) * k, hy: cy + (e.hy - e.cy) * k });
+}
+/* which figures and what they show on this drawing, on this seat: -> null | { t, list, each, zs (scales), offs ([dx, dy]), slices, area }.
+   IMPACT5 (the owner: «Poluzuj»): on an ordinary seat every change of luminance the figures make (a bright treatment i p k; a figure enlarged
+   over the scene) is shared out of LIMITS.figAreaOpen of min(W, H)^2, the star first, then the attacker, then the rest. Each figure is
+   counted at its LARGEST possible size (its cut-in cap), so the decision depends on the figures' art and roles only, never on the zoom or
+   the screen: every seat with the token in view shows the same treatment (before: 2.5 % of the view at the size on THAT screen, so the
+   closer seat got the luminance-held twin). A figure that does not fit is not enlarged and turns to its held twin (i -> n, p / k -> d) with
+   a slice of the bright art cut along the blow from what is left. On a flash drawing the figures take no area (already rationed). The
+   gentle variant (and a photosensitive seat): rims only, nothing enlarged (unchanged). */
 export function figTreat(e, f) {
   if ( !f?.fig || !e.figs?.length ) return null;
   const list = e.figs.filter((g) => g.sil && !(g.role === "target" && ENLARGED.has(f.type)));
   if ( !list.length ) return null;
-  const t = e.local ? "r" : f.fig, z = e.local ? 1 : (f.z ?? 1);
-  const flash = !e.local && isFlash(f);
-  const cap = LIMITS.figArea * e.W * e.H;
+  const t = e.local ? "r" : f.fig, n = list.length;
+  const flash = !e.local && isFlash(f), u = unit(e), cap = LIMITS.figAreaOpen * Math.min(u * u, e.W * e.H), star = starOf(e);
+  const each = new Array(n).fill(t), zs = new Array(n).fill(1), offs = Array.from({ length: n }, () => [0, 0]), slices = new Array(n).fill(0);
   let a = 0;
-  const each = [], zs = [], slices = [];
-  for ( const g of list ) {
-    const base = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area), zz = popOf(e, g, z), bright = FIG_BRIGHT.has(t);
-    if ( flash ) { each.push(t); zs.push(zz); slices.push(0); continue; }
-    const cost = (zz2) => (bright || zz2 > 1 ? base * zz2 * zz2 : 0);
-    if ( a + cost(zz) <= cap ) { a += cost(zz); each.push(t); zs.push(zz); slices.push(0); continue; }
-    if ( a + cost(1) <= cap ) { a += cost(1); each.push(t); zs.push(1); slices.push(0); continue; }
-    const twin = FIG_TWIN[t];
-    if ( !twin ) { each.push(t); zs.push(1); slices.push(0); continue; }
-    const left = Math.min(base * 0.5, cap - a), share = left >= base * 0.08 ? left / base : 0;
-    a += share * base; each.push(twin); zs.push(1); slices.push(share ? +share.toFixed(4) : 0);
+  if ( !e.local ) {
+    const order = list.map((g, i) => i).sort((i, j) => (list[i] === star ? -1 : list[j] === star ? 1 : i - j));
+    for ( const i of order ) {
+      const g = list[i], s = cutScale(e, g, f), bright = FIG_BRIGHT.has(t);
+      const size = sizeOf(g), max = (g === star ? LIMITS.cutMax : LIMITS.cutMaxOther) * u;
+      const worst = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area) * Math.max(1, max / size) ** 2;
+      if ( flash ) { zs[i] = s; offs[i] = cutOffset(e, g, f, s); continue; }
+      const cost = bright || s > 1.001 ? worst : 0;
+      if ( a + cost <= cap ) { a += cost; zs[i] = s; offs[i] = cutOffset(e, g, f, s); continue; }
+      const twin = FIG_TWIN[t];
+      if ( !twin ) continue;   // not enlarged, its own (non-bright) treatment
+      const left = Math.min(worst * 0.5, cap - a), share = left >= worst * 0.08 ? left / worst : 0;
+      a += share * worst; each[i] = twin; slices[i] = share ? +share.toFixed(4) : 0;
+    }
   }
-  return { t, list, each, zs, slices, area: a, flash };
+  return { t, list, each, zs, offs, slices, area: a, flash };
 }
 /* the projections of a figure's pixels on a direction (local units), sorted: the slice's cut line for a share of its area */
 function cutAt(P, w, h, ang, share) {
@@ -484,8 +612,9 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   const w = s.w, h = s.h;
   if ( t !== "r" && !P.pixels ) t = "r";
   /* the rim boils: its width and the angle of its copies change with every drawing (seeded); a small figure keeps a rim that reads */
-  const rw = Math.max(2.2, Math.min(u * 0.016, Math.min(w, h) * 0.05 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.4, rw * 0.5);
-  const lit = rimColor(e), inkT = alphaTint(e, s, INK), litT = alphaTint(e, s, lit);
+  /* IMPACT5: the rim of an enlarged figure is drawn for its size on the screen (a cut-in gets a heavier edge accent) */
+  const rw = Math.max(2.2, Math.min(u * (z > 1.2 ? 0.021 : 0.016), Math.min(w, h) * z * 0.05 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.4, rw * 0.5);
+  const lit = rimFor(e, P), inkT = alphaTint(e, s, INK), litT = alphaTint(e, s, lit);
   const turn = R.f(0.17, 0.83);   // the hue cycle's angle on this drawing
   ctx.save();
   ctx.translate(g.cx, g.cy);
@@ -503,7 +632,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   const artOf = (tt) => {
     if ( tt === "i" ) return P.inv;
     if ( tt === "k" ) return P.ink;
-    if ( tt === "p" ) { let a = P.post.get(lit); if ( !a && P.pixels ) { a = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER ? e.tone.a : lit)))); P.post.set(lit, a); } return a; }
+    if ( tt === "p" ) { let a = P.post.get(lit); if ( !a && P.pixels ) { a = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))); P.post.set(lit, a); } return a; }
     if ( tt === "n" || tt === "d" || tt === "h" ) return heldArt(e, P, tt, turn);
     return P.pixels ? P.orig : null;
   };
@@ -548,7 +677,7 @@ function paintFigs(ctx, e, f) {
   const tr = figTreat(e, f);
   if ( !tr ) return;
   const R = rng((f.seed ^ 0x5bd1e995) >>> 0);
-  tr.list.forEach((g, i) => drawFig(ctx, e, f, g, tr.each[i], R, tr.zs[i], tr.slices[i]));
+  tr.list.forEach((g, i) => drawFig(ctx, e, f, { ...g, cx: g.cx + tr.offs[i][0], cy: g.cy + tr.offs[i][1] }, tr.each[i], R, tr.zs[i], tr.slices[i]));
 }
 /* IMPACT4: the figures of a drawing each on its own canvas, so the player can move it with its token (a knock-back, a fall, a shake the
    token's own reaction plays during the impact). -> [{ g, canvas, x, y, size (css px) }]; the same seeded draws as paintFigs */
@@ -558,11 +687,11 @@ export function paintFigLayers(e, f, q = 1) {
   const R = rng((f.seed ^ 0x5bd1e995) >>> 0), u = unit(e), out = [];
   tr.list.forEach((g, i) => {
     if ( e.local && Math.hypot(g.cx - e.cx, g.cy - e.cy) > e.local.r ) { drawFig(skipCtx, e, f, g, tr.each[i], R, 1, 0); return; }   // outside the gentle panel: nothing (the draws keep the seeded order)
-    const zz = tr.zs[i], size = Math.ceil(Math.hypot(g.sil.w, g.sil.h) * zz * 1.12 + u * 0.08 + 8);
+    const zz = tr.zs[i], size = Math.ceil(Math.hypot(g.sil.w, g.sil.h) * zz * 1.12 + u * 0.08 + 8), [dx, dy] = tr.offs[i];
     const c = e.makeCanvas(Math.max(2, Math.round(size * q)), Math.max(2, Math.round(size * q))), x = ctx2d(e, c);
     x.setTransform?.(q, 0, 0, q, 0, 0);
     drawFig(x, e, f, { ...g, cx: size / 2, cy: size / 2 }, tr.each[i], R, zz, tr.slices[i]);
-    out.push({ g, canvas: c, x: g.cx - size / 2, y: g.cy - size / 2, size });
+    out.push({ g, canvas: c, x: g.cx + dx - size / 2, y: g.cy + dy - size / 2, size, dx, dy });
   });
   return out;
 }
@@ -779,16 +908,16 @@ const PAINT = {
      along the blow and flares thrown off the point of contact; the scene untouched */
   fig(ctx, e, f) {
     const u = unit(e), g = gain(e), R = rng(f.seed);
-    const tgt = e.figs?.find((x) => x.role === "target" && x.sil);
-    const tr = figTreat(e, f);
+    const tgt = starOf(e);   // IMPACT5: the cut's star (the struck figure, else the attacker), at its cut-in size and place
+    const tr = figTreat(e, f), ti = tr ? tr.list.indexOf(tgt) : -1, S = ti >= 0 ? tr.zs[ti] : 1, [ox, oy] = ti >= 0 ? tr.offs[ti] : [0, 0];
     /* knock-back echoes: the struck figure's outline twice behind it along the blow, fading (thin outlines in the accent and in ink;
        not in the gentle panel) */
     if ( tgt && e.dir != null && tr && !e.local ) {
-      const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03), d = Math.max(s.w, s.h) * 0.28 * g;
+      const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03), d = Math.max(s.w, s.h) * S * 0.28 * g;
       const ra = ringOf(e, s, rimColor(e), wpx), rk = ringOf(e, s, INK, wpx * 1.8);
       for ( const [k, al] of [[2, 0.45], [1, 0.8]] ) {
-        const x = tgt.cx + Math.cos(e.dir) * d * k, y = tgt.cy + Math.sin(e.dir) * d * k;
-        ctx.save(); ctx.globalAlpha = al; ctx.translate(x, y); ctx.rotate(s.rot ?? 0);
+        const x = tgt.cx + ox + Math.cos(e.dir) * d * k, y = tgt.cy + oy + Math.sin(e.dir) * d * k;
+        ctx.save(); ctx.globalAlpha = al; ctx.translate(x, y); if ( S > 1 ) ctx.scale(S, S); ctx.rotate(s.rot ?? 0);
         if ( rk ) ctx.drawImage(rk.c, -s.w / 2 - rk.m, -s.h / 2 - rk.m);
         if ( ra ) ctx.drawImage(ra.c, -s.w / 2 - ra.m, -s.h / 2 - ra.m);
         ctx.restore();
@@ -845,7 +974,7 @@ function guarded(e) {
 export function paintFrame(ctx, e0, f) {
   const fn = PAINT[f.type];
   if ( !fn || !FRAMES[f.type] ) return false;
-  const e = guarded(e0);
+  const e = frameEnv(guarded(e0), f);   // IMPACT5: the ink round the cut-in
   ctx.save();
   if ( e.local ) {
     const p = panelOf(e, f);
