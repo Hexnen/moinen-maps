@@ -118,23 +118,25 @@ export function reducedFor(motion, callerReduced, osReduced) {
 }
 
 /* ---------- palettes ---------- */
-const OI = { orange: "#e69f00", sky: "#56b4e9", green: "#009e73", yellow: "#f0e442", blue: "#0072b2", red: "#d55e00", pink: "#cc79a7" };
+const OI = { orange: "#e69f00", sky: "#56b4e9", green: "#009e73", yellow: "#f0e442", blue: "#0072b2", red: "#d55e00" };   // ENGPINK 1.9.22: the set's reddish purple (#cc79a7) is in the pink band: not used
 /* the high-contrast palette: light fill, black ink and extrusion, black outer line */
 export const CONTRAST = { fill: ["#ffffff", "#fff8b8", "#ffe14a"], ext: "#000000", out2: "#000000", ink: "#000000" };
 /* colour-blind safe families (Okabe & Ito 2008): every family keeps its meaning by hue groups that stay apart for protan, deutan and
-   tritan viewers; red-green pairs (blood vs mint, toxic vs hot) become vermillion vs blue / yellow vs purple */
+   tritan viewers; red-green pairs (blood vs mint, toxic vs hot) become vermillion vs blue / yellow vs purple. ENGPINK 1.9.22 (the owner: no
+   pink lettering): the set's reddish purple is in the pink band, so pop / beast / plasma (one hue group, as before) take its bluish green
+   and bruise a blue-violet; each stays at least as far from the other families for protan, deutan and tritan eyes as it was (check-pink) */
 const cv = (fill, ext) => ({ fill, ext, out2: "#ffffff", ink: "#1b1020" });
 export const CVD = {
   hot: cv(["#fff3b0", OI.yellow, OI.orange], "#5a3a00"), ember: cv(["#ffe2a0", OI.orange, "#a35a00"], "#3a2000"),
   rust: cv(["#ffd2a8", OI.red, "#8a3a00"], "#331200"), earth: cv(["#f3dcb0", "#c79a4a", "#7a5420"], "#3a2a10"),
-  primary: cv(["#9fd8ff", OI.blue, "#003f66"], "#001a33"), punch: cv(["#ffffff", "#f0e8ff", "#c8b8e8"], "#2a2350"),
-  pop: cv(["#ffe9f5", OI.pink, "#8a3a6a"], "#3a0a2a"), ice: cv(["#ffffff", "#bfe6ff", OI.sky], "#0a2c4a"),
+  primary: cv(["#9fd8ff", OI.blue, "#003f66"], "#001a33"), punch: cv(["#ffffff", "#f0e8ff", "#b8c0e8"], "#2a2350"),
+  pop: cv(["#d2f2ec", OI.green, "#00553e"], "#002a1e"), ice: cv(["#ffffff", "#bfe6ff", OI.sky], "#0a2c4a"),
   bone: cv(["#fffdf2", "#efe4c4", "#c4a979"], "#4a3420"), stone: cv(["#eeeeee", "#a8a8a8", "#5e5e5e"], "#222222"),
-  toxic: cv(["#fbf6b0", OI.yellow, "#9a8a00"], "#3a3300"), beast: cv(["#f5d8ea", OI.pink, "#7a2a5a"], "#2a0a20"),
+  toxic: cv(["#fbf6b0", OI.yellow, "#9a8a00"], "#3a3300"), beast: cv(["#d2f2ec", OI.green, "#00553e"], "#002a1e"),
   air: cv(["#ffffff", "#cfe9fa", OI.sky], "#123a5a"), volt: cv(["#ffffff", OI.yellow, OI.orange], "#3a2a00"),
-  plasma: cv(["#f5e0ff", OI.pink, "#5a2a8a"], "#200a40"), gold: cv(["#fffbe0", OI.yellow, "#b88a00"], "#4a3000"),
+  plasma: cv(["#d2f2ec", OI.green, "#00553e"], "#002a1e"), gold: cv(["#fffbe0", OI.yellow, "#b88a00"], "#4a3000"),
   soft: cv(["#ffffff", "#ececf2", "#bcbccc"], "#3a3a50"), blood: cv(["#ffc9a8", OI.red, "#7a2a00"], "#2a0a00"),
-  bruise: cv(["#e8d8ff", "#9a7ad8", "#4a2a8a"], "#1e0a34"), mint: cv(["#e0f3ff", OI.sky, OI.blue], "#002a4a"),
+  bruise: cv(["#e2e4ff", "#8680dc", "#363a8a"], "#1e0a34"), mint: cv(["#e0f3ff", OI.sky, OI.blue], "#002a4a"),
   water: cv(["#e8f6ff", OI.sky, OI.blue], "#002a4a"), dull: cv(["#ececec", "#a6a6a6", "#666666"], "#2a2a2a"),
   inv: cv(["#fffdf2", "#f0ead0", "#d8cfa8"], "#1c3b7a")   // LOOK: the Invincible style's family (pale faces, a deep block)
 };

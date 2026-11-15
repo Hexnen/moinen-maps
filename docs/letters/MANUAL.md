@@ -58,6 +58,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | ENGDROP (no bridge to plus-ultra's old mirror, no legacy settings description; migration reads plus-ultra's old copy from its document; an older plus-ultra handled; the settings window redesigned) | 1.9.19 | API-CONTRACT 1.9.19 (v23) | `tactics-zones-engdrop` | pending merge (section 15) |
 | IMPACT3 (the tokens take part in the impact frames: negative, posterised, inked, own colours, lit rims on their true outline, echoes, flares; ladders rebuilt in hand-drawn timing inside the guard; `also`, `figures`, per-frame `fig` / `kick`) | 1.9.20 | API-CONTRACT 1.9.20 (v24) | `tactics-zones-impact3` | pending merge (section 21a) |
 | IMPACT4 (the tokens' colours turned at their own luminance on every size and zoom: hue negative, hue cycle, duotone; a slice of the true negative along the blow; pops; the enlarged frames in the token's own art; figures follow their tokens; the strongest impacts a one-second cut, hit-stop 8, still 2 flashes) | 1.9.21 | API-CONTRACT 1.9.21 (v25) | `tactics-zones-impact4` | pending merge (section 21a) |
+| ENGPINK (no colour the engine picks by itself is pink or magenta: the invincible violet blue-violet, the legacy families' pink members replaced, the colour-blind palette without reddish purple, cyan + yellow colour plates, the impact `void` tone blue-violet, computed shades kept out of the band) | 1.9.22 | API-CONTRACT 1.9.22 | `tactics-zones-engpink` | pending merge (sections 13, 14, 15, 21a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -1090,7 +1091,19 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     never (plain O's in the word's pair spacing). A number's zeros stay level. In stepped motion linked rings shake as one piece;
     in the vertical column the rings stay on the column's axis (no stagger).
   - **Colour**: 11 flat palettes chosen from the sound (`hand.invPal`: yellow, orange, red, white, steel, cyan, blue, air, green,
-    violet, stone; `invPalette(mood, character, traits)`); no palette serves more than a quarter of the kinds (P11).
+    violet, stone; `invPalette(mood, character, traits)`); no palette serves more than a quarter of the kinds (P11). Since 1.9.22
+    (ENGPINK, the owner: no pink lettering) `violet` (power, mind: psychic, cheer) is blue-violet #7258ff on #1e1258 (was #b36dff on
+    #2b0c5a, inside the pink band).
+  - **No pink** (1.9.22, ENGPINK): no colour the engine picks by itself lies in the pink band the callers measure (`PINK` in
+    design.mjs: OKLCH hue 290..360 or 0..15, chroma >= 0.04, lightness >= 0.3; `isPink(hex)`): the INV and legacy COLORS tables, the
+    colour-blind palette (`CVD`: pop / beast / plasma Okabe-Ito bluish green #009e73, bruise blue-violet #8680dc; the set's reddish
+    purple is not used) and every shade the painter computes (hue jitter, per-letter colours `recolor`, rainbow and sweep fills, a
+    backdrop's opposite hue, the block's shading: `unpinkHsl` turns a colour that would land in the band by the smallest step out of
+    it; any other colour is written exactly as before). The legacy colour plates are cyan and yellow (the magenta plate was pink on
+    every zap word). A caller's own `colors`, `hand.pal` or registered palette is the caller's and stays as given (shades derived from
+    a pink colour the caller chose stay pink). The impact frames' `void` tone (a villain's roll in plus-ultra) is blue-violet #7258ff (was #b04cff) and the chromatic split's guarded red plate #c83a34 (was #d0306a); a token's own art turned by `n` / `h` / `d` keeps whatever hues it gets (section 21a).
+    `check-pink.mjs` pins it (the band, every table colour, the computed shades, the replaced families still apart for normal, protan,
+    deutan and tritan eyes, and on the fake browser every kind x style x table palette painted on a recording context).
   - **Spacing by letter pair**: `kernOptical` measures each pair's gap row by row over their common height and sets the mean gap to
     `hand.kern.gap` (Anton 0.04-0.06 of the cap, League Gothic 0.032-0.048); no row comes closer than `KERN.touch`; doubles (AA, RR)
     a little tighter; AV / TA / LT end up tighter than HN; vertical layouts are skipped except a row's mark in League Gothic (P18,
@@ -1213,6 +1226,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-15 | (ENGWORDS, derived from the rulings above, not a new ruling) "No dictionary words, no near-words" holds in BOTH languages: a Polish word must not be an English word (KA-DUMP), an English word not a Polish one (PTAK); the hero going down letters the landing word (THOOM / DUUM) | check your own sound words with `refusal` AND `crossRefusal` | `crossRefusal` over every produced word (check-words section 22); a kept cross reading goes on `CROSS` with its reason for the owner |
 | 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
 | 2026-11-15 | EVERY option is chosen by the GM for the table («wszystko mg wybiera dla stołu. wszystko»): world scope, players read-only, live | a new option is born world-scoped; no client setting of your own (OS reduced motion / photosensitivity still honoured per seat) | the same for engine settings |
+| 2026-11-15 | No pink lettering: «Haymaker, to chyba opis z fighting? Jest różowy. Nie chcę żeby najczęstsze napisy były różowe» (I do not want the most common lettering to be pink); the caller side (PALETTE-1, provisional) then took pink out everywhere | keep your own colours out of the band (plus-ultra `letter-colors.mjs` `isPink`, `sweep-checks/palette.mjs`) and ship your own colour-blind variants | no engine table colour or computed shade in the band (`PINK`, `isPink`, `unpinkHsl`, `check-pink.mjs`; ENGPINK 1.9.22) |
 | 2026-11-15 | The map's destruction lettering gets a size slider: 0 = none, 1, 2 = today's size (default), 3 («aktualna wielkość to 2. dodaj też 1 i 3», «0 to brak»); fire and weather lettering the same, as separate sliders («też z pogody i ognia. mogą być osobne») | step the size through the engine's own options (section 6, "A caller's size step"); at the default pass the options untouched | nothing (callers step the drawn size: `L.sizeOf` + `fit: "world"`, section 6); done in moinen-maps SFXSIZE (`scripts/sfx/sfx-size.mjs`, settings `sfxSizeDestruction` / `sfxSizeFire` / `sfxSizeWeather`) |
 
 ## 15. Tools: settings, authoring, designer, accessibility
@@ -1232,7 +1246,7 @@ screen's own signals, `L.prefs` / `L.settings()` = what THIS seat draws with; `L
 | `motion` | `table` | auto ("Full") / gentle / reduced | the strongest reduction of caller, table and the seat's OS wins; gentle = moves damped to 45 %, no smears; an old stored `full` reads as `auto` |
 | `flashes` | `table` | on / off | the one-tick flash frame; a seat in Foundry's photosensitive mode (`core.photosensitiveMode`) never gets it, whatever the table says |
 | `impact` | `table` | full (default) / local / off | impact frames (`L.impact`, section 21a); a photosensitive seat gets them inside a panel only |
-| `palette` | `table` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
+| `palette` | `table` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set without its reddish purple (1.9.22: no pink) |
 | `announce` | `table` | on / off | screen readers read each word (or `alt`) through one polite live region |
 | `limitScreen`, `limitWorld` | `table` | 1-32, 4-96 | `L.limits` |
 | `movement` | own key | smooth (default) / stepped | the invincible style's motion type (`L.motionMode`) |
@@ -1590,6 +1604,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: IMPACT4 (1.9.21, `tactics-zones-impact4`): section 21a (held colours `n` / `h` / `d`, slices, pops `z`, own-art enlarged
   frames, figures that follow their tokens, one-second cuts, the length and hit-stop limits); impact README "The figures", "Kinds",
   "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
+- 2026-11-15: ENGPINK (1.9.22, `tactics-zones-engpink`): section 13 "No pink" (the band, the replaced colours, the computed shades),
+  section 14 ruling row, section 15 palette row; `check-pink.mjs` (check.mjs 8g and 16).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

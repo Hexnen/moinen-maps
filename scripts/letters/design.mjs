@@ -135,7 +135,7 @@ const INV = {
   blue:    C(F3("#2f8bff"), "#0a1e4d", ["#ffffff"], "#141414"),   // water, cold
   air:     C(F3("#eef8ff"), "#2363c8", ["#ffffff"], "#141414"),   // wind, fast motion
   green:   C(F3("#8edb36"), "#18440e", ["#ffffff"], "#141414"),   // healing, relief, slime
-  violet:  C(F3("#b36dff"), "#2b0c5a", ["#ffffff"], "#141414"),   // power, mind
+  violet:  C(F3("#7258ff"), "#1e1258", ["#ffffff"], "#141414"),   // power, mind (ENGPINK 1.9.22: blue-violet, was #b36dff / #2b0c5a in the pink band)
   stone:   C(F3("#e7d5b2"), "#5a391b", ["#ffffff"], "#141414")    // rock, timber, rubble
 };
 /* the character -> colour table (SPEC-LOOK P11: explosions yellow/orange, blows red/white, cuts and metal white/steel, electricity
@@ -160,28 +160,72 @@ export function invPalette(mood, c, T) {
 export const COLORS = {
   inv:     Object.values(INV),
   hot:     [C(["#fff7b0", "#ffc928", "#f2561d"], "#7a1d10", ["#ffffff", "#1b1020"]), C(["#ffe45c", "#ff8a1a", "#d61f1f"], "#5e130d", ["#fff3c4"]), C(["#fffbe0", "#ffd84a", "#ff7a00"], "#9b2a12", ["#c8102e"])],
-  ember:   [C(["#ffe9a0", "#ff9b2a", "#b8231a"], "#3d0d0a", ["#2a0c0a"]), C(["#fff2c0", "#ff6a2a", "#7a1430"], "#2b0a14", ["#ffd25c"])],
+  ember:   [C(["#ffe9a0", "#ff9b2a", "#b8231a"], "#3d0d0a", ["#2a0c0a"]), C(["#fff2c0", "#ff6a2a", "#7a2410"], "#2b0a14", ["#ffd25c"])],
   primary: [C(["#ff5a4e", "#e01d24", "#a3101a"], "#3e0710", ["#ffe14a", "#ffffff"]), C(["#5ec8ff", "#1f6fe0", "#173a9c"], "#0d1a4a", ["#ffe14a", "#ffffff"]), C(["#fff27a", "#ffd21a", "#f29a00"], "#8a3d00", ["#e01d24", "#1f6fe0"])],
-  punch:   [C(["#ffffff", "#f5f0ff", "#c9c2e8"], "#2a2350", ["#e8322b", "#1f6fe0"]), C(["#ff8ad1", "#ff2e93", "#b0005f"], "#3c0024", ["#ffffff", "#ffe14a"])],
-  pop:     [C(["#9df27a", "#3fc23a", "#17802a"], "#0b3311", ["#fff27a", "#ffffff"]), C(["#ffb3f0", "#c56bff", "#6b2fd6"], "#24104e", ["#ffffff", "#7cf0ff"]), C(["#7cf6ff", "#24c0e8", "#1172b8"], "#0a2848", ["#ffffff", "#ff4fa0"])],
+  punch:   [C(["#ffffff", "#f5f0ff", "#c2c8e8"], "#2a2350", ["#e8322b", "#1f6fe0"]), C(["#ffb3a0", "#ff4a2e", "#b01a0a"], "#3c0024", ["#ffffff", "#ffe14a"])],
+  pop:     [C(["#9df27a", "#3fc23a", "#17802a"], "#0b3311", ["#fff27a", "#ffffff"]), C(["#d4d4ff", "#7258ff", "#2f1fa8"], "#24104e", ["#ffffff", "#7cf0ff"]), C(["#7cf6ff", "#24c0e8", "#1172b8"], "#0a2848", ["#ffffff", "#ffe14a"])],
   ice:     [C(["#ffffff", "#c9f1ff", "#6cc4ef"], "#123e66", ["#1b1020", "#ffffff"]), C(["#f2fdff", "#8fe3ff", "#2b8fd8"], "#0f2c55", ["#ffffff"])],
   bone:    [C(["#fffdf2", "#efe4c4", "#c4a979"], "#4a3420", ["#ffffff", "#e8322b"])],
   stone:   [C(["#e9e6df", "#a9a39a", "#625d58"], "#2a2622", ["#ffffff", "#e6b34a"]), C(["#d8dbe2", "#8a93a6", "#4b5266"], "#20232e", ["#ffd25c"])],
   earth:   [C(["#f3d39a", "#c98a3c", "#7a4a1c"], "#3a2210", ["#fff0c8", "#1b1020"]), C(["#e8c890", "#a8743a", "#5e3a1a"], "#2a180a", ["#ffffff"])],
   rust:    [C(["#ffc48a", "#d8622a", "#7e2a12"], "#331208", ["#fff0c8"])],
-  toxic:   [C(["#f4ff8a", "#a6f03a", "#3c9a1c"], "#13350a", ["#5b1a7a", "#ffffff"])],
-  beast:   [C(["#c6f27a", "#6fbf3a", "#2f6e1f"], "#12300c", ["#ffffff", "#f2e14a"]), C(["#d79bff", "#8a3fd6", "#4a1a8a"], "#1d0a3a", ["#ffffff", "#ffd21a"]), C(["#ff8a5e", "#d8342a", "#6e0f18"], "#2a0508", ["#fff2a0", "#ffffff"])],
+  toxic:   [C(["#f4ff8a", "#a6f03a", "#3c9a1c"], "#13350a", ["#2f1f78", "#ffffff"])],
+  beast:   [C(["#c6f27a", "#6fbf3a", "#2f6e1f"], "#12300c", ["#ffffff", "#f2e14a"]), C(["#d4d4ff", "#6650e8", "#2f2478"], "#1d0a3a", ["#ffffff", "#ffd21a"]), C(["#ff8a5e", "#d8342a", "#6e0f18"], "#2a0508", ["#fff2a0", "#ffffff"])],
   air:     [C(["#ffffff", "#bfeeff", "#5fb8f0"], "#173a6a", ["#1b1020"]), C(["#f0fbff", "#a8e8f0", "#3fa8c8"], "#0d3344", ["#ffffff"]), C(["#ffffff", "#e0e6ff", "#8f9cf0"], "#232a66", ["#ffffff"])],
   volt:    [C(["#ffffff", "#fff35c", "#ffc400"], "#3a2a00", ["#1fb8ff", "#1b1020"]), C(["#ffffff", "#9ff6ff", "#1fb8ff"], "#06305a", ["#fff35c"])],
-  plasma:  [C(["#ffe6ff", "#ff6ad5", "#8a2be2"], "#2a0a4a", ["#ffffff", "#7cf0ff"]), C(["#e0fbff", "#7cf0ff", "#3a5cff"], "#0c1450", ["#ffffff", "#ff6ad5"])],
-  gold:    [C(["#fffbe0", "#ffd84a", "#c88a10"], "#4a2a00", ["#ffffff", "#8a2be2"])],
+  plasma:  [C(["#e2e4ff", "#7a66ff", "#2f1fa8"], "#2a0a4a", ["#ffffff", "#7cf0ff"]), C(["#e0fbff", "#7cf0ff", "#3a5cff"], "#0c1450", ["#ffffff", "#7a66ff"])],
+  gold:    [C(["#fffbe0", "#ffd84a", "#c88a10"], "#4a2a00", ["#ffffff", "#3a2bb8"])],
   soft:    [C(["#ffffff", "#f0f0f6", "#c8c8d8"], "#3a3a50", ["#1b1020"]), C(["#fffbe6", "#ffe9a8", "#e8c36a"], "#4a3a10", ["#ffffff"])],
   blood:   [C(["#ff6a6a", "#d8141f", "#7a0612"], "#2a0206", ["#ffffff", "#ffd8d8"]), C(["#ffd0d0", "#ff3a4a", "#9a0a1e"], "#3a0610", ["#ffffff"])],
-  bruise:  [C(["#e4b8ff", "#9a4ad8", "#4e1a7a"], "#1e0a34", ["#ffffff", "#ff3a6a"])],
+  bruise:  [C(["#d4d4ff", "#6b5ad8", "#2f2478"], "#1e0a34", ["#ffffff", "#ff5a3a"])],
   mint:    [C(["#f0fff4", "#8ff2b8", "#2fbf7a"], "#0c3a22", ["#ffffff", "#1b1020"]), C(["#ffffff", "#c8ffd8", "#5fd89a"], "#124a2a", ["#ffe98a"])],
   water:   [C(["#e8fbff", "#5fd0ff", "#1a6fd0"], "#082a5a", ["#ffffff", "#1b1020"]), C(["#ffffff", "#8fe8f0", "#1aa0b8"], "#063440", ["#ffffff"])],
   dull:    [C(["#e6e4ee", "#a8a6b8", "#6e6c80"], "#2a2838", ["#ffffff"]), C(["#e8ecf2", "#9aa8b8", "#5a6878"], "#222a36", ["#ffffff"])]
 };
+
+/* ENGPINK 1.9.22 (the owner, 2026-11-15: «Nie chcę żeby najczęstsze napisy były różowe»): no colour the engine picks by itself is pink or
+   magenta. The band is the one the callers measure (invincible-plus-ultra letter-colors.mjs / sweep-checks palette.mjs): OKLCH hue
+   290..360 or 0..15 with chroma >= 0.04 and lightness >= 0.3 (a near-black block reads as dark, not pink). Every table colour (INV,
+   COLORS, prefs CVD / CONTRAST) stays outside it, and paint.mjs keeps its computed colours (hue jitter, rainbow fills, a backdrop's
+   opposite hue, the block's shading) out of it with unpinkHsl. A caller's own colours (colors, hand.pal, a registered palette) are
+   the caller's and are never changed. check-pink.mjs pins it. */
+export const PINK = Object.freeze({ from: 290, to: 15, minC: 0.04, minL: 0.3 });
+const linC = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+/** OKLCH of an sRGB colour given as 0..1 channels */
+export function oklchOf(r, g, b) {
+  r = linC(r); g = linC(g); b = linC(b);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return { L, C: Math.hypot(A, B), h: ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360 };
+}
+const pinkLch = (o) => o.C >= PINK.minC && o.L >= PINK.minL && (o.h >= PINK.from || o.h < PINK.to);
+/** is this "#rrggbb" in the pink band? (anything else: false) */
+export function isPink(hex) {
+  const m = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(String(hex ?? "").trim());
+  return !!m && pinkLch(oklchOf(parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255));
+}
+const hslRgb = (h, s, l) => { h = (((h % 360) + 360) % 360) / 360; s /= 100; l /= 100; const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [f(h + 1 / 3), f(h), f(h - 1 / 3)].map((v) => Math.round(v * 255) / 255); };
+const UNPINK = new Map();
+/** a computed HSL colour (h degrees, s and l in percent, rounded as painted) moved out of the pink band by the smallest hue turn (the
+    colour itself when it is not pink: then nothing changes) */
+export function unpinkHsl(h, s, l) {
+  const S = +Math.max(0, Math.min(100, s)).toFixed(0), Lq = +Math.max(0, Math.min(100, l)).toFixed(0), key = `${h}|${S}|${Lq}`;
+  let v = UNPINK.get(key);
+  if ( v === undefined ) {
+    v = h;
+    if ( pinkLch(oklchOf(...hslRgb(h, S, Lq))) ) {
+      for ( let d = 1; d <= 180; d++ ) {
+        if ( !pinkLch(oklchOf(...hslRgb(h - d, S, Lq))) ) { v = h - d; break; }
+        if ( !pinkLch(oklchOf(...hslRgb(h + d, S, Lq))) ) { v = h + d; break; }
+      }
+    }
+    if ( UNPINK.size > 4096 ) UNPINK.clear();
+    UNPINK.set(key, v);
+  }
+  return v;
+}
 
 /* ---------- the "auto" mood: sound symbolism of the word itself (my own reading, see README) ---------- */
 export function guessMood(word) {
@@ -471,8 +515,12 @@ export function recolor(hex, dh, dl = 0) {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let l = (mx + mn) / 2, h = 0, s = 0;
   if ( mx !== mn ) { const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60; }
   h = (((h + dh) % 360) + 360) % 360; l = Math.max(0, Math.min(1, l + dl / 100));
-  const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, "0"); };
-  return `#${f(0)}${f(8)}${f(4)}`;
+  const hex6 = (hh) => { const f = (n) => { const k = (n + hh / 30) % 12, a = s * Math.min(l, 1 - l); return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, "0"); }; return `#${f(0)}${f(8)}${f(4)}`; };
+  const out = hex6(h);
+  /* ENGPINK 1.9.22: a turned colour never lands in the pink band (the smallest further turn out of it; a colour outside it is as before) */
+  if ( !isPink(out) ) return out;
+  for ( let d = 1; d <= 180; d++ ) for ( const x of [h - d, h + d] ) { const c = hex6((x + 360) % 360); if ( !isPink(c) ) return c; }
+  return out;
 }
 
 /* ---------- LOOK: accent, how loud each letter of the word is ----------

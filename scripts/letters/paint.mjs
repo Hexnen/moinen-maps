@@ -4,7 +4,7 @@ import { bbox, crackLines } from "./geom.mjs";
 import { rng } from "./rng.mjs";
 import { pictureGeometry, settleCenter, CRACK_W, crackSeed } from "./shape.mjs";
 import { paintShards, SHARD_MARGIN } from "./shards.mjs";
-import { INV_RIM } from "./design.mjs";
+import { INV_RIM, unpinkHsl, isPink } from "./design.mjs";
 
 export const MAX_SIDE = 2048;
 
@@ -31,8 +31,10 @@ export function hexToHsl(h) {
   }
   return [hh, s * 100, l * 100];
 }
-const hsl = (h, s, l, a = 1) => `hsla(${((h % 360) + 360) % 360},${Math.max(0, Math.min(100, s)).toFixed(0)}%,${Math.max(0, Math.min(100, l)).toFixed(0)}%,${a})`;
-const rot = (hex, dh, dl = 0) => { const [h, s, l] = hexToHsl(hex); return hsl(h + dh, s, l + dl); };
+/* ENGPINK 1.9.22: a computed colour never lands in the pink band (design.mjs PINK); a colour outside it is written exactly as before.
+   `keep` = derived from a colour that is itself pink: only a caller's own choice can be (no engine table holds one), so its shades stay */
+const hsl = (h0, s, l, a = 1, keep = false, h = keep ? h0 : unpinkHsl(h0, s, l)) => `hsla(${((h % 360) + 360) % 360},${Math.max(0, Math.min(100, s)).toFixed(0)}%,${Math.max(0, Math.min(100, l)).toFixed(0)}%,${a})`;
+const rot = (hex, dh, dl = 0) => { const [h, s, l] = hexToHsl(hex); return hsl(h + dh, s, l + dl, 1, isPink(hex)); };
 
 /* SUSTAINGAP: how far the INK of a picture reaches past its letters' box, in cap units ({ l, r, u, d }): the keyline, the second
    outline, the rim (world words) and the duplicate block / shadow on their side; the same terms as extents() below without the
@@ -517,8 +519,8 @@ export function paintPicture(plan, bank, p, S, make) {
   if ( H.depth > 0 ) {
     const steps = Math.max(2, Math.min(28, Math.ceil(H.depth * S / 1.6)));
     for ( let s = steps; s >= 0; s-- ) silhouette(ddx * s / steps, ddy * s / steps, outerW + 0.03, H.ink);
-    const [eh, es, el] = hexToHsl(H.pal.ext);
-    for ( let s = steps; s >= 1; s-- ) silhouette(ddx * s / steps, ddy * s / steps, outerW - 0.005, hsl(eh, es, el + 8 * (1 - s / steps)));
+    const [eh, es, el] = hexToHsl(H.pal.ext), extPink = isPink(H.pal.ext);
+    for ( let s = steps; s >= 1; s-- ) silhouette(ddx * s / steps, ddy * s / steps, outerW - 0.005, hsl(eh, es, el + 8 * (1 - s / steps), 1, extPink));
     if ( H.hatch ) {   /* ink hatching on the block's sides (the letters cover the front) */
       ctx.save(); ctx.beginPath();
       for ( const k of [1, 0.66, 0.33] ) { ctx.save(); ctx.translate(ddx * k * S, ddy * k * S); path(ctx, all, S, ox, oy); ctx.restore(); }
@@ -550,11 +552,12 @@ export function paintPicture(plan, bank, p, S, make) {
       ctx.restore();
     }
   }
-  /* misregistered colour separations: cyan and magenta plates slipped off the key plate */
+  /* misregistered colour separations: cyan and yellow plates slipped off the key plate (ENGPINK 1.9.22: the magenta plate #ec008c was
+     pink on every zap word of the legacy styles; process yellow keeps the printed look) */
   if ( p.misreg > 0 ) {
     const m = p.misreg;
     silhouette(m, -m * 0.35, outerW, "#00aeef");
-    silhouette(-m * 0.8, m * 0.45, outerW, "#ec008c");
+    silhouette(-m * 0.8, m * 0.45, outerW, "#ffe600");
   }
   /* letters: merged (one silhouette) or stacked (each letter its own sticker, later ones on top) */
   /* LOOK: each letter in front of the one to its right (the letterer's rule): painted right to left */
