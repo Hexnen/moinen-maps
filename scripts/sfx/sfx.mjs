@@ -977,7 +977,8 @@ function logCall(w, call) {
   seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, space: call.space ?? "world", seed: w.seed,
     ts: Math.round(w.ts ?? toShared(w.t)), size: r(call.table?.size), at: P(call.table?.at), drawn: r(call.o?.size), seatAt: P(call.o?.at),
     rule: call.fit?.rule ?? "ok", rules: call.fit?.rules ?? [], k: r(call.fit?.k ?? 1), cap: r(call.fit?.cap), clean: call.fit?.clean ?? null,
-    box: call.box ? [r(call.box.x0), r(call.box.y0), r(call.box.x1), r(call.box.y1)] : null, played: Math.round(toShared(performance.now())) });
+    box: call.box ? [r(call.box.x0), r(call.box.y0), r(call.box.x1), r(call.box.y1)] : null, played: Math.round(toShared(performance.now())),
+    layer: call.o?.layer ?? null, lang: lang() });
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }
 /** a table word this seat does not draw, by one of its own needs (logged like a call) */

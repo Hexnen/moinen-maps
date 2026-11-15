@@ -66,6 +66,9 @@ class TableWindow extends ApplicationV2 {
   _replaceHTML(result, content) { content.replaceChildren(result); }
   _onRender() {
     win = this;
+    // (the form element outlives each render: its listeners once)
+    if ( this.wired ) return;
+    this.wired = true;
     const el = this.element;
     const mark = () => { this.dirty = true; el.querySelector(".mm-sfxt-save")?.classList.add("is-dirty"); };
     el.addEventListener("input", (e) => {
