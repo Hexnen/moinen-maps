@@ -197,7 +197,7 @@ export const TABLES = {
     exp: [0.55, 1, 1],                                                          // streak length (exposure) factor
     crown: [0, 1, 1], ripple: [0.12, 0.4, 0.5],                                 // splash crowns on / ripples on water hits
     wet: [0.3, 0.65, 1.0], puddle: [1.4, 0.68, 0.6], sheen: [0.0022, 0.003, 0.004],
-    lens: { bead: [0.2, 0.55, 1], big: [3.4, 4.4, 5.2], run: [0.2, 0.65, 1.25], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] },
+    lens: { bead: [0.35, 0.7, 1], big: [4.2, 4.8, 5.2], run: [0.2, 0.65, 1.25], mist: [0, 0.012, 0.035], film: [0, 0.45, 1] },   // (DROPSVIS: more, bigger beads at levels 1-2: unseen at a table)
     fireDim: [0.3, 0.55, 0.8], steam: [0.4, 0.7, 1], fireOut: [90, 45, 20]          // fire under it: damping, steam, s to put out (opt-in)
   },
   snow: {

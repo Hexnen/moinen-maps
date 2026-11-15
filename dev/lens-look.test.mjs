@@ -3,7 +3,7 @@
 //      window sizes puts every lens px on whole device px (crisp blocks), the pixel pass draws one px per lens px, the smooth one three
 //   B. the programs (scripts/weather/lens.mjs): every pixel-art swap applies (a renamed line throws, never silently leaves the smooth
 //      look on), the pixel pass decides each lens px at its centre with hard edges, its show reads whole lens px; the smooth programs are
-//      byte for byte the ones before DROPS (the base tree's source, through dev/lib/baseline.mjs)
+//      byte for byte the ones before DROPS (the base tree's source, through dev/lib/baseline.mjs) but for DROPSVIS's listed lines
 //   C. the setting (the REAL weather.mjs under small Foundry stubs): world, restricted, out of Foundry's list, default "pixel", live
 //      (onChange), its window a menu every user can open; an existing world (nothing stored, an old scene flag) keeps working and draws
 //      pixel art; the GM switches with the API, a player's write is refused
@@ -69,7 +69,19 @@ for ( const m of (await import("node:fs")).readFileSync(new URL("../scripts/weat
   } finally { fs.rmSync(tmp, { force: true }); }
   const byName = Object.fromEntries(sm.map((p) => [p.name, p]));
   ok(old.length === 5, "the base had 5 lens programs");
-  for ( const p of old ) ok(byName[p.name] && byName[p.name].fragmentSrc === p.fragmentSrc && byName[p.name].vertexSrc === p.vertexSrc, `smooth ${p.name} = the base's`);
+  // DROPSVIS (2026-11-15) changed the drops on purpose, in both looks (dev/lens-vis.test.mjs): the smooth programs are the base's with
+  // exactly these lines changed, nothing else (each old line must be in the base once)
+  const VIS = [
+    ["float r = 0.5 + big * pow(hu(key, CY, 313), 2.6);", "float r = 0.5 + big * pow(hu(key, CY, 313), 1.9);"],
+    ["if ( dR < 1.25 ) { bAdd = vec3(0.07) * uLight; bK = 0.97; } else { bAdd = vec3(0.04) * uLight; bK = 1.0; }",
+      "if ( dR < 1.25 ) { bAdd = vec3(0.15) * uLight; bK = 0.97; } else { bAdd = vec3(0.10) * uLight; bK = 1.0; }"],
+    ["srcK = 0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR);", "srcK = 0.99 + 0.10 * ss(0.1, 0.8, n.y) * step(2.2, dR);"],
+    ["      bAdd = vec3(0.05) * uLight * rim * (1.0 - low);\n", "      bAdd = vec3(0.12) * uLight * rim * (1.0 - low);\n"
+      + "      bAdd += vec3(0.09) * uLight * ss(0.2, 0.8, n.y) * (1.0 - rim);   // (DROPSVIS: the light the drop focuses low inside it)\n"]
+  ];
+  const vis = (src) => VIS.reduce((s, [a, b]) => { ok(s.split(a).length <= 2, `DROPSVIS line at most once: ${a.slice(0, 40)}`); return s.replace(a, b); }, src);
+  ok(old.some((p) => VIS.every(([a]) => p.fragmentSrc.includes(a))), "the base pass has every line DROPSVIS changed");
+  for ( const p of old ) ok(byName[p.name] && byName[p.name].fragmentSrc === vis(p.fragmentSrc) && byName[p.name].vertexSrc === p.vertexSrc, `smooth ${p.name} = the base's + DROPSVIS`);
 }
 
 /* ---------------------------------------------------------------- C: the setting, the API, an existing world */
