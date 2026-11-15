@@ -164,7 +164,7 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], heard: !!w.heard, main: w.role === "main", sound: Number.isFinite(w.sx) && Number.isFinite(w.sy) ? { x: w.sx, y: w.sy } : null, ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], heard: !!w.heard || !!w.hint, main: w.role === "main", sound: Number.isFinite(w.sx) && Number.isFinite(w.sy) ? { x: w.sx, y: w.sy } : null, ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
       // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
       // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
       ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
@@ -454,6 +454,10 @@ function pageWordPlan(p, w0, word, sd, env, d) {
     // (MAPSEATS3: a sound heard all over the scene - a close thunder strike -: a seat whose view does not hold it letters it at its view's
     // edge toward it, by the seat rule, instead of each seat deciding by its own view whether it is a map word or a screen word)
     ...(w.heard ? { heard: true } : {}),
+    // (MAPTHUNDER, ADVM r2 item 9, K 32.7 s: a bomb off every seat's view gave no hint at all - its main word was "off" everywhere. The main
+    // word of a big event (rank 4 and up: a shell, a bomb, a meteor, a plough's stop) is HEARD beyond the view: a seat whose view does not
+    // hold it letters it at its view's edge toward it, "away", at most OFF_K of its size - the rest of its page stays where it happens)
+    ...(w.role === "main" && (w.rank ?? 0) >= 4 && !w.heard && !w.screen ? { hint: true } : {}),
     // (EFFECTS2: a story's words are sized by rank as a share of the REFERENCE view: readable, a lower rank never bigger)
     rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},

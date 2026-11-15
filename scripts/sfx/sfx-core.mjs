@@ -75,7 +75,9 @@ export const VOICES = {
   decay:   { kinds: ["crumble"], prio: 3, w: 0.6, ms: 1300, area: 0.7, cover: 0.2, stage: { out: "fall", on: 3 } },
   acid:    { kinds: ["hiss", "fizzle"], prio: 3, w: 0.55, ms: 1300, area: 0.6, cover: 0.2, stage: { holdKind: "boil", out: "dissolve" } },
   douse:   { kinds: ["hiss"], prio: 3, w: 0.45, ms: 1100, area: 0.45, cover: 0.3, stage: { in: "pop", holdKind: "boil", out: "dissolve" }, drift: true },
-  out:     { kinds: ["fizzle", "hiss"], prio: 3, w: 0.4, ms: 3500, area: 0.4, cover: 0.4, stage: { in: "pop", holdKind: "boil", out: "dissolve", on: 3 }, drift: true },
+  // (MAPTHUNDER, ADVM r2 item 9, D 49 s: a fire going out was the engine's FIZZLE - a power failing, lettered electric blue PFZZZZZZT… as big
+  // as the catch: now the FIRE's own last stage (the engine's fire row "out": TSSS… / FSSSHHT…), in ash colours (OUT_ASH) at rank 1)
+  out:     { kinds: ["fire", "hiss", "fizzle"], prio: 3, w: 0.4, ms: 3500, area: 0.4, cover: 0.4, stage: { in: "pop", holdKind: "boil", out: "dissolve", on: 3 }, drift: true },
   scrape:  { kinds: ["scrape"], prio: 3, w: 0.7, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
   engine:  { kinds: ["engine"], prio: 3, w: 0.75, ms: 1500, area: 0.7, cover: 1, stage: { holdKind: "rattle" }, ride: true },
   whump:   { kinds: ["shockwave", "whump"], prio: 2, w: 0.85, ms: 600, area: 0.7, cover: 0.4, stage: { in: "grow", push: { force: 1.2 } } },
@@ -230,6 +232,11 @@ export function fireColors(c) {
   const hex = (k, to) => "#" + [r, g, b].map((v) => Math.round(v + (to - v) * k).toString(16).padStart(2, "0")).join("");
   return [hex(0.65, 255), c.toLowerCase(), hex(0.55, 0)];
 }
+/** MAPTHUNDER: a natural fire going out letters in ASH (light ash, warm grey, charcoal): the flames are dying, the word is not a new fire
+    and not a spark (a fire painted in its own colour keeps it) */
+export const OUT_ASH = Object.freeze(["#efe9e1", "#a59b91", "#3a3430"]);
+/** MAPTHUNDER: the rank of a fire's going-out hiss (the smallest story rank, well under its catch) */
+export const OUT_RANK = 1;
 /** natural (orange-red-yellow) fire is lettered in the engine's own fire look; only a fire painted in another colour (a blue, a green
     fire) letters in its colour */
 export function ownFireColors(c) {
@@ -391,7 +398,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
     const c = pathCentre(p);
     push({ key: `${st.id}|out|${st.o}`, voice: "out", x: c.x, y: c.y, r: st.r ?? 50, t: Math.max(st.o, from), ms: Math.max(1200, ctx.outMs ?? 3500),
-      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box });
+      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box, colors: colors ?? [...OUT_ASH], rank: OUT_RANK });
   }
   return out;
 }
@@ -521,6 +528,8 @@ export function planCluster(g, o = {}) {
   // (the WORD is written from the main sound alone - how loud it is, how long: the same on every seat even when the rest of its
   // cluster reaches one seat a bake later; the cluster only makes it bigger)
   mw.textLoud = clamp(0.2 + 0.8 * (main.m ?? magnitude(main.r / grid)), 0, 1);
+  // (MAPTHUNDER: an event that knows its place in the story's hierarchy - a fire going out - is sized by that rank, as a page's word)
+  if ( Number.isFinite(main.rank) ) mw.rank = main.rank;
   words.push(mw);
   if ( o.big || !(o.sec > 0) || single ) return words;
   // satellites: the biggest other members out at the edge, each its own voice, quieter, staggered

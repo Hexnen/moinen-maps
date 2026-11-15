@@ -26,7 +26,7 @@ for ( const [v, d] of Object.entries(C.VOICES) ) {
   ok(d.kinds.some((k) => KINDS.has(k)), `voice ${v} resolves to a sound kind the engine knows (${d.kinds})`);
   for ( const lang of ["en", "pl"] ) ok(V.word(C.kindOf(v, KINDS), { lang, loud: 0.6, seed: "x" }).text.length > 0, `${lang} word for ${v}`);
 }
-ok(C.kindOf("out", new Set(["hiss"])) === "hiss" && C.kindOf("out", null) === "fizzle", "a kind the engine does not know falls back to the next one listed");
+ok(C.kindOf("out", new Set(["hiss"])) === "hiss" && C.kindOf("out", null) === "fire", "a kind the engine does not know falls back to the next one listed");
 // (owner's ruling 2026-11-13: no Polish diacritics in sound words - the Polish set is spelled in plain letters, SZ / CZ / RZ for its sounds)
 const plWords = Object.keys(C.VOICES).flatMap((v) => Array.from({ length: 12 }, (_, i) => V.word(C.kindOf(v, KINDS), { lang: "pl", loud: (i % 4) / 3, seed: `p${i}` }).text));
 ok(plWords.length > 100 && !/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(plWords.join("")), "the Polish words carry no Polish diacritics");
@@ -57,7 +57,8 @@ ok(fall.some((w) => w.role === "pre") && fall.find((w) => w.role === "pre").t < 
 const boomW = single({ voice: "boom", x: 0, y: 0, r: 200, m: 0.7 })[0], fireW = single({ voice: "fire", x: 0, y: 0, r: 200, m: 0.7, ms: 1600 })[0];
 ok(fireW.ms > boomW.ms && fireW.kind === "fire" && boomW.kind === "boom", "a fire catching lasts longer than a blast");
 const out = single({ voice: "out", x: 0, y: 0, r: 300, m: 0.35, ms: 3500 })[0];
-ok(out.ms >= 3000 && out.magnitude < 0.4 && /fizzle|hiss/.test(out.kind), "going out is a quiet, long hiss");
+// (MAPTHUNDER: the fire's own last stage - the engine's fire row "out", TSSS… / FSSSHHT… - is the hiss of a fire going out)
+ok(out.ms >= 3000 && out.magnitude < 0.4 && (/fizzle|hiss/.test(out.kind) || (out.kind === "fire" && C.wordOpts(out).stage === "out")), "going out is a quiet, long hiss");
 ok(C.fireColors("#3060ff")?.length === 3 && C.ownFireColors("#3060ff")?.length === 3 && C.ownFireColors("#ff8a24") === null && C.fireColors(null) === null, "a fire in its own colour letters in it; a natural fire takes the engine's look");
 
 /* C. fire stroke events */

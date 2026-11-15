@@ -93,6 +93,12 @@ let soon = [];                  // boxes of words placed, not started yet ({ box
 let stormTimer = 0;
 const flashSeen = new Set();
 let farCount = { key: "", list: new Map() };
+// MAPTHUNDER (ADVM r2 items 1, 9): the storm under the fight
+const fights = new Map();       // key -> shared ms of a fight's main word (a bomb's, a fire's catch, a brush blast, a gun): a storm word yields to it
+const stormUp = new Set();      // engine handles of storm words up on this seat (they leave before a fight's word lands)
+let closeMemo = { key: "", rp: null, m: new Map() };   // slot -> does it hold a close strike (the storm's settings as keyed)
+const onsetSeen = new Set();    // storm switch-on moments whose entrance was decided here
+const steamSeen = new Set();    // weather keys whose rain-on-fire hiss was decided here
 // MAPSFXSEAT: the table picture (sfx-seat.mjs): the words every seat holds, planned from shared data; and this seat's own log of every
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
 const ledger = SEAT.makeLedger();
@@ -201,6 +207,8 @@ export function add(e) {
   // field is computed in a worker, a busy seat shows a big fire a second or two later - so each seat lettered it at another instant, and
   // a seat still applying a blast dropped it as too late: the player got no catch word in the GM's window. Question MAPSFXSEAT-2)
   if ( e.gate ) e = { ...e, t: e.t + CATCH_SHOW_MS };
+  // (MAPTHUNDER: a loud event of the fight - a blast, a crash, a gun, a fire catching, a brush stroke's zap - takes the stage from the storm)
+  if ( (C.VOICES[e.voice]?.prio ?? 0) >= FIGHT_PRIO ) noteFight(`e|${e.key}`, toShared(e.t));
   const due = C.dueAt(e) - performance.now();
   if ( e.t - performance.now() > MAX_AHEAD ) return;
   if ( due > 30 ) { later(e.key, due, () => queue(e), { obj: e.obj, voice: e.voice, ev: e }); return; }
@@ -285,6 +293,7 @@ function onFiring(rec) {
     reported = true;
     const e = C.muzzleEvent(it, { t0, grid: G, muzzleOf: A.muzzleOf, flight, key: `m|${rec.id}|${i}`, sid: `m|${rec.id}|${i}` });
     if ( !e ) return;
+    noteFight(`m|${rec.id}|${i}`, toShared(e.t));                                // (MAPTHUNDER: a gun's report takes the stage)
     // (owner's answer 4: a shooter this client cannot see - hidden, out of vision, under the fog - is heard, but generally on the
     // screen, never at its place)
     if ( !shooterSeen(it.from, it.fr) ) { screenReport(e.path, e.t0, e.kp, `m|${rec.id}|${i}`); return; }
@@ -297,6 +306,7 @@ function onFiring(rec) {
     const last = Math.max(...hits.map((h) => h[2] || 0)), first = Math.min(...hits.map((h) => h[2] || 0));
     shooters.push({ pts: hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000 });
     const walk = hits.map((h) => ({ x: h[0], y: h[1], ms: Math.max(0, (h[2] || 0) - first) })).sort((a, b) => a.ms - b.ms);
+    noteFight(`m|${rec.id}|off`, toShared(t0 + first));                         // (MAPTHUNDER)
     screenReport(walk, t0 + first - 120, C.gunKinds(walk), `m|${rec.id}|off`);
   }
 }
@@ -306,6 +316,8 @@ function onFiring(rec) {
 /** A story that is not a preset firing (a plough, a flash): a page of its own words, played like a firing's (pageWord). */
 function storyPage(id, t0, words, ground = null, grp = null) {
   const p = { rec: { id, t0, size: 1 }, pg: { words }, ground, grp };
+  // (MAPTHUNDER: a story of the fight - a plough's stop - takes the stage from the storm; the storm's own stories and a hiss do not)
+  if ( !STORM_PAGE.test(id) && !id.startsWith("steam|") ) for ( const w of words ) if ( w.role === "main" ) noteFight(`st|${id}|${w.key ?? w.role}`, Number(w.t));
   for ( const w of words ) {
     const t = toPerf(w.t), lead = 140;
     if ( lifeOver({ ...w, t }) ) continue;
@@ -368,18 +380,123 @@ function pollStorm() {
     flashSeen.add(id); if ( flashSeen.size > 600 ) flashSeen.delete(flashSeen.values().next().value);
     if ( ev.kind === "far" && !EV.farLettered(ev, (k) => farBefore(storm, k)) ) continue;
     if ( mode() === "big" && ev.kind !== "close" ) continue;
+    // (MAPTHUNDER, ADVM r2 item 1: in a storm a close strike was lettered at full size every few seconds, two at once, over the fight. Now
+    // the storm's RHYTHM, the same on every seat (sfx-events thunderRhythm, from the storm's own slots): one close strike lettered in
+    // THUNDER_GAP s, the first after a quiet spell OPENS it (its bigger word), the rest roll on under it; a mid flash's rumble only away from
+    // a lettered strike. Every strike still lights the scene - only its word waits)
+    let spell = null;
+    if ( !ev.preview && ev.kind === "close" ) { spell = EV.thunderRhythm(ev.k, (j) => closeAt(storm, j)); if ( !spell.lettered ) { stats.flashQuiet = (stats.flashQuiet ?? 0) + 1; continue; } }
+    if ( !ev.preview && ev.kind === "mid" && !EV.midLettered(ev.k, (j) => closeAt(storm, j)) ) { stats.flashQuiet = (stats.flashQuiet ?? 0) + 1; continue; }
     const place = W.stormModel?.placeOf?.(ev, rect, G);
     if ( !place ) continue;
-    const w = EV.flashWord(ev, place, view(), canvas.scene?.id ?? "");
+    const w = EV.flashWord(ev, place, view(), canvas.scene?.id ?? "", spell);
     if ( !w ) continue;
     const r = G * 0.5;
     const p = storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }], null, "weather");
     // (MAPRIDE: when its word is due, the flash is asked again with the storm as it stands THEN - the GM's change reaches his own seat at
     // once and a player's a moment later, so a seat that polled before the change and one that polled after decided differently)
-    if ( !ev.preview ) p.still = () => flashStill(ev);
+    // (MAPTHUNDER: and a storm word whose moment is a fight's is not lettered - the fight has the stage; sfx-events thunderYields)
+    if ( !ev.preview ) p.still = () => (!flashStill(ev) ? false : EV.thunderYields(w.t, fights.values()) ? "yield" : true);
     stats.flashes = (stats.flashes ?? 0) + 1;
   }
+  stormEntrance(storm, now, rect, G);
   again(700);
+}
+/** MAPTHUNDER: a storm's own page (a flash's, its entrance's) */
+const STORM_PAGE = /^(flash|onset)\|/;
+/** MAPTHUNDER: does slot `j` of the storm shown here hold a close strike (storm-model flashOf, the same on every seat)? Kept per settings. */
+function closeAt(storm, j) {
+  const S = storm.S, SM = moduleApi.weather?.stormModel; if ( !S || !SM?.flashOf ) return false;
+  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}|${S.prev?.on}|${S.prev?.rate}|${S.prev?.near}`;
+  if ( closeMemo.key !== key || closeMemo.rp !== storm.rainP ) closeMemo = { key, rp: storm.rainP, m: new Map() };
+  if ( closeMemo.m.has(j) ) return closeMemo.m.get(j);
+  const v = SM.flashOf(S, storm.seed, j, storm.rainP)?.kind === "close";
+  closeMemo.m.set(j, v);
+  if ( closeMemo.m.size > 3000 ) closeMemo.m.delete(closeMemo.m.keys().next().value);
+  return v;
+}
+/** MAPTHUNDER: does the storm letter a flash of its own (by its rhythm) with its moment in [t0, t1] (shared ms)? */
+function stormLettered(storm, t0, t1) {
+  const SM = moduleApi.weather?.stormModel; if ( !storm?.S || !SM?.flashOf ) return false;
+  const slot = SM.SLOT || 1000;
+  for ( let k = Math.floor(t0 / slot) - 1; k <= Math.floor(t1 / slot); k++ ) {
+    const ev = SM.flashOf(storm.S, storm.seed, k, storm.rainP);
+    if ( !ev || ev.t < t0 || ev.t > t1 ) continue;
+    if ( ev.kind === "close" ? EV.thunderRhythm(k, (j) => closeAt(storm, j)).lettered : ev.kind === "mid" ? EV.midLettered(k, (j) => closeAt(storm, j)) : EV.farLettered(ev, (j) => farBefore(storm, j)) ) return true;
+  }
+  return false;
+}
+/** MAPTHUNDER, ADVM r2 item 9 (E: the first thunder word came 7 s after the lightning was switched on): the storm's ENTRANCE - when the
+    GM switches the lightning on and it letters nothing of its own at once, a rumble rolls in at the screen's edge (sfx-events stormOnset:
+    the same on every seat, from the stored switch-on). */
+function stormEntrance(storm, now, rect, G) {
+  const S = storm.S;
+  if ( !S?.on || S.prev?.on || onsetSeen.has(S.t) || now > S.t + EV.ONSET_LAG + 2000 || now < S.t - 4000 ) return;
+  onsetSeen.add(S.t);
+  if ( onsetSeen.size > 50 ) onsetSeen.delete(onsetSeen.values().next().value);
+  if ( mode() === "big" ) return;
+  const o = EV.stormOnset(S, (t0, t1) => stormLettered(storm, t0, t1), storm.rainP);
+  if ( !o ) return;
+  const place = moduleApi.weather?.stormModel?.placeOf?.(o.ev, rect, G);
+  const w = place && EV.flashWord(o.ev, place, view(), canvas.scene?.id ?? "");
+  if ( !w ) return;
+  const p = storyPage(`onset|${S.t}`, o.t, [{ ...w, key: w.role }], null, "weather");
+  p.still = () => { const s2 = moduleApi.weather?.stormDisplay?.()?.S; return !(s2?.on && s2.t === S.t) ? false : EV.thunderYields(w.t, fights.values()) ? "yield" : true; };
+  stats.onsets = (stats.onsets ?? 0) + 1;
+}
+/** MAPTHUNDER: a voice of this priority and up is the fight (a fire catching and up: not a crack, a hiss, a rumble) */
+const FIGHT_PRIO = 6;
+/** MAPTHUNDER: a fight's main word at shared ms `t`: the storm yields to it (thunderYields), and a storm word up on this seat leaves
+    THUNDER_CLEAR ms before it lands (its exit) - the same moment on every seat */
+function noteFight(key, t) {
+  if ( !Number.isFinite(t) || fights.has(key) ) return;
+  const now = sharedNow();
+  fights.set(key, t);
+  if ( fights.size > 40 ) for ( const [k, f] of fights ) if ( f < now - 15000 ) fights.delete(k);
+  const at = toPerf(t - EV.THUNDER_CLEAR) - performance.now();
+  if ( at > -200 ) later(`fx|${key}`, at, () => { for ( const h of [...stormUp] ) { try { h.stop(); } catch {} stormUp.delete(h); } });
+}
+/** a storm word's engine handle, kept while it is up (MAPTHUNDER) */
+function keepStorm(w, h) {
+  if ( !h || !STORM_PAGE.test(String(w?.page ?? "")) ) return;
+  stormUp.add(h);
+  Promise.resolve(h.finished).finally(() => stormUp.delete(h));
+}
+/** MAPTHUNDER, ADVM r2 item 9 (D 28 s: rain level 3 on a burning fire got no reaction): the weather changed - the moment its rain first
+    steams over the fires (weather model fireWet, the world's: the same on every seat) is lettered as a hiss at the burning fires */
+function onWeather(kind) {
+  if ( kind !== "changed" && kind !== "loaded" && kind !== "params" ) return;
+  try {
+    if ( mode() === "off" || mode() === "big" || !canvas?.ready || stepFor("fire") === 0 ) return;
+    const W = moduleApi.weather, P = W?.params?.(), M = W?.model;
+    if ( !P?.on || !M?.fireWet || !M?.resolve || !Array.isArray(P.keys) ) return;
+    if ( P.who === "gm" && !game.user?.isGM ) return;                            // (the weather hidden from the players: so is its hiss)
+    const now = sharedNow(), steamAt = (t) => M.fireWet(M.resolve(P, t)).steam;
+    for ( const s of EV.steamOnsets(P.keys.filter((k) => Number(k?.t) >= now - 20000), steamAt) ) {
+      if ( steamSeen.has(s.key) || s.t < now - 1500 ) continue;
+      steamSeen.add(s.key);
+      if ( steamSeen.size > 100 ) steamSeen.delete(steamSeen.values().next().value);
+      later(`steam|${s.key}`, toPerf(s.t) - 600 - performance.now(), () => steamFires(s, steamAt(s.t)));
+    }
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: the rain's hiss failed`, err); }
+}
+/** the hiss at the (at most two biggest) fires burning at the rain's steam onset `s` (the table's fires, as the burn's) */
+function steamFires(s, steam) {
+  if ( mode() === "off" || !canvas?.ready ) return;
+  const G = grid(), all = Fire.allStrokes?.() ?? new Map();
+  const fires = [...all.values()].filter((st) => st.k === "fire" && FM.burningAt(st, s.t));
+  if ( !fires.length ) return;
+  const geo = Fire.geo(), FP = Fire.params0();
+  const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, FP), levelNow: (st, t) => FM.levelNow(st, Number.isFinite(t) ? t : undefined) }))
+    .sort((a, b) => b.prio - a.prio).slice(0, 2);
+  for ( const pl of plans ) {
+    const w = EV.steamWord({ ...pl, points: [pl.at(0, s.t)] }, s.t, steam, canvas.scene?.id ?? "");
+    if ( !w ) continue;
+    const ids = pl.key.split("+");
+    const p = storyPage(`steam|${s.t}|${pl.key}`, s.t, [{ ...w, key: "steam" }], null, "fire");
+    p.still = () => ids.some((id) => { const st = Fire.allStrokes?.()?.get(id); return !!st && FM.burningAt(st, sharedNow()); });
+    stats.steams = (stats.steams ?? 0) + 1;
+  }
 }
 /** MAPRIDE: is a lightning flash still one this storm makes and letters, read with the storm's settings as they stand now on this seat (a
     switch-off that reached this seat after its poll: the flash is gone, on every seat alike)? No storm shown here: as polled. */
@@ -389,7 +506,10 @@ function flashStill(ev) {
     if ( !storm?.S || !SM?.flashOf ) return true;
     const now = SM.flashOf(storm.S, storm.seed, ev.k, storm.rainP);
     if ( !now || now.kind !== ev.kind || now.t !== ev.t ) return false;
-    return ev.kind !== "far" || EV.farLettered(now, (k) => farBefore(storm, k));
+    // (MAPTHUNDER: and still lettered by the storm's rhythm as it stands now)
+    if ( ev.kind === "close" ) return EV.thunderRhythm(ev.k, (j) => closeAt(storm, j)).lettered;
+    if ( ev.kind === "mid" ) return EV.midLettered(ev.k, (j) => closeAt(storm, j));
+    return !!EV.farLettered(now, (k) => farBefore(storm, k));
   } catch { return true; }
 }
 /** How many far flashes the storm made in slot `k`'s window before it (sfx-events farIndex: the same on every seat; MAPRIDE - before, a
@@ -443,6 +563,8 @@ function planPage(rec, tries = 0) {
   // (MAPSFXSEAT: the ground under the impact from the map's own pixels, the same on every seat, known before any word is written)
   const p = { rec, pg, ground: groundAt(rec) };
   pages.set(rec.id, p);
+  // (MAPTHUNDER: a firing's main word takes the stage from the storm)
+  for ( const w of pg.words ?? [] ) if ( w.role === "main" ) noteFight(`pg|${rec.id}|${w.key}`, Number(w.t));
   for ( const id of pg.owned.d ) owned.d.add(id);
   for ( const id of pg.owned.f ) owned.f.add(id);
   for ( const id of pg.owned.catch ) owned.catch.add(id);
@@ -506,7 +628,8 @@ function pageWord(p, w) {
   if ( stepFor(grp) === 0 ) return;
   const q = tb?.get(w.key);
   if ( !q ) return;
-  if ( p.still && !p.still() ) { seatSkip(q, "gone"); return; }
+  const still = p.still ? p.still() : true;
+  if ( still === false || typeof still === "string" ) { seatSkip(q, typeof still === "string" ? still : "gone"); return; }   // (MAPTHUNDER: "yield")
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
   // (this seat's own need: its performance mode keeps fewer words up - never the main word)
   const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
@@ -572,7 +695,7 @@ function playScreen(spec, fixed = null) {
     const oo = { ...o, at, size: f.cap / ((plan?.sizeK ?? 1) * sc), startAt: spec.t, reduced: reducedMotion() };
     try {
       const h = L.play(spec.text, oo);
-      if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; screenUp.push({ box: f.box, life }); logCall(spec, { o: oo, fit: { ...f, k: oo.size / o.size }, box: f.box, table: { size: o.size, at: { x: ref.x, y: ref.y } }, space: "screen" }); }
+      if ( h ) { keepStorm(spec, h); stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; screenUp.push({ box: f.box, life }); logCall(spec, { o: oo, fit: { ...f, k: oo.size / o.size }, box: f.box, table: { size: o.size, at: { x: ref.x, y: ref.y } }, space: "screen" }); }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); }
   };
   const wait = spec.t - performance.now();
@@ -1010,6 +1133,7 @@ function play(w) {
     const b0 = call?.box ?? w.box, bx = b0 && w.voice === "cavein" ? { ...b0, y1: b0.y1 + (b0.y1 - b0.y0) * 0.5 } : b0;
     const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
+    keepStorm(w, h);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
     // (MAPRIDE: a burning run gives way to an event word at once - burnRooms keeps the runs off the words this seat drew; live a close
     // strike's KRRRMMM! stood a second on a run's phrase)
@@ -1054,6 +1178,7 @@ function teardown(full = true) {
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
   burns.clear(); ledger.clear(); pageWaits.clear(); holdMemo.clear();
+  fights.clear(); stormUp.clear(); closeMemo = { key: "", rp: null, m: new Map() }; onsetSeen.clear(); steamSeen.clear();
   uiCache = { t: -1e9, rects: [], boxes: [] };
 }
 function refresh() {
@@ -1177,5 +1302,6 @@ export function registerSfx() {
   Hooks.on("deleteSetting", onDeleted);
   UI.wire({ table: tableNow, perf: () => perfMode(), reduced: () => reducedMotion(), engineMenu: engineMenu });
   Hooks.on("moinenMapsPresets", (kind, data) => { if ( kind === "firing" ) onFiring(data?.rec); });
+  Hooks.on("moinenMapsWeather", (kind) => onWeather(kind));                     // (MAPTHUNDER: the rain's hiss on a fire)
   Hooks.on("moinenMapsFire", (kind) => { if ( kind === "edited" || kind === "loaded" ) { if ( kind === "loaded" ) { fireSeen = new Map(); onFire(true); } else onFire(false); } });
 }

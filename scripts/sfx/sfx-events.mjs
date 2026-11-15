@@ -106,12 +106,84 @@ export function farIndex(k, isFar) {
   for ( let j = k0; j < k; j++ ) if ( isFar(j) ) n++;
   return n;
 }
+/* ---------------------------------------------------------------- MAPTHUNDER: the storm under the fight (ADVM r2 items 1 and 9) */
+
+/** A lettered close strike's word holds about 2.5 s: two lettered strikes are at least THUNDER_GAP slots (s) apart, so one storm word is
+    up at a time and the fight has the stage between them (live 2026-11-15, storm 3 with close thunder: a thunder word on screen 20 of 30 s,
+    often two at once, over the bombs' words) */
+export const THUNDER_GAP = 6;
+/** a lettered close strike after this many slots without one OPENS a spell of the storm (its bigger word); the others roll on under it */
+export const THUNDER_SPELL = 20;
+/** the rhythm is counted from this many slots back (two windows aligned to the shared clock): the same answer on every seat */
+export const THUNDER_WIN = 30;
+/** the opening strike's word: rank 4, a notch smaller - under a shell's rank-4 word and a bomb's rank 5 */
+export const THUNDER_SHRINK = 0.9;
+/**
+ * Is the close strike of slot `k` lettered, and does it open a spell? Greedy over the slots from two windows back: a close strike is
+ * lettered when no lettered one came in the THUNDER_GAP slots before it. `isClose(j)` -> slot j holds a close strike (storm-model flashOf,
+ * the same on every seat). -> { lettered, opens }
+ */
+export function thunderRhythm(k, isClose) {
+  const a = Math.floor(k / THUNDER_WIN) * THUNDER_WIN - THUNDER_WIN;
+  let last = -Infinity;
+  for ( let j = a; j <= k; j++ ) {
+    if ( !isClose(j) || j - last < THUNDER_GAP ) continue;
+    if ( j === k ) return { lettered: true, opens: j - last >= THUNDER_SPELL };
+    last = j;
+  }
+  return { lettered: false, opens: false };
+}
+/** a mid flash's rumble at the screen edge is lettered only when no lettered close strike is within MID_CLEAR slots of it (no stack) */
+export const MID_CLEAR = 3;
+export function midLettered(k, isClose) {
+  for ( let j = k - MID_CLEAR; j <= k + MID_CLEAR; j++ ) if ( isClose(j) && thunderRhythm(j, isClose).lettered ) return false;
+  return true;
+}
+/** THE FIGHT HAS THE STAGE: a storm word whose moment is within [YIELD[0], YIELD[1]] ms of a fight's main word (a preset's blast, a
+    catching fire, a brush blast, a plough's stop: the table's own events) is not lettered; one already up leaves THUNDER_CLEAR ms before
+    the fight's main word lands (its exit). `fights` = shared ms of the fights' main words. */
+export const THUNDER_YIELD = [-1500, 2400];
+export const THUNDER_CLEAR = 320;
+export const thunderYields = (t, fights) => { for ( const f of fights ) if ( f - t >= THUNDER_YIELD[0] && f - t <= THUNDER_YIELD[1] ) return true; return false; };
+/** THE STORM'S ENTRANCE (ADVM r2 item 9, E: the first thunder word came 7 s after the lightning was switched on): when the GM switches
+    the lightning on and the storm letters nothing of its own within ONSET_WAIT ms, a rumble rolls in from a side of the scene ONSET_LAG ms
+    after the switch-on (only while it rains: the flashes come with the rain). `S` the stored storm (storm-model), `lettered(t0, t1)` -> does
+    a flash lettered by the rhythm sound in [t0, t1] (shared ms). -> { t, ev } (a mid flash's shape for flashWord) | null */
+export const ONSET_WAIT = 2500, ONSET_LAG = 900;
+export function stormOnset(S, lettered, rainAt = () => 1) {
+  if ( !S?.on || !(S.t > 0) || S.prev?.on ) return null;
+  const t = S.t + ONSET_LAG;
+  if ( (Number(rainAt(t)) || 0) < 0.25 || lettered(S.t, S.t + ONSET_WAIT) ) return null;
+  const h = (i) => h01(`onset|${S.t}|${i}`);
+  return { t, ev: { k: `onset${S.t}`, t, kind: "mid", at: { a: h(1) * 6.283, d: 0.8 }, onset: true } };
+}
+/** RAIN ON A BURNING FIRE (ADVM r2 item 9, D 28 s: rain level 3 on a burning fire got no reaction): the moment the rain's steam over the
+    fire (weather model fireWet) first passes STEAM_ON after a weather change is lettered as a hiss at the burning fires. `keys` the weather's
+    timeline keys ({ t, dur }), `steamAt(t)` the world's steam share at shared ms t. -> [{ key, t }] (one per key whose ramp brings it) */
+export const STEAM_ON = 0.2, STEAM_STEP = 100, STEAM_AFTER = 4000;
+export function steamOnsets(keys, steamAt) {
+  const out = [];
+  for ( const k of keys ?? [] ) {
+    if ( !Number.isFinite(k?.t) ) continue;
+    if ( (Number(steamAt(k.t - 1)) || 0) >= STEAM_ON * 0.6 ) continue;                 // (it was steaming before this change already)
+    const end = k.t + Math.max(0, Number(k.dur) || 0) + STEAM_AFTER;
+    for ( let t = k.t; t <= end; t += STEAM_STEP ) if ( (Number(steamAt(t)) || 0) >= STEAM_ON ) { out.push({ key: `steam|${Math.round(k.t)}`, t: Math.round(t) }); break; }
+  }
+  return out;
+}
+/** the hiss of rain on a fire group (sfx-core burnPlan `p`, the steam share `steam`): the fire's own place, rank 2, rising as steam */
+export function steamWord(p, t, steam = 0.5, seed = "") {
+  const q = p.points?.[0] ?? null; if ( !q ) return null;
+  return { role: "main", key: "steam", kind: "hiss", wo: { loud: clamp(0.3 + 0.35 * steam, 0.3, 0.65), long: 0.85 }, t, x: q.x, y: q.y, r: p.r ?? 50,
+    rank: 2, ms: 1800, drift: true, stage: { in: "pop", holdKind: "boil", out: "dissolve" }, seed: `${seed}|steam|${p.key}|${t}` };
+}
+
 /**
  * The word of a lightning flash. `ev` (storm-model makeFlash), `place` ({ x, y } scene px: storm-model placeOf), `view` ({ x0, y0, x1,
  * y1 } scene px of this client), `seed`. -> { kind, wo, t (shared ms), rank, screen? ({ fx, fy }: a share of the screen, unlocated at the
  * edge on the flash's side), x?, y? (scene px: a close strike's foot), ms, stage } | null
  */
-export function flashWord(ev, place, view, seed = "") {
+export function flashWord(ev, place, view, seed = "", spell = null) {
   if ( !ev ) return null;
   const sd = `${seed}|flash|${ev.k}|${ev.t}`;
   // the edge of THIS screen on the flash's side (the light comes from beyond it): its direction from the view's centre
@@ -123,16 +195,21 @@ export function flashWord(ev, place, view, seed = "") {
   };
   if ( ev.kind === "close" ) {
     const lv = clamp(ev.lv | 0 || 2, 1, 3), restrikes = Math.max(0, (ev.strokes?.length ?? 1) - 1);
-    // (a close strike beyond this screen - the storm strikes anywhere on the scene - is lettered at the edge toward it, still the big
-    // word: live, a strike off the view was dropped, its word had nowhere to stand)
-    // (MAPSEATS3: ONE word for the table, at the strike, on every seat - `heard`: a seat whose view does not hold the strike letters it at
-    // its view's edge toward it by the seat rule, at the size its view gives a word it does not see (sfx-seat OFF_K). Before, each seat
-    // chose by ITS view between a map word at the strike and a screen word at its edge: the GM, who saw the strike, drew a small map word
-    // and the player a big screen word for the same flash (ADVM r2 item 2))
-    return { role: "main", kind: "thunder", wo: { loud: clamp(0.6 + 0.12 * lv + 0.04 * restrikes, 0.6, 1), ...(lv === 3 ? { prefix: true } : {}) }, t: ev.t, x: place.x, y: place.y,
-      heard: true, edge: edge(), rank: lv === 3 ? 5 : 4, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd };
+    // (MAPTHUNDER, ADVM r2 item 1: the storm is the scene's weather, not its fight - its loudest word stays under a bomb's (rank 5, a shell's
+    // rank 4 at full size): the strike that opens a spell of the storm (`opens`) at rank 4 a notch smaller, with its lead-in on a full
+    // strike; the strikes after it in the same spell at rank 3, no lead-in: the storm makes its entrance, then rolls on under the fight)
+    // (a close strike beyond this screen - the storm strikes anywhere on the scene - is lettered at the edge toward it: MAPSEATS3, ONE word
+    // for the table, at the strike, on every seat - `heard`: a seat whose view does not hold the strike letters it at its view's edge toward
+    // it by the seat rule, at the size its view gives a word it does not see (sfx-seat OFF_K); ADVM r2 item 2)
+    const opens = spell?.opens !== false;
+    return { role: "main", kind: "thunder", wo: { loud: clamp((opens ? 0.6 : 0.5) + 0.12 * lv + 0.04 * restrikes, 0.5, opens ? 1 : 0.85), ...(lv === 3 && opens ? { prefix: true } : {}) }, t: ev.t, x: place.x, y: place.y,
+      heard: true, edge: edge(), rank: opens ? 4 : 3, shrink: opens ? THUNDER_SHRINK : 1, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd, storm: true };
   }
   const far = ev.kind === "far", lag = THUNDER_LAG[ev.kind], t = ev.t + Math.round(lag[0] + (lag[1] - lag[0]) * h01(`${sd}|lag`));
+  // (MAPTHUNDER: the storm's entrance - stormOnset - rolls in from the edge a notch bigger and longer than a mid flash's rumble, under
+  // any fight's word: rank 3, no flash of its own)
+  if ( ev.onset ) return { role: "mid", kind: "thunder", wo: { loud: 0.5, long: 0.85 }, t: ev.t, screen: edge(), rank: 3, ms: 1700,
+    stage: { in: "grow", holdKind: "rattle", out: "dissolve" }, seed: sd, onset: true };
   return { role: far ? "far" : "mid", kind: far ? "rumble" : "thunder", wo: { loud: far ? 0.15 : 0.32, long: far ? 0.8 : 0.6 }, t, screen: edge(), rank: far ? 1 : 2,
     ms: far ? 1800 : 1300, stage: { in: "grow", holdKind: "rattle", out: "dissolve" }, seed: sd };
 }
