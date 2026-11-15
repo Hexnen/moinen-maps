@@ -201,9 +201,15 @@ await group("RULE", async () => {
   const rd = L1({ ...it, sizes: [60], ride: true, path: [{ x: 2000, y: 1490 }] }, { view, panels: [panel], zoom: 1 });
   ok(rd.rule === "ride" && rd.dx === 0 && rd.dy === 0 && rd.f === 1.5, "a rider keeps the table's way, only its size is this seat's");
   // (MAPSFXSEAT2 live: the blast's wave word rode half off the GM's screen - the table holds a way inside the REFERENCE view; each seat
-  // holds it inside its own: the anchor's rectangle keeps the word whole in this view, and the runtime clamps the way's points to it)
-  const rr = rd.ride, vv = { x0: view.x0 + SEAT.SEAT_EDGE, y0: view.y0 + SEAT.SEAT_EDGE, x1: view.x1 - SEAT.SEAT_EDGE, y1: view.y1 - SEAT.SEAT_EDGE };
-  ok(rr && rr.x0 >= vv.x0 && rr.x1 <= vv.x1 && rr.y0 >= vv.y0 && rr.y1 <= vv.y1 && rr.x1 > rr.x0, "a rider's way is held inside this seat's view");
+  // holds it inside its own where that way stays off the words laid out before it and the pins: the anchor's rectangle keeps the word
+  // whole in this view, and the runtime clamps the way's points to it. Live take 4: held inside, the wave rode over the main word - so a
+  // way that would meet one keeps the table's)
+  const way = [{ x: 2000, y: 1490 }, { x: 2000, y: 2400 }], rideIt = { ...it, key: "r", prio: 2, sizes: [40], ride: true, path: way, life: [0, 1000] };
+  const rv = L1(rideIt, { view, zoom: 1 }), rr = rv.ride, vv = { x0: view.x0 + SEAT.SEAT_EDGE, y0: view.y0 + SEAT.SEAT_EDGE, x1: view.x1 - SEAT.SEAT_EDGE, y1: view.y1 - SEAT.SEAT_EDGE };
+  ok(rr && rr.x0 >= vv.x0 && rr.x1 <= vv.x1 && rr.y0 >= vv.y0 && rr.y1 <= vv.y1 && rr.x1 > rr.x0 && rr.y1 < 2100, "a rider's way that leaves this seat's view is held inside it");
+  const low = { ...it, key: "m", sub: null, box: { x0: 1900, y0: 1960, x1: 2100, y1: 2040 }, life: [0, 1000] };
+  const lr = SEAT.seatLayout([low, rideIt], { view, zoom: 1 }).get("r");
+  ok(lr.rule === "ride" && !lr.ride, "held inside, it would ride over a word laid out before it: the table's way stands");
   ok(/else if \( o\.path\?\.points && f\.ride \) \{[\s\S]{0,400}oo\.path = \{ \.\.\.o\.path, points: o\.path\.points\.map\(kp\) \}; oo\.at = kp\(at\);/.test(SRC), "the runtime clamps a rider's way to it");
   // (two words of one picture up at the same time: the second keeps off the first)
   const lay = SEAT.seatLayout([{ ...it, key: "a", life: [0, 1000] }, { ...it, key: "b", prio: 1, life: [500, 1500], box: { x0: 1950, y0: 1460, x1: 2150, y1: 1540 } }], { view, zoom: 1 });
