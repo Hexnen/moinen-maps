@@ -55,6 +55,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | RIMUNDER (an invincible word on the map gets an ink rim UNDER the whole lettering, letters and duplicate block; `look.rim` ink / paper / none; default ink in world space, none on the screen) | 1.9.12 | API-CONTRACT 1.9.12 | `tactics-zones-rimunder` | pending merge (sections 5, 13, 20) |
 | SUSTAINGAP (a sustained sound reads as one run: phrases seated by their own measured ink, never piled; echo and shed beyond the run's edge; the run inside the view and a caller's `room`; `startAt` on every seat; stream syllables in staggered lanes; a word drawn in by parts no longer thrown away by decaying holds) | 1.9.15 | API-CONTRACT 1.9.15 | `tactics-zones-sustaingap` | pending merge (sections 10, 12, 18) |
 | ENGVIEW (one table picture from the public API: an explicit `view` for sizeOf / measure / play / stream / sustain; `L.measure` stand / inkReach / ink / rim / life; `L.streamUnit`; legacy sustain on `startAt`; `L.impact.tierOf` / `stepOf` / `tiers` / `seriesBoost`; `ceilK` named as unread) | 1.9.18 | API-CONTRACT 1.9.18 (v22) | `tactics-zones-engview` | pending merge (sections 5, 6, 6a, 8, 10, 12, 18, 20) |
+| ENGDROP (no bridge to plus-ultra's old mirror, no legacy settings description; migration reads plus-ultra's old copy from its document; an older plus-ultra handled; the settings window redesigned) | 1.9.19 | API-CONTRACT 1.9.19 (v23) | `tactics-zones-engdrop` | pending merge (section 15) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -1184,21 +1185,34 @@ Who writes: only a GM (`game.user.isGM`). A player's `L.setTable` / `setPrefs` w
 for the whole table"); any player write of a `moinen-letters.*` setting is cancelled quietly in `preCreateSetting` /
 `preUpdateSetting` [V node]. A setting deleted from the database falls back to the defaults on every seat (`deleteSetting` hook).
 
-The window: a GM sees controls in four groups (Words, Motion, Flashes and impact frames, Screen readers and limits), a banner
-"You choose for the whole table", "Defaults" (window only), "Try on my screen" (two sample words with the window's values, this
-seat only) and "Save for the table". A player opens the same window read-only: the GM's values as text, a lock banner, "Try". Both see
-"On this screen": whether this seat's reduced motion and photosensitive mode are on and what they change here. An open window
-follows the table live (a GM mid-edit keeps his edits until he saves or resets).
+The window (1.9.19 ENGDROP layout) [V live, lane 5, GM and Test Gracz 1, pl and en]: four groups, Words (on/off, typeface, colours,
+size, read aloud), Motion (Type = `movement`, Intensity = `motion`), Flashes and impact frames (flash frames, impact frames, the pinned
+"Always on" guard), Words at once (over the interface, on the map; one shared hint). Each row is label | control in one fixed column,
+the hint under both in a quieter voice; a row inside a group never repeats the group's name. Sizes read as percent on both seats (the
+GM's slider shows "160 %", a player reads "160 %"); limits as plain numbers. With lettering off the rest of the window steps back
+(dimmed, still editable). A GM sees a banner "You choose for the whole table", "Defaults" (window only), "Try on my screen" (two sample
+words with the window's values, this seat only) and "Save for the table". A player opens the same window read-only: the GM's values as
+text where the controls would be, a lock banner, "Try". Both see "On this screen": whether this seat's reduced motion and
+photosensitive mode are on and what they change here. An open window follows the table live (a GM mid-edit keeps his edits until he
+saves or resets).
 
 Migration (once per world, marker world setting `tableMigrated` = 1, run on the first GM seat after `ready`): the table starts from
-invincible-plus-ultra's GMALL table (`invincible-plus-ultra.lettersTable`) if plus-ultra is active and that setting is stored, else from the GM's own old client
-values (`moinen-letters.<key>` in that browser's localStorage), else the defaults; the old `photosafe` value is dropped. Players' old
-client values stay in their browsers, unused; each player sees one notice saying the settings are now the GM's (skipped when
-plus-ultra's mirror is present: it tells them itself).
+invincible-plus-ultra's old GMALL copy (`invincible-plus-ultra.lettersTable`) when the world holds that document (read straight from
+the world's setting documents: with plus-ultra active or not, registered or not), else from the GM's own old client values
+(`moinen-letters.<key>` in that browser's localStorage), else the defaults; the old `photosafe` value is dropped. Players' old client
+values stay in their browsers, unused; a player whose old values differ sees one notice saying the settings are now the GM's.
+Before 1.9.19 the copy was read only while plus-ultra registered it: a world opened with maps alone fell back to the GM's browser
+values and lost the choices made in plus-ultra's window (check-table section 7 "maps alone").
 
-Bridge to plus-ultra's mirror (while plus-ultra still carries GMALL-E1/7): on the GM's seat `table` <-> `invincible-plus-ultra.
-lettersTable` are kept equal both ways in one round (no loop). A player's seat writes neither. (So a GM who deletes `lettersTable` by hand while both run gets it written back with the table's values.) When plus-ultra drops its mirror the
-engine can drop `PU_KEY`, `bridgeIn`, `bridgeOut` and the LEGACY `SETTINGS` export in prefs.mjs (kept only for plus-ultra's checks).
+No bridge (1.9.19 ENGDROP). plus-ultra since UNMIRROR (tag tactics-integrated-136) keeps no copy: it reads `L.table` / `L.seat`, writes
+`L.setTable`, and carries its old copy itself where it is newer. The engine writes nothing into plus-ultra's namespace. An OLDER
+plus-ultra (132-135, the GMALL mirror) next to this engine: its mirror writes the engine's old client keys, none of which is registered
+since 1.9.16 (inert: every seat applies the engine's table); its window still writes its copy, and on the GM's seat that wrote it the
+keys that write CHANGED become the table's (a choice made there is not lost; its stale other values do not undo the table). Nothing
+is written back, so that older window may show older values: the GM gets one notice per session to update plus-ultra (at once when
+the copy is registered after the engine had migrated, else at the older window's first write). Provisional, combat-questions ENGDROP-1.
+The legacy description of 1.9.14's client settings (prefs.mjs `SETTINGS`, `WORLD_KEYS`, `scopeOf`, `DEFAULTS`, `clean`, `cleanAll`) is
+gone: `TABLE`, `TABLE_DEFAULTS`, `cleanTableValue`, `cleanTable`, `seatPrefs` are the one model.
 
 World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.
 
@@ -1484,6 +1498,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: ENGVIEW (1.9.18, `tactics-zones-engview`): section 6a (one table picture from the public API: `view`, the standing
   footprint, `L.streamUnit`, legacy sustain on `startAt`, the impact's ladders, what each caller may drop or pass), the `ceilK`
   warning (6), notes in 8, 10, 12, limits (18), API index (20), stage table; `check-engview.mjs` (check.mjs section 15).
+- 2026-11-15: ENGDROP (1.9.19, `tactics-zones-engdrop`): section 15 (no bridge to plus-ultra's old mirror; the migration reads its old
+  copy from the world document, also with maps alone; an older plus-ultra next to this engine; the legacy settings description gone;
+  the settings window's new layout), stage table; check-table section 7 rewritten, section 8 dropped.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

@@ -417,18 +417,31 @@ export function openDesigner(state, o = {}) {
    ENGTABLE (1.9.16): the TABLE's lettering settings. The GM sees the controls and saves them for every seat ("Save for the table");
    a player opens the same window read-only: the GM's choices as text, updated live when the GM saves. Both see what THEIR screen's own
    accessibility signals change (system reduced motion, Foundry photosensitive mode) and that the photosensitivity guard is always on.
-   Groups follow what a GM decides: the words themselves, how they move, flashes and impact frames, screen readers and limits. */
+   Groups follow what a GM decides: the words themselves, how they move, flashes and impact frames, how many at once.
+   ENGDROP (1.9.19), the window as a design: one row = label | control in a fixed column (every control starts on the same line, a
+   checkbox too), the hint under it in a quieter voice; short row labels inside a titled group (Motion: Type / Intensity; Words at
+   once: Over the interface / On the map; a group no longer repeats its own name in a row); sizes as percent on both seats (a slider
+   with a readable value, no tiny number box); the two limits share one hint; with lettering off the rest of the window steps back. */
 const GROUPS = [
-  ["Look", ["enabled", "face", "palette", "scale"]],
+  ["Look", ["enabled", "face", "palette", "scale", "announce"]],
   ["Motion", ["movement", "motion"]],
   ["Flash", ["flashes", "impact", "photosafe"]],
-  ["More", ["announce", "limitScreen", "limitWorld"]]
+  ["Limits", ["limitScreen", "limitWorld"]]
 ];
+/* a short label inside its group (the setting's full name stays its Name) */
+const rowLabel = (k) => (game.i18n.has(`LETR.Settings.Short.${k}`) ? T(`Settings.Short.${k}`) : T(`Settings.${k}.Name`));
+const pct = (v) => `${Math.round(Number(v) * 100)} %`;
+const valueText = (k, v) => {
+  const d = TABLE[k];
+  if ( d.type === "bool" ) return T(v ? "Settings.On" : "Settings.OffValue");
+  if ( d.type === "pick" ) return T(`Settings.${k}.${v}`);
+  return k === "scale" ? pct(v) : String(v);
+};
 class Settings extends ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: "moinen-letters-settings", tag: "form", classes: ["letr-app", "letr-settings"],
     window: { title: "LETR.Settings.Title", icon: "fa-solid fa-burst", contentClasses: ["standard-form"] },
-    position: { width: 540, height: "auto" },
+    position: { width: 560, height: "auto" },
     form: { handler: Settings.#save, submitOnChange: false, closeOnSubmit: true },
     actions: { reset: Settings.#reset, try: Settings.#try }
   };
@@ -437,36 +450,35 @@ class Settings extends ApplicationV2 {
   async _renderHTML() {
     ensureStyles(this.letr);
     const v = this.v, gm = this.gm, f = foundry.applications.fields, seat = this.letr.seat ?? {};
-    const shown = (k) => {
-      const d = TABLE[k];
-      if ( d.type === "bool" ) return T(v[k] ? "Settings.On" : "Settings.OffValue");
-      if ( d.type === "pick" ) return T(`Settings.${k}.${v[k]}`);
-      return k === "scale" ? `${Math.round(v[k] * 100)} %` : String(v[k]);
-    };
+    const id = (k) => `letr-s-${k}`;
+    const hint = (k) => (k === "limitScreen" ? "" : `<p class="hint">${esc(T(k === "limitWorld" ? "Settings.Limits.Hint" : `Settings.${k}.Hint`))}</p>`);
     const row = (k) => {
       /* the guard is not a setting: one line that says so, for everyone */
-      if ( k === "photosafe" ) {
-        const out = document.createElement("output");
-        out.className = "letr-s-ro letr-s-pin"; out.innerHTML = `<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> ${esc(T("Settings.photosafe.Always"))}`;
-        return f.createFormGroup({ label: T("Settings.photosafe.Name"), hint: T("Settings.photosafe.Hint"), input: out }).outerHTML;
-      }
+      if ( k === "photosafe" ) return `<div class="form-group letr-row" data-key="photosafe"><label>${esc(rowLabel(k))}</label>
+        <div class="form-fields"><output class="letr-s-ro letr-s-pin"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> ${esc(T("Settings.photosafe.Always"))}</output></div>${hint(k)}</div>`;
       const d = TABLE[k];
       let input;
-      if ( !gm ) { input = document.createElement("output"); input.className = "letr-s-ro"; input.textContent = shown(k); }
-      else if ( d.type === "bool" ) input = f.createCheckboxInput({ name: k, value: v[k] });
-      else if ( d.type === "pick" ) input = f.createSelectInput({ name: k, value: v[k], options: d.choices.map((c) => ({ value: c, label: T(`Settings.${k}.${c}`) })) });
-      else { input = document.createElement("range-picker"); input.name = k; input.setAttribute("min", d.min); input.setAttribute("max", d.max); input.setAttribute("step", d.step); input.setAttribute("value", v[k]); }
-      return f.createFormGroup({ label: T(`Settings.${k}.Name`), hint: T(`Settings.${k}.Hint`), input }).outerHTML;
+      if ( !gm ) { input = document.createElement("output"); input.className = "letr-s-ro"; input.textContent = valueText(k, v[k]); input.id = id(k); }
+      else if ( d.type === "bool" ) { input = f.createCheckboxInput({ name: k, value: v[k] }); input.id = id(k); }
+      else if ( d.type === "pick" ) { input = f.createSelectInput({ name: k, value: v[k], options: d.choices.map((c) => ({ value: c, label: T(`Settings.${k}.${c}`) })) }); input.id = id(k); }
+      else {
+        /* a slider and its value in words (percent for the size): readable at a glance, the same text a player reads */
+        input = document.createElement("span"); input.className = "letr-slide";
+        input.innerHTML = `<input type="range" id="${id(k)}" name="${k}" min="${d.min}" max="${d.max}" step="${d.step}" value="${v[k]}" data-dtype="Number">`
+          + `<output for="${id(k)}" data-unit="${k === "scale" ? "pct" : "n"}">${esc(valueText(k, v[k]))}</output>`;
+      }
+      return `<div class="form-group letr-row" data-key="${k}"><label for="${id(k)}">${esc(rowLabel(k))}</label>
+        <div class="form-fields">${input.outerHTML}</div>${hint(k)}</div>`;
     };
     /* this screen: its own signals and what they change here (only the lines that apply say "On") */
     const notes = seatNotes(v, seat);
     const seatLine = (key, on) => `<li class="${on ? "is-on" : ""}"><i class="fa-solid ${on ? "fa-circle-check" : "fa-circle"}" aria-hidden="true"></i>
       <span><b>${esc(T(`Settings.Seat.${key}.Name`))}</b> ${esc(T(on ? `Settings.Seat.${key}.On` : "Settings.Seat.Off"))}</span></li>`;
     const root = document.createElement("div");
-    root.className = `letr-s${gm ? " is-gm" : " is-player"}`;
+    root.className = `letr-s${gm ? " is-gm" : " is-player"}${v.enabled ? "" : " is-off"}`;
     root.innerHTML = `
       <p class="letr-s-banner"><i class="fa-solid ${gm ? "fa-users" : "fa-lock"}" aria-hidden="true"></i><span>${esc(T(gm ? "Settings.Banner.gm" : "Settings.Banner.player"))}</span></p>
-      ${GROUPS.map(([g, keys]) => `<fieldset><legend>${esc(T(`Settings.Groups.${g}`))}</legend>${keys.map(row).join("")}</fieldset>`).join("")}
+      ${GROUPS.map(([g, keys]) => `<fieldset class="letr-s-group" data-group="${g}"><legend>${esc(T(`Settings.Groups.${g}`))}</legend>${keys.map(row).join("")}</fieldset>`).join("")}
       <section class="letr-s-seat" aria-label="${esc(T("Settings.Seat.Title"))}"><h4>${esc(T("Settings.Seat.Title"))}</h4>
         <ul>${seatLine("reduced", notes.reduced)}${seatLine("photo", notes.photo)}</ul></section>
       <footer class="form-footer">
@@ -482,13 +494,21 @@ class Settings extends ApplicationV2 {
     /* a GM's edit stops the window following the table until he saves or resets */
     this.element.addEventListener("input", () => { this.dirty = true; }, { once: true });
     this.element.addEventListener("change", () => { this.dirty = true; }, { once: true });
+    /* a slider's value follows it; lettering off lets the rest of the window step back */
+    this.element.addEventListener("input", (e) => {
+      const el = e.target;
+      if ( el?.type !== "range" ) return;
+      const o = el.parentElement?.querySelector("output");
+      if ( o ) o.textContent = o.dataset.unit === "pct" ? pct(el.value) : String(Number(el.value));
+    });
+    this.element.addEventListener("change", (e) => { if ( e.target?.name === "enabled" ) this.element.querySelector(".letr-s")?.classList.toggle("is-off", !e.target.checked); });
   }
   _onClose() { if ( this.letr.settingsApp === this ) this.letr.settingsApp = null; }
-  /* the table changed (another GM, plus-ultra's window, a macro) or this screen's own signal: show it */
+  /* the table changed (another GM, a macro, a reset) or this screen's own signal: show it */
   follow() { if ( this.gm && this.dirty ) return; this.v = { ...this.letr.table }; this.render(); }
   values() {
     const fd = new foundry.applications.ux.FormDataExtended(this.element).object;
-    const o = {}; for ( const k of TABLE_KEYS ) if ( k in fd ) o[k] = fd[k];
+    const o = {}; for ( const k of TABLE_KEYS ) if ( k in fd ) o[k] = TABLE[k].type === "num" ? Number(fd[k]) : fd[k];
     return o;
   }
   static async #save() { if ( !this.gm ) return; this.dirty = false; await setTable(this.values()); ui.notifications.info(T("Settings.Saved")); }

@@ -1,21 +1,24 @@
 // LETR tools (contract v6): node checks of the engine-wide preferences, the plan filters (palette, motion, flash guard), the
 // authoring API, the networking helper and the i18n tables. Run by check.mjs (both modules); `run(ok, ctx)` with ctx = { plan, bank }.
 import fs from "node:fs";
-import { SETTINGS, DEFAULTS, clean, cleanAll, reducedFor, resolveOpts, filterPlan, flashTimes, handFrom, CONTRAST, CVD, PHOTO } from "./prefs.mjs";
+import { TABLE, TABLE_DEFAULTS, cleanTableValue as clean, cleanTable as cleanAll, seatPrefs, reducedFor, resolveOpts, filterPlan, flashTimes, handFrom, CONTRAST, CVD, PHOTO } from "./prefs.mjs";
 import { registerMood, registerPalette, registerFont, makeStyles, motionNames, shade } from "./author.mjs";
 import { wireOpts, wireValue, unwire, missingToken, localStart, checkMsg, rateGate, OP_KEYS, senderIsGM, refusedHandle } from "./net.mjs";
 import { STRINGS } from "./strings.mjs";
 import { MOODS, MOOD_IDS, COLORS, FONTS, TICK, makePlan } from "./design.mjs";
 import { paintPicture } from "./paint.mjs";
 
+/* ENGDROP (1.9.19): the legacy SETTINGS / DEFAULTS / clean / cleanAll are gone; the table's own TABLE, cleanTableValue, cleanTable serve.
+   DEFAULTS = what a plain seat applies at the table's defaults (the guard pinned on). */
+const SETTINGS = TABLE, DEFAULTS = seatPrefs(TABLE_DEFAULTS, {});
 export async function run(ok, { plan, bank, fontsApi }) {
   const P = (o = {}) => ({ ...DEFAULTS, ...o });
   const all = (p) => [...p.timeline.ent, ...p.timeline.hold, ...p.timeline.exit];
 
   /* settings: defaults, cleaning of stored values */
-  ok(Object.keys(DEFAULTS).length === Object.keys(SETTINGS).length && DEFAULTS.enabled === true && DEFAULTS.scale === 1 && DEFAULTS.photosafe === true, "tools: defaults");
+  ok(Object.keys(DEFAULTS).length === Object.keys(SETTINGS).length + 1 && DEFAULTS.enabled === true && DEFAULTS.scale === 1 && DEFAULTS.photosafe === true, "tools: defaults");
   ok(clean("scale", 99) === 2.5 && clean("scale", "x") === 1 && clean("motion", "wild") === "auto" && clean("enabled", "yes") === true && clean("limitWorld", 2) === 4, "tools: stored values are cleaned");
-  ok(JSON.stringify(cleanAll({})) === JSON.stringify(DEFAULTS), "tools: cleanAll of nothing = defaults");
+  ok(JSON.stringify(cleanAll({})) === JSON.stringify(TABLE_DEFAULTS), "tools: cleanAll of nothing = defaults");
 
   /* motion: the strongest reduction wins */
   ok(reducedFor("reduced", false, false) === true && reducedFor("auto", undefined, true) === true && reducedFor("auto", false, true) === false
@@ -221,7 +224,7 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const missing = [...used].filter((k) => !(k in STRINGS.en) && !/\.$/.test(k));
     ok(missing.length === 0, `tools: strings missing: ${missing.join(", ")}`);
     for ( const m of MOOD_IDS.filter((x) => !MOODS[x].custom) ) ok(`LETR.Mood.${m}` in STRINGS.pl, `tools: mood ${m} has a Polish name`);
-    for ( const k of Object.keys(SETTINGS) ) ok(`LETR.Settings.${k}.Name` in STRINGS.en && `LETR.Settings.${k}.Hint` in STRINGS.pl, `tools: setting ${k} has words`);
+    for ( const k of [...Object.keys(SETTINGS), "photosafe"] ) ok(`LETR.Settings.${k}.Name` in STRINGS.en && `LETR.Settings.${k}.Hint` in STRINGS.pl, `tools: setting ${k} has words`);
     /* every choice of a pick setting has a label in both languages (the window builds the keys from a template) */
     for ( const [k, d] of Object.entries(SETTINGS) ) if ( d.type === "pick" ) for ( const c of d.choices )
       ok(`LETR.Settings.${k}.${c}` in STRINGS.en && `LETR.Settings.${k}.${c}` in STRINGS.pl, `tools: setting ${k} choice ${c} has words`);
@@ -237,7 +240,8 @@ export async function run(ok, { plan, bank, fontsApi }) {
     /* FONTSEL 1.9.7: the table also holds the invincible face (world, the GM's): the pinned list of table keys grows by exactly it */
     /* ENGTABLE (1.9.16): every preference is the table's now (check-table.mjs). The LEGACY description keeps its old shape for
        invincible-plus-ultra's mirror (movement, face world; the rest the old client keys), but the engine registers none of the old ones */
-    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement,face" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: the legacy description keeps its shape for plus-ultra's mirror");
+    /* ENGDROP (1.9.19): plus-ultra's mirror is gone, and with it the legacy description of the old client settings */
+    ok(["SETTINGS", "WORLD_KEYS", "scopeOf", "DEFAULTS", "clean", "cleanAll"].every((n) => !(n in pm)), "mode: the legacy description of the old client settings is gone (no mirror reads it)");
     ok(pm.TABLE.movement.default === "smooth" && pm.TABLE.movement.choices.join() === MOTION_MODES.join() && pm.TABLE_KEYS.includes("movement"), "mode: movement is a table key (world, the GM's)");
     ok(clean("movement", "bogus") === "smooth" && clean("movement", "stepped") === "stepped" && cleanAll({}).movement === "smooth", "mode: a stored value outside the choices falls back to smooth");
     ok("LETR.Settings.movement.ByGM" in STRINGS.en && "LETR.Settings.movement.ByGM" in STRINGS.pl && "LETR.Settings.Groups.Table" in STRINGS.pl, "mode: words for the player's read-only row and the table group");
@@ -270,7 +274,7 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const D = await import("./design.mjs");
     const d = SETTINGS.face;
     ok(!!d && d.type === "pick" && d.default === "league" && D.DEFAULT_FACE === "league" && d.choices.join() === "league,anton" && D.INV_FACES.join() === "league,anton", "face: setting face = league | anton, default league");
-    ok(d?.scope === "world", "face: the table's setting (world scope, the GM's)");
+    ok(D.INV_FACES.includes(d.default) && (await import("./prefs.mjs")).TABLE_KEYS.includes("face"), "face: the table's setting (a table key, the GM's)");
     ok(clean("face", "bogus") === "league" && clean("face", "anton") === "anton" && cleanAll({}).face === "league", "face: a stored value outside the choices falls back to League Gothic");
     ok(["Name", "Hint", "league", "anton", "ByGM"].every((k) => `LETR.Settings.face.${k}` in STRINGS.en && `LETR.Settings.face.${k}` in STRINGS.pl), "face: the setting's words in both languages");
     const T = await import("./tools.mjs");

@@ -173,7 +173,7 @@ async function engineChecks() {
   try {
     for ( const gm of [true, false] ) {
       const E = await setup({ gm }); const L = E.engine; L.lookStyle("invincible");
-      const { applyPrefs } = await import("./tools.mjs"); const { DEFAULTS } = await import("./prefs.mjs");
+      const { applyPrefs } = await import("./tools.mjs"); const { TABLE_DEFAULTS: DEFAULTS } = await import("./prefs.mjs");
       const who = gm ? "GM" : "player";
       ok(L.invFace() === "league" && L.invFaces.join() === "league,anton", `fontsel engine (${who}): League Gothic by default`);
       applyPrefs(L, { ...DEFAULTS });

@@ -8,9 +8,10 @@
 //   3 today's defaults: what a seat applies at the table's defaults equals 1.9.14's defaults (no picture changes; fingerprints apart)
 //   4 a player cannot change any (setTable refused, a direct write stopped on his seat, the impact switch refused)
 //   5 a GM change reaches the second seat live, on its next word, for every preference
-//   6 migration from old client values (the GM's become the table's once; plus-ultra's table first; players' untouched, told once)
-//   7 the three situations: maps alone, plus-ultra alone, both (the bridge to plus-ultra's mirror, the old mirror inert)
-//   8 (only in invincible-plus-ultra's copy) plus-ultra's own GMALL mirror code running next to this engine
+//   6 migration from old client values (the GM's become the table's once; plus-ultra's old copy first; players' untouched, told once)
+//   7 the situations: maps alone, plus-ultra alone, both (ENGDROP 1.9.19: no bridge; plus-ultra 136+ keeps no copy and writes none;
+//     the old copy `lettersTable` read from its document by the migration, with or without plus-ultra; an OLDER plus-ultra (132-135,
+//     the GMALL mirror) next to this engine: its mirror inert, its window's changes taken into the table, nothing written back)
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -32,8 +33,10 @@ export async function run(ok, ctx = {}) {
 
   /* ---------------- 1. inventory ---------------- */
   {
-    const legacy = Object.keys(P.SETTINGS);
+    /* the preferences of 1.9.14 (its client settings, plus movement and face), frozen here since ENGDROP removed their description */
+    const legacy = ["enabled", "scale", "motion", "flashes", "photosafe", "impact", "palette", "announce", "limitScreen", "limitWorld", "movement", "face"];
     ok(legacy.filter((k) => k !== "photosafe").every((k) => P.TABLE_KEYS.includes(k)) && P.TABLE_KEYS.length === legacy.length - 1, `table: every preference of 1.9.14 is a table key (${P.TABLE_KEYS.join(", ")})`);
+    ok(["SETTINGS", "WORLD_KEYS", "scopeOf", "DEFAULTS", "clean", "cleanAll"].every((n) => !(n in P)), "table: the legacy description of the old client settings is gone (ENGDROP)");
     ok(!("photosafe" in P.TABLE), "table: the photosensitivity guard is no setting at all");
     const tsrc = fs.readFileSync(new URL("tools.mjs", HERE), "utf8"), isrc = fs.readFileSync(new URL("impact/index.mjs", HERE), "utf8");
     const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -56,7 +59,8 @@ export async function run(ok, ctx = {}) {
 
   /* ---------------- 3. today's defaults ---------------- */
   {
-    const now = P.seatPrefs(P.TABLE_DEFAULTS, {}), old = P.cleanAll({});
+    /* 1.9.14's defaults, frozen (its prefs.mjs DEFAULTS) */
+    const now = P.seatPrefs(P.TABLE_DEFAULTS, {}), old = { enabled: true, scale: 1, motion: "auto", flashes: true, photosafe: true, impact: "full", palette: "mood", announce: true, limitScreen: 16, limitWorld: 48, movement: "smooth", face: "league" };
     const keys = Object.keys(old);
     ok(keys.every((k) => now[k] === old[k]), `table: what a seat applies at the table's defaults = 1.9.14's defaults (${keys.filter((k) => now[k] !== old[k]).join(", ") || "all equal"})`);
     ok(JSON.stringify(P.resolveOpts({ mood: "boom", seed: 3 }, now, {}, {})) === JSON.stringify(P.resolveOpts({ mood: "boom", seed: 3 }, old, {}, {})), "table: options resolve alike at the defaults");
@@ -65,8 +69,12 @@ export async function run(ok, ctx = {}) {
   /* ---------------- 4-7. two seats on a fake Foundry ---------------- */
   await seats(ok, { P, D, fontsApi });
 
-  /* ---------------- 8. plus-ultra's own mirror (only in its vendored copy) ---------------- */
-  if ( fs.existsSync(new URL("../table/main.mjs", HERE)) ) await mirror(ok, P);
+  /* ---------------- source: no bridge, nothing written into another module's namespace ---------------- */
+  {
+    const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const tsrc = code(fs.readFileSync(new URL("tools.mjs", HERE), "utf8"));
+    ok(!/bridgeOut|bridgeIn|bridged|PU_MOD|puTable/.test(tsrc) && !/settings\.set\(\s*(PU|["']invincible-plus-ultra)/.test(tsrc), "table: no bridge to plus-ultra's old mirror, no write into its namespace (ENGDROP)");
+  }
 }
 
 /* =============================================================== the fake Foundry */
@@ -286,53 +294,74 @@ async function seats(ok, { P, D, fontsApi }) {
   await situations(ok, { P, D, fontsApi, saved: null });
 }
 
-/* plus-ultra alone and both: plus-ultra's mirror setting `lettersTable` (registered by its GMALL code) is kept equal from the GM's seat */
+/* =============================================================== 7: the situations (ENGDROP 1.9.19: no bridge)
+   A world from GMALL: plus-ultra's old copy `lettersTable` (the GM's choices made in its window) lies in the world, the engine has not
+   migrated. Opened with maps alone (nobody registers the copy), plus-ultra 136+ alone or both (it registers the copy, written by nobody,
+   only while the engine has not migrated): the engine's migration reads the copy's DOCUMENT in every case. Then an OLDER plus-ultra
+   (132-135: the copy always registered, its window writes it, its mirror would write the engine's old client keys). */
 async function situations(ok, { P, D, fontsApi }) {
   const saved = { game: globalThis.game, Hooks: globalThis.Hooks, localStorage: globalThis.localStorage, ui: globalThis.ui, matchMedia: globalThis.matchMedia, foundry: globalThis.foundry, document: globalThis.document, warn: console.warn, info: console.info };
   console.warn = () => {}; console.info = () => {};
+  const OLD = { enabled: true, motion: "gentle", scale: 1.2, palette: "cvd", flashes: true, impact: "local", announce: true, limitScreen: 16, limitWorld: 48 };
+  const told = (s, re) => s.notes.filter((m) => re.test(m)).length;
   try {
-    for ( const [label, modules] of [["plus-ultra alone", [PU]], ["both", ["moinen-maps", PU]]] ) {
+    for ( const [label, modules, registers] of [["maps alone", ["moinen-maps"], false], ["plus-ultra alone", [PU], true], ["both", ["moinen-maps", PU], true]] ) {
       const world = makeWorld(); world.writes = [];
-      /* plus-ultra's GMALL table already chose for the table (its window), and the GM has other old client values */
-      world.store.set(`${PU}.lettersTable`, { enabled: true, motion: "gentle", scale: 1.2, palette: "cvd", flashes: true, impact: "local", announce: true, limitScreen: 16, limitWorld: 48 });
-      const gm = makeSeat(world, { name: "GM", gm: true, modules, ls: { [`${NS}.scale`]: 2 } }), pl = makeSeat(world, { name: "Player", gm: false, modules });
-      for ( const s of [gm, pl] ) s.game.settings.register(PU, "lettersTable", { scope: "world", default: {} });
+      world.store.set(`${PU}.lettersTable`, clone(OLD));
+      const gm = makeSeat(world, { name: "GM", gm: true, modules, ls: { [`${NS}.scale`]: 2 } }), pl = makeSeat(world, { name: "Player", gm: false, modules, ls: { [`${NS}.palette`]: "contrast" } });
+      if ( registers ) for ( const s of [gm, pl] ) s.game.settings.register(PU, "lettersTable", { scope: "world", config: false, type: Object, default: {} });
       await bootSeat(world, gm, D, fontsApi); await bootSeat(world, pl, D, fontsApi);
       const host = modules.includes("moinen-maps") ? "moinen-maps" : PU;
       ok(gm.menus.has(`${host}.letters`) && gm.T.state.host === host, `table ${label}: the window's menu sits in ${host}'s settings`);
       await readyAll(world);
       const tbl = () => world.store.get(`${NS}.table`);
-      ok(tbl()?.scale === 1.2 && tbl()?.palette === "cvd" && tbl()?.motion === "gentle", `table ${label}: migration takes plus-ultra's table first (${JSON.stringify(tbl())})`);
+      ok(tbl()?.scale === 1.2 && tbl()?.palette === "cvd" && tbl()?.motion === "gentle" && tbl()?.impact === "local", `table ${label}: migration takes plus-ultra's old copy from its document, over the GM's browser values (${JSON.stringify(tbl())})`);
       ok(pl.T.state.prefs.palette === "cvd" && pl.T.state.prefs.scale === 1.2, `table ${label}: the player's seat applies it`);
-      ok(pl.notes.filter((m) => /Settings\.Moved/.test(m)).length === 0, `table ${label}: the engine leaves the player's notice to plus-ultra's mirror`);
-      /* plus-ultra's window writes its table (GM) -> the engine's table follows on every seat */
-      await world.run(gm, () => gm.game.settings.set(PU, "lettersTable", { ...world.store.get(`${PU}.lettersTable`), scale: 0.8, impact: "off" }));
-      await tick(10);
-      ok(tbl()?.scale === 0.8 && pl.T.state.prefs.scale === 0.8 && world.with(pl, () => pl.I.mode()) === "off", `table ${label}: a change in plus-ultra's window reaches the engine's table and the player's seat`);
-      /* the engine's window (GM) -> plus-ultra's table follows, so its window shows it */
+      ok(told(pl, /Settings\.Moved/) === 1, `table ${label}: the player whose own old values differ is told once, by the engine`);
       await world.run(gm, () => gm.T.setTable({ palette: "contrast", flashes: false }));
       await tick(10);
-      const pu = world.store.get(`${PU}.lettersTable`);
-      ok(pu.palette === "contrast" && pu.flashes === false && pu.scale === 0.8, `table ${label}: a change in the engine's window reaches plus-ultra's table (${JSON.stringify(pu)})`);
-      const n = world.writes.length; await tick(20);
-      ok(world.writes.length === n, `table ${label}: the two meet in one round (no write loop)`);
+      ok(pl.T.state.prefs.palette === "contrast" && pl.T.state.prefs.flashes === false, `table ${label}: a GM change reaches the player's seat`);
+      ok(!world.writes.some(([, id]) => id.startsWith(`${PU}.`)) && JSON.stringify(world.store.get(`${PU}.lettersTable`)) === JSON.stringify(OLD), `table ${label}: nothing written into plus-ultra's namespace; its old copy stays as it was`);
+      ok(told(gm, /Settings\.OldPlusUltra/) === 0, `table ${label}: no 'older plus-ultra' notice on a current install`);
       ok(!world.writes.some(([who]) => who === "Player"), `table ${label}: the player's seat writes nothing`);
-      /* an older plus-ultra mirror (1.9.14 copy) finds no engine client key to write: inert, no error on the player's screen */
-      ok(!pl.reg.has(`${NS}.enabled`) && !pl.notes.some((m) => /^ERR/.test(m)), `table ${label}: an older mirror's player seat finds nothing to write`);
+    }
+
+    for ( const migrated of [true, false] ) {
+      const label = `older plus-ultra, ${migrated ? "engine migrated before" : "first run of the engine"}`;
+      const world = makeWorld(); world.writes = [];
+      world.store.set(`${PU}.lettersTable`, clone(OLD));
+      if ( migrated ) { world.store.set(`${NS}.table`, { ...Object.fromEntries(P.TABLE_OBJECT.map((k) => [k, P.TABLE_DEFAULTS[k]])), scale: 1.3 }); world.store.set(`${NS}.tableMigrated`, 1); }
+      const modules = ["moinen-maps", PU];
+      const gm = makeSeat(world, { name: "GM", gm: true, modules }), pl = makeSeat(world, { name: "Player", gm: false, modules });
+      /* GMALL's registration: always, with its mirror on change (it writes the engine's old client keys only when they are registered) */
+      for ( const s of [gm, pl] ) s.game.settings.register(PU, "lettersTable", { scope: "world", config: false, type: Object, default: {},
+        onChange: () => { if ( s.reg.has(`${NS}.enabled`) ) s.notes.push("ERR mirror wrote"); } });
+      await bootSeat(world, gm, D, fontsApi); await bootSeat(world, pl, D, fontsApi);
+      await readyAll(world);
+      const tbl = () => world.store.get(`${NS}.table`);
+      const base = migrated ? 1.3 : 1.2;
+      ok(tbl()?.scale === base && pl.T.state.table.scale === base, `table ${label}: every seat on the engine's table (size ${base}: ${migrated ? "the old copy is not taken again" : "migrated from the old copy"})`);
+      ok(told(gm, /Settings\.OldPlusUltra/) === (migrated ? 1 : 0) && told(pl, /Settings\.OldPlusUltra/) === 0, `table ${label}: the GM is told at once to update plus-ultra only where it can be known (registered after the engine migrated)`);
+      /* the older window writes its copy: one key changed (size) next to its stale others (colours, motion) */
+      const w0 = world.writes.length;
+      await world.run(gm, () => gm.game.settings.set(PU, "lettersTable", { ...OLD, scale: 0.8 }));
+      await tick(10);
+      ok(tbl()?.scale === 0.8 && pl.T.state.prefs.scale === 0.8, `table ${label}: a change made in the older window reaches the table and the player's seat (no GM choice lost)`);
+      if ( migrated ) ok(tbl()?.palette === "mood" && tbl()?.motion === "auto" && tbl()?.impact === "full", `table ${label}: only the key that write changed is taken; the older window's stale values do not undo the table (${JSON.stringify(tbl())})`);
+      ok(told(gm, /Settings\.OldPlusUltra/) === 1, `table ${label}: the GM is told once`);
+      await world.run(gm, () => gm.T.setTable({ impact: "off" }));
+      await tick(10);
+      ok(world.writes.slice(w0).filter(([, id]) => id.startsWith(`${PU}.`)).length === 1 && world.store.get(`${PU}.lettersTable`).impact === "local",`table ${label}: the engine writes nothing back into the older copy (no mirror)`);
+      ok(pl.T.state.prefs.impact === "off" && world.with(pl, () => pl.I.mode()) === "off", `table ${label}: the engine window's change reaches the player`);
+      ok(!pl.reg.has(`${NS}.enabled`) && !pl.notes.some((m) => /^ERR/.test(m)) && !gm.notes.some((m) => /^ERR/.test(m)), `table ${label}: the older mirror finds no engine client key to write (inert, no error)`);
+      const n = world.writes.length; await tick(20);
+      ok(world.writes.length === n && !world.writes.some(([who]) => who === "Player"), `table ${label}: no write loop; the player's seat writes nothing`);
     }
   } finally {
     await tick(600);   /* each booted seat says hello 500 ms after ready: let it run on the fake table, not on the restored globals */
     Object.assign(globalThis, { game: saved.game, Hooks: saved.Hooks, localStorage: saved.localStorage, ui: saved.ui, matchMedia: saved.matchMedia, foundry: saved.foundry, document: saved.document });
     console.warn = saved.warn; console.info = saved.info;
   }
-}
-
-/* =============================================================== 8: plus-ultra's GMALL mirror next to this engine */
-async function mirror(ok, P) {
-  /* plus-ultra's own suite (sweep-checks/gmall.mjs) checks its mirror alone; here: its window's writes still reach the engine's table
-     through the bridge, and its mirror finds no engine client setting to write (inert, no refused write on a player's seat) */
-  const D = await import("../table/defs.mjs");
-  ok(Array.isArray(D.ENGINE_MIRROR) && D.ENGINE_MIRROR.every((k) => P.TABLE_OBJECT.includes(k)), "table (plus-ultra copy): every key plus-ultra's mirror keeps is a key of the engine's table object (the bridge carries all of them)");
 }
 
 if ( process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] ) {
