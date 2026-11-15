@@ -2,7 +2,7 @@ import * as M from "./model.mjs";
 import { blendMode } from "./display.mjs";
 import { GLSL_WIND, gustEnv, dirVec } from "../wind.mjs";
 import { weatherQ } from "./guard.mjs";
-import { DEFAULT_LOOK, cleanLook, lensGrid } from "./lens-look.mjs";
+import { DEFAULT_LOOK, cleanLook, lensGrid, lensLight } from "./lens-look.mjs";
 
 /**
  * The LENS: what happens ON the glass (doc 4.2-4.4), never a second copy of the world weather.
@@ -555,7 +555,7 @@ bool beadOf(int CX, int CY, bool own, out vec2 b, out vec4 sh, out float tau, ou
   b = (vec2(CX, CY) + 0.5 + (vec2(hu(key, CY, 310), hu(key, CY, 311)) - 0.5) * 0.9) * G;
   if ( hu(key, CY, 312) >= dens(b) * intensityAgo(tau) * 1.3 * uRainA.x ) return false;
   float big = kk <= 2.0 ? uRainA.y : 1.2;
-  float r = 0.5 + big * pow(hu(key, CY, 313), 2.6);
+  float r = 0.5 + big * pow(hu(key, CY, 313), 1.9);
   r *= (0.6 + 0.4 * ss(0.0, 0.6, tau)) * (1.0 - ss(L - 0.7, L, tau));
   if ( r > 2.4 ) b.y += 0.5 * tau;
   bool splat = tau < 0.2 && r > 1.0;
@@ -727,12 +727,13 @@ void main() {
     if ( dR < SMALL ) {
       // a small drop: a faint lift, fullest at its middle and fading out softly to its edge
       inC = 1.0 - ss(-0.45 * max(dR, 0.8), 0.5 * uAA, sdf);
-      if ( dR < 1.25 ) { bAdd = vec3(0.07) * uLight; bK = 0.97; } else { bAdd = vec3(0.04) * uLight; bK = 1.0; }
+      if ( dR < 1.25 ) { bAdd = vec3(0.15) * uLight; bK = 0.97; } else { bAdd = vec3(0.10) * uLight; bK = 1.0; }
     } else {
       float rim = 1.0 - cov(sdf + 1.0), low = clamp((n.y - 0.3) * dR / uAA + 0.5, 0.0, 1.0);
-      srcK = 0.97 + 0.07 * ss(0.1, 0.8, n.y) * step(2.2, dR);                                   // a touch brighter low in the drop
+      srcK = 0.99 + 0.10 * ss(0.1, 0.8, n.y) * step(2.2, dR);                                   // a touch brighter low in the drop
       srcK = mix(srcK, mix(0.9, 0.86, low), rim);                // the rim: the thin darker lower crescent, the faint lit top edge
-      bAdd = vec3(0.05) * uLight * rim * (1.0 - low);
+      bAdd = vec3(0.12) * uLight * rim * (1.0 - low);
+      bAdd += vec3(0.09) * uLight * ss(0.2, 0.8, n.y) * (1.0 - rim);   // (DROPSVIS: the light the drop focuses low inside it)
     }
     add = mix(add, bAdd, inC); k = mix(k, bK, inC); srcK *= inC;
   }
@@ -790,7 +791,7 @@ const PIXEL_SWAPS = [
   // and the contact shadow under it read as dark squares at night (B6): 0.72 here, no shadow)
   ["low = clamp((n.y - 0.3) * dR / uAA + 0.5, 0.0, 1.0);", "low = n.y > -0.1 ? 1.0 : 0.0;"],
   ["srcK = mix(srcK, mix(0.9, 0.86, low), rim);", "srcK = mix(srcK, mix(0.9, 0.72, low), rim);"],
-  ["bAdd = vec3(0.05) * uLight * rim * (1.0 - low);", "bAdd = vec3(0.10) * uLight * rim * (1.0 - low);"],
+  ["bAdd = vec3(0.12) * uLight * rim * (1.0 - low);", "bAdd = vec3(0.18) * uLight * rim * (1.0 - low);"],
   ["if ( G_ > 0.0 ) over(1.0 - G_, Gc_ * G_ * uLight);", "if ( G_ > 0.1 ) { float g = G_ > 0.42 ? 0.9 : 0.3; over(1.0 - g, (G_ > 0.42 ? Gc_ : vec3(0.80, 0.88, 1.0)) * g * uLight); }"]
 ];
 export function pixelize(src) {
@@ -1107,7 +1108,7 @@ export class WeatherLens {
     const t0 = performance.now(), u = this.slices[0].shader.uniforms, [bead, big, run, mist, film] = this.gates ?? [0, 0, 0, 0, 0];
     // (the arrays are shared by the pass and its pre-passes; the numbers are set on each)
     const w = this.wind, [dx, dy] = dirVec(w?.dir ?? 0), ws = Math.min(1, Math.max(0, (w?.str ?? 0) * 2));
-    const light = 1 - 0.7 * Math.min(1, Math.max(0, canvas.environment?.darknessLevel ?? 0));
+    const light = lensLight(canvas.environment?.darknessLevel ?? 0);   // (DROPSVIS: lens-look.mjs)
     for ( const s of this.shaders ) { const v = s.uniforms; v.uT = t; v.uSeed = this.seed | 0; v.uFilm = film; v.uSlant = 0.14 * dx * ws; v.uLight = light; }
     u.uRainA[0] = bead; u.uRainA[1] = big; u.uRainA[2] = run; u.uRainA[3] = mist;
     u.uWind[0] = dx; u.uWind[1] = dy; u.uWind[2] = ws;

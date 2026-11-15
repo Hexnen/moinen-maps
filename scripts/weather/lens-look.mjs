@@ -28,3 +28,11 @@ export function lensGrid(cssW, cssH, dpr, look) {
 
 /** Who may change the table's look: a GM (a player's seat only reads it). */
 export const mayWrite = (user) => !!user?.isGM;
+
+/**
+ * DROPSVIS (2026-11-15): how much light the lens's own light terms (glints, lit rims, the light a drop focuses, specks) keep at the
+ * scene's darkness d (0..1). It was 1 - 0.7 d: at The Warehouse's 0.9 every drop cue fell to 0.37 while the world's rain streaks stay
+ * at full light, so a table saw no drops at all at night. 1 - 0.3 d keeps 0.73 there. Only light is scaled: nothing on the glass
+ * darkens more at night (the night-squares defect, B6, came from dark terms).
+ */
+export const lensLight = (d) => 1 - 0.3 * Math.min(1, Math.max(0, Number(d) || 0));
