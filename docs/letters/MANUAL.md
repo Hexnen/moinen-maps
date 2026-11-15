@@ -303,7 +303,9 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     30-minute epochs (`runClock`); every seat restarts the run at the same epoch instant.
   - *a word's life on the table* (`lifeOf`) counts the engine's own hold (`L.measure(...).plan.holdMs`) + 450 ms + 450 ms: the old
     `hold / ms + 450` ended a shock wave's life at 1.25 s while the engine kept it legible 1.9 s, and a debris word was laid onto it
-    (`sfx-seat.test.mjs` LIFE).
+    (`sfx-seat.test.mjs` LIFE). A word STOPPED early (`h.stop()`: the wave at its rim) is not gone at the stop: it plays its exit from
+    there (the plan's `timeline.exit` ticks, a shock wave 542 ms, legible ~270 ms of it), so a rider's `stop` in the seat layout is the
+    stop + that exit; before, a debris word starting 250 ms after the wave's stop was lettered onto it.
   - *far thunder after a storm is cleared* (MAPRIDE): the far-flash count is keyed on the storm's previous level too
     (`EV.farIndex`, window `FAR_WIN` 30 s), and a page whose flash the storm no longer holds when it draws (`flashStill`) is skipped
     on every seat; before, a seat that saw the clear first lettered a rumble the others did not.

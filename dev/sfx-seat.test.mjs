@@ -558,6 +558,23 @@ await group("LIFE", async () => {
   }
   ok(shortPrev.length > 0, `the previous life (hold / ms + 450) ended before the engine's word did: ${shortPrev.join("; ")}`);
   ok(!short.length, `every word's table life lasts as long as the engine keeps it legible (${short.join("; ") || "all"})`);
+  // A rider stopped early (the wave at its rim + 180 ms, sfx.mjs stopAt) plays its exit from the stop: live (take after3, step 3, GM) the
+  // debris word starting 250 ms after the wave's stop was laid onto the wave, which the seat layout thought gone at the stop.
+  {
+    const word = L.word("shockwave", { loud: 0.9, seed: "life-stop", lang: "en" });
+    const path = [{ x: 2000, y: 1500, ms: 0 }, { x: 2400, y: 1300, ms: 836 }];
+    const w = { role: "sec", text: word.text, word, x: 2000, y: 1500, magnitude: 0.9, area: 150, seed: "life-stop", shrink: 1, stage: {}, ms: 836, zr: 0, voice: "shockwave", kind: "shockwave", alive: 0,
+      path, orient: "none", t: 0, ts: 0, stopAt: 836 };
+    globalThis.innerWidth = SEAT.REF_VW; globalThis.innerHeight = SEAT.REF_VH; canvas.stage.scale.x = SEAT.refZoom(G, 0);
+    const d = A.deps(SEAT.makeLedger()), o = T.baseOpts(w, d); T.measure(w, d);
+    const E2 = await setup({ gm: true }), L2 = E2.engine; L2.lookStyle("invincible");
+    const h = await L2.play(w.text, { ...o, at: { x: 2000, y: 1500 }, keepInView: false, orient: "none", path: { points: path } });
+    let last = 0; for ( let t = 0; t < 6000; t += 17 ) { await E2.tick(17, 17); if ( t >= 836 && t < 853 ) h.stop(); const dd = drawnOf(h); if ( dd && dd.a >= LEGIBLE_ALPHA ) last = t; }
+    E2.restoreWarn?.();
+    const it = T.seatItems([w], d, { vw: SEAT.REF_VW, vh: SEAT.REF_VH, zoom: SEAT.refZoom(G, 0), scale: 1 })[0];
+    ok(836 < last, `a stopped wave word stays legible past its stop (${last} ms)`);
+    ok(it?.stop >= last, `the seat layout keeps later words off a stopped rider until its exit is over (${Math.round(it?.stop)} >= ${last}; before: 836)`);
+  }
 });
 
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900; canvas.stage.scale.x = 1;
