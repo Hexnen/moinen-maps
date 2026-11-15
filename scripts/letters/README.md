@@ -287,6 +287,19 @@ stops, the words up play their exits and a small tail trails off.
   `{ stop({ quick }), level(v), alive, phrases, history, finished, handles }`. `level` 0..1 (or a function of ms) sets size, how
   often and how busy; change it live with `s.level(v)`. `kind` takes its words from the vocabulary (WORD); `words(k, ms, level)`
   supplies your own. Ends on `until`, `s.stop()`, `L.stopAll()` and (world) a scene change.
+- The run's layout (1.9.15 SUSTAINGAP, invincible style; the legacy styles keep the 1.9.14 sustain, `sustain-legacy.mjs`): a run
+  reads as one living run, its phrases never pile on each other while legible. Each phrase is seated by its own measured ink box
+  (`inkBoxOf` in the engine: entrance, hold and its turns, keyline, rim, duplicate block, the picture's glow, plus how far its exit
+  moves it while legible) in one of two seats round a split line 0.8 cap above the source (even phrases below, odd above), with a
+  gap of `RUN_GAP.seat` (0.14 cap) between them; a drawn shards / crumble exit becomes a clean cut in the upper seat (its pieces
+  would fall through the lower one). Echo copies and shed fragments (one per syllable; a one-syllable word sheds its tail) go
+  beyond the run's edge on the `dir` side, each placed by its own box, and are left out when the room has no space for them.
+  The run is moved as one block to stay inside its room: the view (unless `keepInView: false`) and the caller's `room` (extents
+  `{ up, down, left, right }` round the source, a rect `{ x0, y0, x1, y1 }`, or a function returning either); when it is taller than
+  the room the top wins and it overflows downwards, never onto itself. `maxWidth` is passed to each phrase.
+  `startAt` (ms on the page clock, the event's instant) runs the score on the event's clock: a seat joining late skips the phrases
+  already over and shows the same phrase, at the same place, at the same instant as every other seat (every draw is decided from
+  the seed and the phrase index; nothing is per-seat random). The layout reads only the phrases up, never the run's past.
 - `mode: "ambient"`: the quiet, permanent case (the steady hiss of a pipe on a map). One small hollow word now and then (`gap`
   [min, max] ms, default 4.5-11 s), only while its spot is in view, at most `L.ambientMax` (3 world, 2 screen) up at once for all
   sources of a scene, slow and on threes. Hundreds of sources cost nothing while off view.
@@ -526,6 +539,11 @@ rule above on the new words and on the text the engine makes from them).
   A stream keeps the effect's clock: with `startAt` in the past it skips the syllables whose life is already over and every syllable
   joins its own due time (a duration counts from `startAt`); its hand is the first syllable's whenever it joins. `s.handles` holds the
   syllables still alive, `s.emitted` counts all; `loud: 0` is the quietest syllable; `every` is at least 20 ms.
+  Lanes (1.9.15 SUSTAINGAP, invincible style; the legacy styles unchanged): syllables up at once never pile. Each syllable takes
+  the lowest lane free on the stream's own schedule (so a late seat puts it in the same lane); lanes stand in two staggered columns
+  along `dir`, a step apart by the biggest syllable's ink plus its travel (default travel 0.45 cap in lanes; `travel` overrides),
+  no alternating spread or side jitter. With the view kept (default) the rows go forward as far as the view reaches and on behind
+  the source after that; lane syllables are not moved one by one by the engine.
 - Pixel-art surroundings: `pixel: true` letters on the effect grid (1 texel = 1 art px = grid/32 scene px), hard 1-bit edges,
   nearest-neighbour; the same moods and motions apply. Pass `span` (the effect's width in scene px) or `area` and `magnitude` rather than a fixed `size`; pixel words get whole art pixels (at least 7 per cap height) and keep the size they started with while the view zooms.
 - Several powers at once: each `play`/`stream` gets its own hand unless seeded alike; words share the limit of 48 on the canvas

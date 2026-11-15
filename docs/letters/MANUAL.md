@@ -53,6 +53,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | ENGREG (plumbing: one copy rule on every seat with `L.build` / `L.seats()`; the table's own clock `L.clock` under the stepped grid and `L.net`; `ceil` reaches the size model; `L.measure`; a settle memo and faster mark rows) | 1.9.11 | API-CONTRACT 1.9.11 (v18) | `tactics-zones-engreg` | pending merge (sections 2, 5, 6, 8, 16, 17, 18, 20) |
 | ENGWORDS (both deny lists over both languages: `crossRefusal`, `CROSS`; the words that read as a word of the other language replaced, pl KA-DUMP -> KA-DUUM ...) | 1.9.13 | API-CONTRACT 1.9.13 | `tactics-zones-engwords` | pending merge (sections 9, 14, 20) |
 | RIMUNDER (an invincible word on the map gets an ink rim UNDER the whole lettering, letters and duplicate block; `look.rim` ink / paper / none; default ink in world space, none on the screen) | 1.9.12 | API-CONTRACT 1.9.12 | `tactics-zones-rimunder` | pending merge (sections 5, 13, 20) |
+| SUSTAINGAP (a sustained sound reads as one run: phrases seated by their own measured ink, never piled; echo and shed beyond the run's edge; the run inside the view and a caller's `room`; `startAt` on every seat; stream syllables in staggered lanes; a word drawn in by parts no longer thrown away by decaying holds) | 1.9.15 | API-CONTRACT 1.9.15 | `tactics-zones-sustaingap` | pending merge (sections 10, 12, 18) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -313,7 +314,12 @@ from the films:
 - A wave word on a fixed angle rode under the interface panels and through the main word: choose its direction per screen (away
   from the main word as placed there, off the panels, inside the view, screen-up preferred).
 - A fire's lasting word with the sustain's `echo` treatment sat stacked on itself (FOOOFF three times): pass `treatments` without
-  `echo` until the engine places echoes clear (REQUESTS EFFECTS1-6).
+  `echo` until the engine places echoes clear (REQUESTS EFFECTS1-6). From 1.9.15 (SUSTAINGAP) echo copies and shed fragments are
+  placed beyond the run's edge by their own box, or left out when there is no room (section 12).
+- (1.9.15) A sustained run is taller than one phrase: two seats of about 2.2 caps each plus a gap, about 4.8 caps in all (a
+  phrase's measured ink, its turn and its exit included), its split line 0.8 cap above the source. A caller that reserves a box for
+  the run (the map's burn offsets assume about -2.5..+0.9 em) should pass that box as `room` (extents round the source) so the run
+  keeps to it, or reserve the taller box; a run taller than its room overflows downwards, never onto itself.
 - An unlocated sound (a gun with no shooter on the map, a shooter or a page word this player cannot see) goes to a free spot on
   the screen (`space: "screen"`, layer `hud`), never at the hidden place.
 - A gun's report: start its syllables outside the shooter's token circle plus about a third of a square, screen-up of the barrel.
@@ -583,7 +589,12 @@ travelling along `dir` or toward `to`, one hand for the whole stream.
   syllable), `manual: true` + `s.beat()` from each shot, `count` (default 6), `duration`, `until`, `startAt`, `delay`, `swing`.
 - `life` (ms per syllable, 340), `travel`, `spread`, `loud` (number or `(i) => 0..1`), and the play options for size, look, layer.
 - On an effect's clock: with `startAt` in the past the syllables whose life is over are skipped; `s.handles` holds only the living
-  syllables, `s.emitted` counts all [V]. A stream whose source token goes away stops. `L.stopAll()` and (world) a scene change stop
+  syllables, `s.emitted` counts all [V]. A stream whose source token goes away stops.
+- Lanes (1.9.15 SUSTAINGAP, invincible style; the legacy styles unchanged) [V node, check-sustain 7]: syllables up at once never
+  pile. Each takes the lowest lane free on the stream's own schedule (a late seat puts it in the same lane); the lanes stand in two
+  staggered columns along `dir`, a step apart by the biggest syllable's ink plus its travel (default `travel` 0.45 cap in lanes),
+  with no alternating spread or side jitter; with the view kept (default) the rows go forward as far as the view reaches, then on
+  behind the source. Before, a gun's rounds piled 95-100 % on each other (all born at one spot, life 340 ms, every 110 ms). `L.stopAll()` and (world) a scene change stop
   it.
 
 ## 11. Motion (core): the legacy styles `comic` / `expressive`
@@ -702,6 +713,21 @@ Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then ch
   Overlapping phrases, each a different treatment of the sound; `level` 0..1 (or a function of ms) live with `s.level(v)`.
   `mode: "ambient"`: one small hollow word now and then while its spot is in view, at most `L.ambientMax` (`{ world: 3, screen: 2 }`)
   up at once [V].
+- **The run's layout (1.9.15 SUSTAINGAP, invincible style; the legacy styles keep the 1.9.14 sustain)** [V node, `check-sustain.mjs`]:
+  the cause of the piles (THUNDERFIT-E1): 1.9.14 seated the two seats 1.15 em apart (+0.1 / -1.05 em, `em` = the size before the
+  cap factor) while a phrase's drawn ink is about 2.2 caps tall (hold box, entrance growth, keyline, rim, duplicate block, a few
+  degrees of turn on a wide word); shed fragments of a one-syllable word were whole-word copies piling at the path's end, echo
+  copies sat on the phrase, crumble pieces of the upper seat fell through the lower one. Measured: 65-100 % overlap between two
+  legible phrases on 1.9.14, at most 4 % on 1.9.15 (both faces, smooth and stepped, 41 / 58 / 82 px, all 58 sustained kinds).
+  Now: each phrase is seated by its own measured ink box (engine `inkBoxOf`: entrance, hold and turns over its whole hold, keyline,
+  rim, duplicate block, the picture's own margin, and how far its exit moves it while still legible), in two seats round a split
+  line 0.8 cap above the source, 0.14 cap apart; in the upper seat a drawn shards / crumble exit becomes a cut. Echo copies and shed
+  fragments (one per syllable; a one-syllable word sheds its tail) go beyond the run's edge on the `dir` side, each by its own box,
+  and are left out when the room has no space. Options: `room` (extents `{ up, down, left, right }` round the source, a rect, or a
+  function) and the view (unless `keepInView: false`) bound the run, moved as one block; `maxWidth` goes to each phrase; `startAt`
+  runs the score on the event's clock (a seat joining late shows the same phrase at the same place at the same instant; every draw
+  comes from the seed and the phrase index, and the layout reads only the phrases up). Cost: no rise measured (40 sustains + 10
+  streams, fake browser, medians equal or lower).
 - Gallery parts `move orbit path choreo rate escalate shards glow sustain ambient` [C].
 
 **Merge watch (checked for this manual).** The MOVE branch predates two things on `tactics-zones`; the merge must keep both:
@@ -966,7 +992,9 @@ Suites: `check.mjs` (core), `check-life.mjs` (lifecycle on a simulated clock), `
 dictionary rule and reviewed syllables), `check-tools.mjs`, `check-look.mjs` (L1-L16, legibility), (1.5.0) `check-move.mjs`,
 (1.9.11) `check-engreg.mjs --engine [other letters folder]` (copy rule, seats, the clock on four simulated seats incl. a late answer,
 a restarted server and a sleeping tab, `ceil`, `L.measure`, the settle memo equal to a fresh settle; on 1.9.10 15 of its 19 engine
-checks fail).
+checks fail), (1.9.15) `check-sustain.mjs --engine [other letters folder]` (every sustained kind and stream at three sizes, both
+faces, both motion types: no two legible words of a run overlap beyond 4 % of the smaller; the map's burn call, the view edge, a
+caller's room, two seats on one clock, a word drawn in by parts; on 1.9.14 234 of its 242 checks fail).
 moinen-maps runs them as `dev/letters.test.mjs`, invincible-plus-ultra as `scripts/sweep-checks/letters.mjs` [C]. Never weaken a check
 to make it pass; add one for every behaviour you add.
 
@@ -1031,6 +1059,11 @@ Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest t
 
 ## 18. Known limits
 Status: stable list; edit as items close.
+
+- (1.9.15) THUNDERFIT-E1 (sustain seats overlap) is closed by SUSTAINGAP. A run's room comes from the view and the caller's `room`;
+  the engine knows nothing of a caller's panels or of another run next to it (two fires side by side may still touch). A `room`
+  smaller than two seats lets the run overflow downwards. Phrases are measured from their first picture: before it the old fixed
+  seat is used for that frame. Echo and shed are skipped when the room is full, so a fire in a tight room sheds less.
 
 - (1.9.11) A seat compares its build only with the GM's; two players on different builds without a GM seat are not named. The
   clock needs Foundry's "time" socket answer; until the first answer `L.clock.ready()` is false and the old `serverTime` is used.
@@ -1171,6 +1204,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   stage table; `check-engreg.mjs` (16).
 - 2026-11-15 (ENGWORDS, 1.9.13, `tactics-zones-engwords`): both deny lists over both languages and the replaced words (9), the
   derived both-languages row (14), API index (20), stage table.
+- 2026-11-15 (SUSTAINGAP, 1.9.15, `tactics-zones-sustaingap`): sustain run layout and its cause (12), stream lanes (10), the run's
+  height and `room` for callers (5), limits (18), stage table; `check-sustain.mjs` (16).
 - 2026-11-15: RIMUNDER (1.9.12, `tactics-zones-rimunder`): section 13 "Rim under the lettering on the map" (`look.rim`, defaults,
   which calls change, fingerprint proof, cost), section 5 caller note, stage table, API index.
 
