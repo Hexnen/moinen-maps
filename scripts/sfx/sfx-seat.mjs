@@ -203,10 +203,22 @@ export function seatGroup({ items, anchor = null, view, panels = [], zoom = 1, r
 }
 /** after the group's move, a word that now stands on a pin (the move pulls the words toward the event, where its pins are) steps off it
     by the smallest shift that keeps it in the view: [{ dx, dy }] per box (boxes as this seat draws them, world units) */
-export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE) {
-  if ( !view || !pins?.length ) return boxes.map(() => ({ dx: 0, dy: 0 }));
+export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE, lives = null) {
+  const out = boxes.map(() => ({ dx: 0, dy: 0 }));
+  if ( !view || !pins?.length ) return out;
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
-  return boxes.map((b) => (pins.some((p) => inter(b, p) > 0) ? shiftClear(b, b, pins, v) : { dx: 0, dy: 0 }));
+  const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
+  // (the words up at the same time are obstacles too - lives [t0, t1] per box; without them every word of the group: a word stepped off
+  // a pin must not step onto another word)
+  const meet = (i, j) => !lives || (lives[i][0] < lives[j][1] && lives[j][0] < lives[i][1]);
+  boxes.forEach((b, i) => {
+    if ( !pins.some((p) => inter(b, p) > 0) ) return;
+    const others = boxes.map((q, j) => (j !== i && meet(i, j) ? mv(q, out[j]) : null)).filter(Boolean);
+    const d = shiftClear(b, b, [...pins, ...others], v), nb = mv(b, d);
+    const cost = (q) => [...pins, ...others].reduce((s, p) => s + inter(q, p), 0);
+    if ( cost(nb) < cost(b) - 1e-6 ) out[i] = d;
+  });
+  return out;
 }
 /** a point of the group's table picture as this seat draws it (seatGroup) */
 export const groupAt = (p, g) => ({ ...p, x: g.ax + (p.x - g.ax) * g.k + g.dx, y: g.ay + (p.y - g.ay) * g.k + g.dy });
