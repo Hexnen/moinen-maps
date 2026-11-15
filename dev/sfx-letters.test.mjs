@@ -163,7 +163,9 @@ for ( const l of ["en", "pl"] ) {
 }
 // (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
 const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
-ok(/LAYER_IDS = \["ground", "tokens", "weather", "overlay", "top"\]/.test(sfx) && sfx.includes('register(MODULE_ID, "sfxLayer"') && /\.\.\.layerOpts\(\)/.test(sfx), "the display layer is a setting over the engine's world layers, passed with every word");
+// (GMALLMAPS: the layer ids live in the pure sfx-prefs.mjs, sfx.mjs re-exports them; the setting is the table's now)
+const PREFS = fs.readFileSync(new URL("../scripts/sfx/sfx-prefs.mjs", import.meta.url), "utf8");
+ok(/LAYER_IDS = \["ground", "tokens", "weather", "overlay", "top"\]/.test(PREFS) && /export const LAYER_IDS = PF\.LAYER_IDS;/.test(sfx) && sfx.includes('register(MODULE_ID, "sfxLayer"') && /\.\.\.layerOpts\(\)/.test(sfx), "the display layer is a setting over the engine's world layers, passed with every word");
 ok(sfx.includes("area: w.area, magnitude: w.magnitude") && !/\bsize: w\.size\b/.test(sfx), "words pass their area and magnitude (the engine's size model), not a fixed size");
 ok(/L\.word\(kind, \{ \.\.\.o, \.\.\.wo \}\)/.test(sfx) && /C\.wordOpts\(/.test(sfx) && /\.\.\.\(w\.word\?\.play \?\? \{\}\)/.test(sfx), "the engine's vocabulary writes each word, and its play options (mood, sound, accent, character) go with it");
 ok(sfx.includes('space: "world"') && sfx.includes("reduced: red"), "words are world-space and follow the module's reduced-motion rule");

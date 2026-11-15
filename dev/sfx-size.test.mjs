@@ -180,8 +180,8 @@ group("PLACEMENT", () => {
 // ZERO and LIVE (wiring in sfx.mjs): a group at 0 letters nothing and schedules nothing; every size is a WORLD setting of the GM's (the
 // window's slider 0..3, default 2), applied live (onChange) on every seat; the step reaches every way a word is drawn
 group("WIRING", () => {
-  ok(/for \( const g of SZ\.SIZE_GROUPS \) game\.settings\.register\(MODULE_ID, SZ\.SIZE_SETTING\[g\], \{[\s\S]{0,120}?scope: "world", config: true,\s*restricted: true, type: Number, default: SZ\.SIZE_DEFAULT, range: \{ min: 0, max: 3, step: 1 \}, onChange: \(\) => sizeChanged\(g\) \}\);/.test(sfx),
-    "three world settings, the GM's, slider 0..3, default 2, live");
+  ok(/for \( const g of SZ\.SIZE_GROUPS \) game\.settings\.register\(MODULE_ID, SZ\.SIZE_SETTING\[g\], \{[\s\S]{0,120}?scope: "world", config: false,\s*restricted: true, type: Number, default: SZ\.SIZE_DEFAULT, range: \{ min: 0, max: 3, step: 1 \}, onChange: live\(\(\) => sizeChanged\(g\)\) \}\);/.test(sfx),
+    "three world settings, the GM's, slider 0..3, default 2, live (GMALLMAPS: config false - shown in the table window, sfx-table-ui.mjs)");
   ok(!/scope: "client"[^\n]*sfxSize/.test(sfx) && !/sfxSize\w*", \{[^}]*scope: "client"/.test(sfx), "no client setting for the sizes");
   ok(/if \( stepFor\(SZ\.groupOfVoice\(e\.voice\)\) === 0 \) return;/.test(sfx), "an event of a group at 0 is not even scheduled");
   ok(/if \( stepFor\(SZ\.groupOfPageWord\(w\)\) === 0 \) continue;/.test(sfx) && /const grp = SZ\.groupOfPageWord\(w, p\.grp\);\n\s*if \( stepFor\(grp\) === 0 \) return;/.test(sfx), "a page word of a group at 0 is not scheduled, nor played if the GM switched it off meanwhile");
@@ -204,7 +204,10 @@ group("WIRING", () => {
   ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
   ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
   ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");
-  ok(/Hooks\.on\("renderSettingsConfig", \(app, html\) => sizeRowsForPlayer\(app, html\)\);/.test(sfx) && /if \( game\.user\?\.can\?\.\("SETTINGS_MODIFY"\) \) return;/.test(sfx), "a player sees the sizes read-only");
+  // (GMALLMAPS: a player reads the sizes in the table window, every row as text: was injected into Foundry's settings list; the window's
+  // behaviour - player read-only, GM writes, live on a second seat - is dev/sfx-prefs.test.mjs)
+  const UI_SRC = src("sfx/sfx-table-ui.mjs");
+  ok(/if \( !gm \) input = `<output class="mm-sfxt-ro"/.test(UI_SRC) && /registerMenu\(MODULE_ID, "sfxTable", \{[^}]*restricted: false \}\);/.test(sfx), "a player sees the sizes read-only");
   // (the planners know nothing of the size: the story, its order and its placement rules are the same at every step)
   for ( const f of ["sfx/sfx-core.mjs", "sfx/sfx-page.mjs", "sfx/sfx-events.mjs"] ) ok(!/sfxSize|sfx-size|STEP_K/.test(src(f)), `${f} plans the same page at every step`);
   const lang = (l) => JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
