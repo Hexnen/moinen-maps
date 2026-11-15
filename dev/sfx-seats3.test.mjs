@@ -184,6 +184,8 @@ for ( const [nm, page] of [["bomb (preset)", bombAt], ["brush blast", brushAt]] 
   const a = T.soundAt({ role: "pre", ride, x: 50, y: -3000 }), b = T.soundAt({ role: "main", ride, x: 50, y: 50 }), c = T.soundAt({ role: "sec", x: 7, y: 8 }), d = T.soundAt({ at: { x: 1, y: 2 }, ride, x: 3, y: 4 });
   ok(a.sx === 900 && a.sy === 600 && b.sx === 100 && c.sx === 7 && c.sy === 8 && d.sx === 1 && d.sy === 2,
     `SOUND: a fall word's sound is its impact (${a.sx},${a.sy}), a word riding off its start there, a standing word its place, its own \`at\` first`);
+  const e = T.soundAt({ role: "pre", ride, x: 50, y: -3000 }, { x: 905, y: 640 });
+  ok(e.sx === 905 && e.sy === 640, `SOUND: a fall word whose own way ends in the sky (a meteor's far whine) sounds at the page's impact (${e.sx},${e.sy})`);
   const pre = bombAt(2, false).find((q) => q.role === "pre" && (q.ride?.length ?? 0) > 1);
   if ( pre ) ok(Math.hypot(pre.sx - BOMB.x, pre.sy - BOMB.y) < WG * 2, `SOUND: the bomb's fall word sounds at its impact (${Math.round(pre.sx)},${Math.round(pre.sy)} by the bomb ${BOMB.x},${BOMB.y})`);
 }

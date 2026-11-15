@@ -999,7 +999,7 @@ function play(w) {
     let h, call = null;
     try {
       if ( w.stream ) h = playStream(w);
-      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, "off"); return; } h = L.play(w.text, call.o); }
+      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, call.fit?.rule === "noroom" ? "noroom" : "off"); return; } h = L.play(w.text, call.o); }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;

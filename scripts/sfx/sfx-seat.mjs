@@ -244,7 +244,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const seen = sub ? inter(sub, view) > 0 : inter(B2, view) > 0;
     // (off this view: its place and its subject both; a sound heard all over the scene - a close thunder strike - still letters at the
     // view's edge toward it)
-    if ( !it.heard && inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); if ( it.main && mainF === null ) mainF = [OFF_K, OFF_K, OFF_K]; continue; }
+    if ( !it.heard && inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && [...(it.path ?? []), ...(it.sound ? [it.sound] : [])].some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); if ( it.main && mainF === null ) mainF = [OFF_K, OFF_K, OFF_K]; continue; }
     const rules = [];
     // (MAPSEATS3, the size this seat draws it at, before its room: a word whose thing this seat does not see stands at the view's edge toward
     // it at OFF_K of its size here - never bigger than on a seat that sees it (ADVM r2 item 4: the player, who could not see the bomb, got a
