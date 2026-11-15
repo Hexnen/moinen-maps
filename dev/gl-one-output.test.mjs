@@ -26,7 +26,8 @@ for ( const f of files ) {
 class Stub { toArray() { return []; } }
 globalThis.PIXI = new Proxy({ Program: { from: (vertexSrc, fragmentSrc, name) => ({ vertexSrc, fragmentSrc, name }) } }, { get: (o, k) => o[k] ?? Stub });
 globalThis.Hooks = { on() {}, once() {}, off() {}, call() {}, callAll() {} };
-const progs = (await import("../scripts/weather/lens.mjs")).lensPrograms();
+// (DROPS: both looks of the lens, the pixel-art one (the default) and the smooth one; their pre-passes and show are separate programs)
+const LP = (await import("../scripts/weather/lens.mjs")).lensPrograms, progs = [...new Set([...LP("pixel"), ...LP("smooth")])];
 
 /** The global `out` declarations a GLSL source keeps after its #if / #elif / #else (#define NAME VALUE, defined(), ==, !=, &&, ||, !). */
 function activeOuts(src) {
@@ -63,11 +64,13 @@ for ( const p of progs ) {
   assert.equal(outs.length, 1, `${p.name}: exactly one output (has ${outs.join(", ") || "none"})`);
 }
 // the pass's two halves: the shade writes fragColor, the refraction dispColor; the same source otherwise (the same pixels)
-const shade = byName["moinen-maps-weather-lens"], disp = byName["moinen-maps-weather-lens-disp"];
-assert.ok(shade && disp, "both halves of the lens pass are in lensPrograms (so the pre-warm links them)");
-assert.deepEqual(activeOuts(shade.fragmentSrc), ["fragColor"]);
-assert.deepEqual(activeOuts(disp.fragmentSrc), ["dispColor"]);
-assert.equal(shade.fragmentSrc.replace("#define LENS_OUT 1", "#define LENS_OUT 2"), disp.fragmentSrc, "the halves differ only in LENS_OUT");
-assert.equal(shade.vertexSrc, disp.vertexSrc);
+for ( const pre of ["moinen-maps-weather-lens", "moinen-maps-weather-lens-px"] ) {
+  const shade = byName[pre], disp = byName[`${pre}-disp`];
+  assert.ok(shade && disp, `${pre}: both halves of the lens pass are in lensPrograms (so the pre-warm links them)`);
+  assert.deepEqual(activeOuts(shade.fragmentSrc), ["fragColor"]);
+  assert.deepEqual(activeOuts(disp.fragmentSrc), ["dispColor"]);
+  assert.equal(shade.fragmentSrc.replace("#define LENS_OUT 1", "#define LENS_OUT 2"), disp.fragmentSrc, `${pre}: the halves differ only in LENS_OUT`);
+  assert.equal(shade.vertexSrc, disp.vertexSrc);
+}
 
 console.log(`gl-one-output: ok (${files.length} scripts without MRT, ${progs.length} lens programs with one output each)`);

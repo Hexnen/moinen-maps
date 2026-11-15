@@ -1205,3 +1205,20 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 .mm-sfxt .form-footer button { flex: 1 1 auto; white-space: nowrap; }
 .mm-sfxt .form-footer .mm-sfxt-save { color: var(--mm-sfxt-accent-ink); background: var(--mm-sfxt-accent); border-color: color-mix(in srgb, var(--mm-sfxt-accent) 70%, #000); }
 @media (prefers-reduced-motion: reduce) { .mm-sfxt .mm-sfxt-row { transition: none; } }
+/* DROPS: the lens window (lens-look-ui.mjs): the lettering window's family, the rain's blue as accent; two looks as a radio pair */
+.mm-lenslook { --mm-sfxt-accent: #4f9de0; --mm-sfxt-accent-ink: #ffffff; --mm-ll-glint: #ffffff; }
+.mm-lenslook .mm-ll-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.55rem 0 0.5rem; }
+.mm-lenslook .mm-ll-opt { display: flex; align-items: flex-start; gap: 0.6rem; height: auto; margin: 0; padding: 0.55rem 0.65rem; text-align: left;
+  line-height: 1.3; border: 1px solid var(--mm-sfxt-edge); border-radius: 8px; background: transparent; color: inherit;
+  transition: border-color 0.15s var(--mm-sfxt-ease), background-color 0.15s var(--mm-sfxt-ease); }
+.mm-lenslook .mm-ll-opt:not(:disabled):hover { border-color: color-mix(in srgb, var(--mm-sfxt-accent) 60%, transparent); }
+.mm-lenslook .mm-ll-opt[aria-checked="true"] { border-color: var(--mm-sfxt-accent); background: color-mix(in srgb, var(--mm-sfxt-accent) 14%, transparent); }
+.mm-lenslook .mm-ll-opt:disabled { cursor: default; opacity: 1; }
+.mm-lenslook .mm-ll-opt:disabled:not([aria-checked="true"]) { opacity: 0.45; }
+.mm-lenslook .mm-ll-icon { flex: none; width: 28px; height: 28px; color: var(--mm-sfxt-accent); }
+.mm-lenslook .mm-ll-icon svg { display: block; width: 27px; height: 27px; margin: 0.5px; }
+.mm-lenslook .mm-ll-text { display: grid; gap: 0.15rem; min-width: 0; }
+.mm-lenslook .mm-ll-text > span { font-size: 0.8rem; color: var(--mm-sfxt-muted); }
+.mm-lenslook .mm-ll-seatbtn { margin-top: 0.4rem; width: auto; }
+@media (max-width: 520px) { .mm-lenslook .mm-ll-opts { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .mm-lenslook .mm-ll-opt { transition: none; } }

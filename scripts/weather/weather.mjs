@@ -18,6 +18,8 @@ import { warmPrograms } from "../gl-warm.mjs";
 import { CloudDisplay, cloudPrograms } from "./clouds.mjs";
 import * as SM from "./storm-model.mjs";
 import { StormDisplay, stormPrograms } from "./storm.mjs";
+import { LOOK_KEY, LOOKS, DEFAULT_LOOK, cleanLook } from "./lens-look.mjs";
+import * as LookUI from "./lens-look-ui.mjs";
 
 /**
  * WEATHER, the engine: the scene's weather flag (model.mjs), the display (display.mjs) and the lens (lens.mjs), the GM's changes
@@ -66,6 +68,8 @@ export function lensCap() {
   const s = setting("weatherLens", "3"); if ( s === "off" || perfMode() === "low" || reducedMotion() ) return 0;
   return Math.max(1, Math.min(3, Number(s) || 3));
 }
+/** DROPS: the table's look of the lens (world, the GM's: every seat draws the same; lens-look.mjs). */
+export const lensLook = () => cleanLook(setting(LOOK_KEY, DEFAULT_LOOK));
 const shown = () => P.on && (P.who !== "gm" || game.user.isGM) && detailCap() > 0;
 
 /**
@@ -109,7 +113,7 @@ async function prewarm() {
   const job = ++warmJob;
   if ( globalThis.CONFIG?.moinenMaps?.weatherPrewarm === false || !shown() ) return;
   const list = [...displayPrograms(), ...cloudPrograms(), ...tornadoPrograms()];
-  if ( P.lens?.on ) try { list.push(...(await import("./lens.mjs")).lensPrograms()); } catch { /* compiled on first use */ }
+  if ( P.lens?.on ) try { list.push(...(await import("./lens.mjs")).lensPrograms(lensLook())); } catch { /* compiled on first use */ }
   if ( P.storm?.on ) {
     list.push(...stormPrograms());
     if ( P.storm.bolts ) try { list.push((await import("../presets/lightning.mjs")).strikeProgram()); } catch { /* compiled on first use */ }
@@ -404,6 +408,7 @@ function syncLens(st) {
     lens = new LensClass();
     lens.now = sharedNow; lens.stAt = clientState;
   }
+  lens.look = lensLook();   // (DROPS: a new look re-makes the lens's targets and programs on its next frame)
   lens.setState(st, P);
 }
 
@@ -529,6 +534,18 @@ export const weatherApi = {
   wind(w, { over = 5000 } = {}) { return change({ wind: w }, { over }); },
   /** Lens effects (scene default): { on, level: "auto" | a fixed strength 0..3.35 (below 1 fades the level-1 lens in), strength 0..1, heat }. */
   lens(l = {}) { setParams({ lens: l }); return { ...P.lens }; },
+  /**
+   * DROPS: the table's look of the lens: "pixel" (default) or "smooth". `look()` reads it; `look(v)` (GM) writes the world setting, every
+   * seat follows at once. Returns the look in force (a player's write is refused: the GM chooses for the table).
+   */
+  async look(v) {
+    if ( v === undefined ) return lensLook();
+    if ( !game.user?.isGM ) { ui.notifications?.warn(game.i18n.localize("MOINENMAPS.Weather.look.gmOnly")); return lensLook(); }
+    const n = cleanLook(v); if ( n !== lensLook() ) await game.settings.set(MODULE_ID, LOOK_KEY, n);
+    return lensLook();
+  },
+  /** DROPS: open the lens window (the table's look, read-only for a player; this seat's own lens cap). */
+  openLook: () => LookUI.open(),
   clear({ over = M.DEFAULT_DUR } = {}) { return change({ preset: "clear" }, { over }); },
   presets: () => Object.keys(M.PRESETS),
   levels: (preset) => M.levels(preset),
@@ -570,6 +587,14 @@ export function registerWeatherSettings() {
   const ch = (k) => ({ off: `MOINENMAPS.Weather.cap.off`, 1: `MOINENMAPS.Weather.cap.1`, 2: `MOINENMAPS.Weather.cap.2`, 3: `MOINENMAPS.Weather.cap.3` });
   game.settings.register(MODULE_ID, "weatherDetail", { name: "MOINENMAPS.Weather.set.detail", hint: "MOINENMAPS.Weather.set.detailHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { dropSettings(); refresh(); tell("client"); } });
   game.settings.register(MODULE_ID, "weatherLens", { name: "MOINENMAPS.Weather.set.lens", hint: "MOINENMAPS.Weather.set.lensHint", scope: "client", config: true, type: String, default: "3", choices: ch(), onChange: () => { dropSettings(); refresh(); tell("client"); } });
+  // DROPS: the look of the lens, the TABLE's (GMALLMAPS rule): world, the GM's (restricted), out of Foundry's list (config: false: a
+  // player would not see a restricted world setting there at all); shown to everyone in the lens window (menu below; the GM's weather
+  // dock has it too), live on every seat (onChange: the lens re-makes itself on its next frame, the pre-warm links the new look)
+  game.settings.register(MODULE_ID, LOOK_KEY, { name: "MOINENMAPS.Weather.look.name", hint: "MOINENMAPS.Weather.look.hint", scope: "world", config: false, restricted: true,
+    type: String, default: DEFAULT_LOOK, choices: Object.fromEntries(LOOKS.map((k) => [k, `MOINENMAPS.Weather.look.${k}`])),
+    onChange: () => { dropSettings(); refresh(); prewarm(); tell("client"); LookUI.follow(); } });
+  game.settings.registerMenu(MODULE_ID, "weatherLensTable", { name: "MOINENMAPS.Weather.look.menu", label: "MOINENMAPS.Weather.look.open", hint: "MOINENMAPS.Weather.look.menuHint",
+    icon: "fa-solid fa-droplet", type: LookUI.menuClass(), restricted: false });
   // the GM's last transition time (s) in the bar
   game.settings.register(MODULE_ID, "weatherOver", { scope: "client", config: false, type: Number, default: 20 });
 }
