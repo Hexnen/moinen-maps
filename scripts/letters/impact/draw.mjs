@@ -750,7 +750,7 @@ const PAINT = {
   chroma(ctx, e, f) {
     const u = unit(e), d = u * 0.012 * gain(e), a = e.dir ?? 0;
     if ( e.sil && e.chromaBack === false ) {   // only when the scene itself cannot be split (no SVG backdrop filter)
-      sil(ctx, e, { color: e.redOk ? "#ff2a4a" : "#d0306a", x: e.cx - Math.cos(a) * d * 1.6, y: e.cy - Math.sin(a) * d * 1.6, blend: "screen", alpha: 0.85 });
+      sil(ctx, e, { color: e.redOk ? "#ff2a4a" : "#c83a34",   /* ENGPINK 1.9.22: a red under the guard line, not pink (was #d0306a) */ x: e.cx - Math.cos(a) * d * 1.6, y: e.cy - Math.sin(a) * d * 1.6, blend: "screen", alpha: 0.85 });
       sil(ctx, e, { color: "#19e0ff", x: e.cx + Math.cos(a) * d * 1.6, y: e.cy + Math.sin(a) * d * 1.6, blend: "screen", alpha: 0.85 });
     }
     lines(ctx, e, f.seed, { n: 30, fat: 0.35, color: PAPER, second: null, gap: 1.3 });

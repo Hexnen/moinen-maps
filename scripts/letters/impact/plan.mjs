@@ -33,7 +33,7 @@ export const TONES = {
   blood: { a: "#e3202a", b: "#ffd400" },
   volt:  { a: "#19c3ff", b: "#fff36b" },
   toxic: { a: "#8fe01f", b: "#ffd400" },
-  void:  { a: "#b04cff", b: "#19c3ff" },
+  void:  { a: "#7258ff", b: "#19c3ff" },   // ENGPINK 1.9.22: blue-violet (was #b04cff, in the pink band; the lettering violet)
   dust:  { a: "#e9c98a", b: "#ffffff" }
 };
 /* saturated red (WCAG 2.3.1 counts R / (R + G + B) >= 0.8 as saturated red; the guard is stricter: 0.7, plus the bright reds of the

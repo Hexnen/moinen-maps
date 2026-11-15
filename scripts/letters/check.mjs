@@ -222,6 +222,9 @@ await (await import("./check-motion2.mjs")).run(ok, { bank, fontsApi });
 /* 8g2. HOLDS: a held invincible word lives as long as it stands, in the manner of its sound, inside its placement (check-holds.mjs) */
 await (await import("./check-holds.mjs")).run(ok, { fontsApi });
 
+/* 8g. ENGPINK: no engine colour (tables, computed shades) in the pink band; the replaced families still apart (check-pink.mjs) */
+await (await import("./check-pink.mjs")).run(ok);
+
 /* 8f. IMPACT: impact frames (impact/check-impact.mjs) */
 await (await import("./impact/check-impact.mjs")).run(ok);
 
@@ -285,6 +288,14 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-engview.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 1200000 });
   for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
   ok(r.status === 0, `engview engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
+/* 16. ENGPINK: every word of every kind in every style and table palette (and every family by name), planned and painted on a
+   recording context: no pink in any colour it paints (own process; `--engine <older letters>` shows the pink) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-pink.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 900000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `pink engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
 console.log(`letters: ${n} checks, ${failed} failed`);

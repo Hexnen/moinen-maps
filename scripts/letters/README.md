@@ -594,7 +594,7 @@ this seat draws with), `L.setTable(partial)` (GM; a player's call writes nothing
 | `motion` | auto ("Full") / gentle / reduced | the strongest reduction wins: the caller's `reduced: true`, the table, this seat's OS; gentle = moves damped to 45 %, no smear frames (a stored `full` reads as `auto`) |
 | `flashes` | on / off | the one-tick black/white flash frame (off: an ordinary drawing of the same length); a seat in Foundry's photosensitive mode never gets it |
 | `impact` | full / local / off | impact frames (`L.impact`); a photosensitive seat gets local |
-| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set, no green, no red-green pair (a caller's own `colors` stay) |
+| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set without its reddish purple, no red-green pair (a caller's own `colors` stay). 1.9.22 (ENGPINK): no engine colour in any palette, and no shade the painter computes, is pink or magenta (`PINK` / `isPink` / `unpinkHsl` in design.mjs, `check-pink.mjs`) |
 | `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
 | `movement` | smooth / stepped | the invincible style's motion type on every seat (1.9.2 MODE) |
