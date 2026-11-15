@@ -162,6 +162,15 @@ new size / drawn size. As soon as the wanted texel size drifts up by more than 1
 new size (the next pictures are drawn ahead within the frame budget): a small bitmap is never stretched into a big one, big lettering
 is drawn big. Screen words follow window resizes the same way.
 
+### The table's view instead of this seat's (1.9.18 ENGVIEW)
+`view: { vw, vh, zoom, alive, dpr }` (on `sizeOf`, `measure`, `play` / `sfx`, `stream`, `sustain`) replaces the seat's own usable width,
+window height, canvas zoom, count of world words up and device pixel ratio in the model above (a field left out: the seat's own, but
+`alive` 0 and `dpr` 1). Every seat then gets the same size for the same call; a world word played with a view keeps the table's size
+while this seat zooms. `L.measure` also gives the ink the word covers standing (`stand` / `standBox`: hold poses, a held word's life,
+keyline, rim, duplicate block, hold extras) and arriving (`inkReach` / `inkReachBox`), and `rim`, `life`, `ink`, computed lazily from
+the plan (no painting). `L.streamUnit(opts)` names a stream's syllable sizes (`unit` = natural x 0.62; syllable i: unit x (0.85 + 0.25
+loud) x 1.15 for the first). Manual section 6a has the worked examples. `ceilK` is still not read and warns once; use `ceil`.
+
 ### What it means in the situations that matter (my reading, numbers at 1366x768)
 - **A tick on a small token, zoomed out** (0.2): the world size would be about 8 px; the floor holds it at about 15 px (a normal
   word about 19 px) - readable, never bigger than a normal word.

@@ -8,7 +8,7 @@
    ink (stars, lines, silhouettes, halftone, splashes) is painted ahead of time on 2D canvases, one per drawing, and a drawing change
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
-import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER } from "./plan.mjs";
+import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost } from "./plan.mjs";
 import { paintFrame, backClip } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
@@ -552,6 +552,10 @@ export function createImpact(L, tools = null) {
     kinds: KIND_IDS.map((id) => ({ id, pl: KINDS[id].pl, en: KINDS[id].en, tone: KINDS[id].tone })),
     frames: FRAME_IDS.map((id) => ({ id, pl: FRAMES[id].pl, en: FRAMES[id].en, full: FRAMES[id].full })),
     tones: Object.keys(TONES), limits: LIMITS, steps: STEP_AT, series: { step: SERIES_STEP, max: SERIES_MAX }, stats,
+    /* ENGVIEW (1.9.18): the engine's own strength ladders, for a caller that picks its own drawings by strength (no hand copy of the
+       bounds): stepOf(m) 0..5 (bounds `steps`), tierOf(m) the four tiers of the first build 0..3 (bounds `tiers`: 0.35 / 0.85 / 1.35),
+       seriesBoost(n) what place n of a series adds to the strength */
+    stepOf, tierOf, tiers: TIER_AT, seriesBoost,
     get busy() { return [...lives].some((x) => x.alive); },
     /* the chromatic split needs a backdrop filter that takes an SVG filter: false turns the scene's split off (the ink still splits) */
     set chroma(v) { chromaOk = v; }, get chroma() { return chromaOk; },
