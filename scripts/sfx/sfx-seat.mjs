@@ -219,6 +219,10 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
   const strips = mergeRects(inV, RIDE_PANEL_GAP / Math.max(1e-4, zoom), 1.3);
   panels = mergeRects(inV, PANEL_GAP);
   const placed = [];
+  // (MAPSEATS3: the share of its table size this seat draws the page's MAIN word at - its own size for this window and zoom, less what its
+  // room took -: every other word of the page draws the same share of ITS table size, so the words keep the table's proportions on
+  // every seat (ADVM r2 item 4: the GM's rocket KA-BOOOOM! drawn smaller than its own debris word, one word shrunk for room, the next not))
+  let mainF = null;
   const meet = (a, b) => !a || !b || (a[0] < b[1] && b[0] < a[1]);
   const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
   const into = (lo, hi, a, z) => (hi - lo > z - a ? (a + z) / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > z ? z - hi : 0);
@@ -235,12 +239,28 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const p2c = { x: clamp(sc.x, B2.x0, B2.x1), y: clamp(sc.y, B2.y0, B2.y1) };
     const at2 = (cap) => { const f = cap / u2; return { x0: p2c.x + (B2.x0 - p2c.x) * f, y0: p2c.y + (B2.y0 - p2c.y) * f, x1: p2c.x + (B2.x1 - p2c.x) * f, y1: p2c.y + (B2.y1 - p2c.y) * f }; };
     const moveOf = (q, cap) => { const b = at(cap / u); return { dx: (q.x0 + q.x1) / 2 - (b.x0 + b.x1) / 2, dy: (q.y0 + q.y1) / 2 - (b.y0 + b.y1) / 2 }; };
-    // (off this view: its place and its subject both)
-    if ( inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); continue; }
+    const step0 = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2;
+    // (MAPSEATS3: does this seat SEE the thing the word letters - its subject (or, without one, its place) inside the view?)
+    const seen = sub ? inter(sub, view) > 0 : inter(B2, view) > 0;
+    // (off this view: its place and its subject both; a sound heard all over the scene - a close thunder strike - still letters at the
+    // view's edge toward it)
+    if ( !it.heard && inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); if ( it.main && mainF === null ) mainF = [OFF_K, OFF_K, OFF_K]; continue; }
     const rules = [];
+    // (MAPSEATS3, the size this seat draws it at, before its room: a word whose thing this seat does not see stands at the view's edge toward
+    // it at OFF_K of its size here - never bigger than on a seat that sees it (ADVM r2 item 4: the player, who could not see the bomb, got a
+    // word three times wider than the GM's) -; a word of a page whose main word is laid out already draws the main word's share of its
+    // table size (one proportion between the words on every seat). `nomS` / `sizesS` are its sizes after that.)
+    // (the main word's share at this step: what this seat's room or view took off the main word as drawn at the step - its drawn size over
+    // its own size here -; the other words take the same share of theirs (their sizes keep the steps' ratios, so 3 > 2 > 1 stays as drawn),
+    // never more than OFF_K for a word this seat does not see either)
+    // (one share per step, the same whatever step is drawn: the envelope a word searches - up to its step-3 size - stays one for every step)
+    const k0 = seen ? 1 : OFF_K, gA = [k0, k0, k0].map((g, i) => (!it.main && mainF !== null ? Math.min(g, mainF[i]) : g)), gS = gA[step0 - 1];
+    if ( !seen ) rules.push("away");
+    const nom0 = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
+    const nomS = nom0 && gA.some((g) => g !== 1) ? nom0.map((c, i) => c * gA[i]) : nom0;
     // (its sizes, the first that fits the view whole; a word bigger than the view: the size that fits)
     const fitCap = (B2.x1 - B2.x0) > 0 && (B2.y1 - B2.y0) > 0 ? u2 * Math.min(vw / (B2.x1 - B2.x0), vh / (B2.y1 - B2.y0)) : Infinity;
-    let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0);
+    let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0).map((c) => c * gS);
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
     const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
@@ -261,7 +281,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const flips = (b) => { if ( !side0 ) return 0; const s2 = sideOf(b); return !s2 || s2.x !== side0.x || s2.y !== side0.y ? 1 : 0; };
     // (a word that rides (a bomb's fall, a shock wave): MAPRIDE rideLayout, its way kept on the table's side of its subject - MAPSAME)
     if ( it.ride && (it.path?.length ?? 0) > 1 ) {
-      const nomR = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
+      const nomR = nomS;
       if ( nomR ) {
         // (MAPSAME: as a standing word - its envelope is the largest size up to its step-3 size whose way stands clean here, the same at
         // every step; the step draws its share on that way, inside it)
@@ -274,13 +294,16 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         if ( small < min - 1e-9 ) sizes.push(small);
       }
       const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels: strips, placed, meet, sub });
-      const o = { ...r.out, px: p.x, py: p.y };
+      const o = { ...r.out, px: p.x, py: p.y, share: gS };
       if ( nomR && o.way ) {
         const st = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2, env = o.cap, G = MIN_GAIN, fl = Math.min(it.floor > 0 ? it.floor : Infinity, nomR[0], env);
         const d2 = Math.max(fl, Math.min(nomR[1], env / G)), d1 = Math.max(fl, Math.min(nomR[0], d2 / G)), dr = Math.min(env, [d1, d2, env][st - 1]);
         const rr = o.rules.filter((q) => q !== "size");
         if ( Math.abs(dr - u) > 1e-6 ) rr.splice(1, 0, "size");
         if ( dr < nomR[st - 1] - 1e-6 ) rr.push("room");
+        // (as a standing word: a step held up by the floor, less than MIN_GAIN over the step below it, says so)
+        if ( (st > 1 && dr < [d1, d2, env][st - 2] * G - 1e-6) || dr > nomR[st - 1] + 1e-6 ) rr.push("floor");
+        if ( !seen ) rr.push("away");
         Object.assign(o, { cap: dr, k: dr / u, f: dr / u, env: env, rules: rr, rule: rr.at(-1) });
       }
       out.set(it.key, o);
@@ -414,9 +437,10 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // seat short of room keeps its words where they stand at every step (the same picture, only bigger or smaller), and the words laid out
     // after it keep off its envelope whatever the step - before, step 3 and step 2 of a crowded seat drew the same size (live 185 / 186,
     // question MAPSAME-1), and each step searched its own spots)
-    const nom = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
-    const step = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2;
-    const floorC = Math.min(it.floor > 0 ? it.floor : Infinity, nom ? nom[0] : Infinity, it.small > 0 ? it.small : Infinity, it.min > 0 ? it.min : Infinity, ...sizes);
+    const nom = nomS;
+    const step = step0;
+    // (the legibility floor holds under the MAPSEATS3 share: the floor of its own sizes, not of the shared ones)
+    const floorC = Math.min(it.floor > 0 ? it.floor : Infinity, nom0 ? nom0[0] : Infinity, it.small > 0 ? it.small : Infinity, it.min > 0 ? it.min : Infinity, ...(it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0));
     let top = nom ? nom[2] : sizes[0], fitted = false;
     if ( top > fitCap ) { top = fitCap; fitted = true; }
     const lo = Math.min(floorC, top);
@@ -448,7 +472,8 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       // (its move: the drawn box's centre against the table's box of this step at that size, scaled about p)
       pick = { cap: dr, f: dr / u, d: moveOf(qd, dr), q: qd, env: q, soft: env.soft };
       if ( dr < want - 1e-6 ) rules.push("room");
-      if ( nom && step > 1 && dr < [d1, d2, d3][step - 2] * G - 1e-6 ) rules.push("floor");
+      // (the legibility floor holds this step down to it - under MIN_GAIN over the step below - or up over its share of the page: MAPSEATS3)
+      if ( nom && ((step > 1 && dr < [d1, d2, d3][step - 2] * G - 1e-6) || dr > nom[step - 1] + 1e-6) ) rules.push("floor");
     } else {
       // (nothing clean on any side even at the floor: the least covered spot at its step's size (capped to the view), its own side first)
       best = null; fallback = null; fmin = Math.min(want, top);
@@ -463,8 +488,14 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     if ( Math.abs(pick.d.dx) > 1e-6 || Math.abs(pick.d.dy) > 1e-6 ) rules.splice(rules.includes("size") ? 1 : 0, 0, "shift");
     if ( env && env.soft > 1e-6 ) rules.push("edge");
     const r = { cap: pick.cap, k: pick.f, f: pick.f, px: p.x, py: p.y, dx: pick.d.dx, dy: pick.d.dy, box: pick.q, env: pick.env, rules, rule: rules.at(-1) ?? "ok",
-      clean: !!env && !(env.soft > 1e-6), ok: !!env, side: side0 ? `${side0.x},${side0.y}` : null };
+      clean: !!env && !(env.soft > 1e-6), ok: !!env, side: side0 ? `${side0.x},${side0.y}` : null, share: gS };
     out.set(it.key, r);
+    if ( it.main && mainF === null ) {
+      const k0 = seen ? 1 : OFF_K;
+      if ( env && nom ) { const r3 = env.cap, fl = Math.min(floorC, r3), d2 = Math.max(fl, Math.min(nom[1], r3 / MIN_GAIN)), d1 = Math.max(fl, Math.min(nom[0], d2 / MIN_GAIN));
+        mainF = [d1 / nom[0], d2 / nom[1], r3 / nom[2]].map((q) => Math.min(1, q) * k0); }
+      else { const q = Math.min(1, pick.cap / Math.max(1e-9, want)) * k0; mainF = [q, q, q]; }
+    }
     // (the words laid out after it keep off its envelope - the same arrangement at every step)
     placed.push({ box: inkOf(pick.env), life: it.life ?? null });
   }
@@ -690,6 +721,9 @@ export function shrinkOnSide(q, f, sub, ink = null) {
     smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size
     between the challenges panel, the scene bar, the hotbar and the bomb's pin) */
 export const SOFT_OK = 0.06;
+/** MAPSEATS3: the share of its size a seat draws a word at whose thing it does not see (laid out at its view's edge toward it): smaller than
+    on a seat that sees it, still read (question MAPSEATS3-2) */
+export const OFF_K = 0.6;
 /**
  * Is there a move d inside `A` ({ x0, x1, y0, y1 }: the moves allowed) that puts the box `k` on none of `obs` (touching allowed)? Exact:
  * every obstacle forbids one open rectangle of moves; the allowed rectangle is swept in x-slabs and each slab's forbidden y-intervals

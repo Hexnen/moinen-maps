@@ -57,7 +57,11 @@ group("FLASH", () => {
   ok(wf.kind === "rumble" && wm.kind === "thunder" && wc.kind === "thunder", "kinds");
   ok(!wc.screen && wc.x === 900 && wc.t === close.t, "close: at the strike, on the stroke");
   const wo = E.flashWord(close, { x: 900, y: -700 }, view, "s");
-  ok(wo.screen && wo.screen.fy < 0.2 && wo.role === "main" && wo.rank >= 4 && wo.t === close.t, "close beyond the screen: the big word at the edge toward it (live: dropped)");
+  // (MAPSEATS3: a close strike is ONE table word at the strike on every seat - `heard` -, never a screen word chosen by one seat's view
+  // (ADVM r2 item 2: the GM drew a map word, the player a screen word for the same flash); a seat that does not see it letters it at its
+  // view's edge toward it by the seat rule (sfx-seat.test SEATS3). `edge` stays the direction toward it, for a seat that must play it
+  // unlocated (a player under the fog of war).)
+  ok(!wo.screen && wo.heard && wo.x === 900 && wo.y === -700 && wo.edge.fy < 0.2 && wo.role === "main" && wo.rank >= 4 && wo.t === close.t, "close beyond a view: one map word at the strike, heard (edge toward it kept)");
   for ( const lang of ["en", "pl"] ) for ( let s = 0; s < 12; s++ ) {
     const t = V.word(wf.kind, { ...wf.wo, seed: `x${s}`, lang }).text;
     ok(!t.includes("!"), `far rumble without "!": ${t}`);

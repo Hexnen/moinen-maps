@@ -294,7 +294,7 @@ await group("THUNDER", async () => {
           bw *= o.size / s0; bh *= o.size / s0;
         }
         const fx = bw * 0.5 + 16, fy = bh * 0.75 + 16;
-        const today = { x: Math.min(Math.max(fw.screen.fx * W, fx), Math.max(fx, W - fx)), y: Math.min(Math.max(fw.screen.fy * H, fy), Math.max(fy, H - fy)) };
+        const today = { x: Math.min(Math.max((fw.screen ?? fw.edge).fx * W, fx), Math.max(fx, W - fx)), y: Math.min(Math.max((fw.screen ?? fw.edge).fy * H, fy), Math.max(fy, H - fy)) };
         const real = FIT.wordBox(hb, o.size * hb.sk), rk0 = FIT.reachOf("slam");
         const r0 = boxAt(today.x, today.y, real.bw * rk0, real.bh * rk0), b0 = boxAt(today.x, today.y, real.bw, real.bh);
         if ( area(r0) - inter(r0, { x0: 16, y0: 16, x1: W - 16, y1: H - 16 }) > 1 || ui.some((q) => inter(b0, q) > 1) ) before++;
@@ -303,7 +303,7 @@ await group("THUNDER", async () => {
         const so = { ...o0, size: EV.rankSize(fw.rank, SEAT.REF_VH), fit: "screen" };
         const size = SEAT.tableScreenSize(sizeFor, L.sizeModel, so, plan, step);
         const m = L.measure(word.text, { ...so, size, at: { x: 0, y: 0 } }), u = m.unit;
-        const ref = SEAT.screenLayout({ hold: { w: m.hold.w / u, h: m.hold.h / u }, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, cap: size * m.sizeK, fixed: fw.screen });
+        const ref = SEAT.screenLayout({ hold: { w: m.hold.w / u, h: m.hold.h / u }, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, cap: size * m.sizeK, fixed: fw.screen ?? fw.edge });
         const gm = SEAT.seatScreen(ref, { W, H, panels: ui }), pl = SEAT.seatScreen(ref, { W, H, panels: [] });
         const g = drawn(ref, gm);
         const out = area(g.reach) - inter(g.reach, { x0: 15, y0: 15, x1: W - 15, y1: H - 15 }) > 1, under = ui.some((q) => inter(g.box, q) > 1);

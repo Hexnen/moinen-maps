@@ -125,9 +125,12 @@ export function flashWord(ev, place, view, seed = "") {
     const lv = clamp(ev.lv | 0 || 2, 1, 3), restrikes = Math.max(0, (ev.strokes?.length ?? 1) - 1);
     // (a close strike beyond this screen - the storm strikes anywhere on the scene - is lettered at the edge toward it, still the big
     // word: live, a strike off the view was dropped, its word had nowhere to stand)
-    const off = view && (place.x < view.x0 || place.x > view.x1 || place.y < view.y0 || place.y > view.y1);
+    // (MAPSEATS3: ONE word for the table, at the strike, on every seat - `heard`: a seat whose view does not hold the strike letters it at
+    // its view's edge toward it by the seat rule, at the size its view gives a word it does not see (sfx-seat OFF_K). Before, each seat
+    // chose by ITS view between a map word at the strike and a screen word at its edge: the GM, who saw the strike, drew a small map word
+    // and the player a big screen word for the same flash (ADVM r2 item 2))
     return { role: "main", kind: "thunder", wo: { loud: clamp(0.6 + 0.12 * lv + 0.04 * restrikes, 0.6, 1), ...(lv === 3 ? { prefix: true } : {}) }, t: ev.t, x: place.x, y: place.y,
-      ...(off ? { screen: edge() } : {}), rank: lv === 3 ? 5 : 4, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd };
+      heard: true, edge: edge(), rank: lv === 3 ? 5 : 4, ms: 1100, stage: { in: "slam", holdKind: "rattle", glow: "auto" }, seed: sd };
   }
   const far = ev.kind === "far", lag = THUNDER_LAG[ev.kind], t = ev.t + Math.round(lag[0] + (lag[1] - lag[0]) * h01(`${sd}|lag`));
   return { role: far ? "far" : "mid", kind: far ? "rumble" : "thunder", wo: { loud: far ? 0.15 : 0.32, long: far ? 0.8 : 0.6 }, t, screen: edge(), rank: far ? 1 : 2,
