@@ -1109,6 +1109,8 @@ export function buildTimeline(n, mood, sound, hand, R, o = {}) {
 function trackTimeline(n, m, R, o = {}) {
   const tempo = o.tempo || 1;
   const sc = (keys) => keys.map(([t, p, e]) => [t / tempo, p, e]);
+  /* HOLDS: the sound's own body (its natural hold at this tempo); a longer hold lives on after it (motion.mjs lifePose) */
+  if ( m.life ) m.bodyMs = Math.round(m.holdMs / tempo);
   m.entKeys = sc(entranceKeys(m)); m.exitKeys = sc(exitKeys(m));
   /* FIN-ENGINE (FXIS-E4): under reduced motion the fade-in ends on the FULL entrance's contact (o.contact), so a reduced seat sees the
      word land on the same instant as a full one (before: a 140 ms fade, the word ~0.1-0.4 s early) */
