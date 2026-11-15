@@ -700,6 +700,88 @@ export function mergeRects(list, gap) {
   }
   return r;
 }
+/**
+ * MAPRIDE: a burning fire's sustained run as ONE block, in units of the run's `size` k (scene px). Measured on the engine (1.9.17, node,
+ * the map's own call - its treatments, glow, sizes 41 / 58 / 82, levels 0.3 / 0.9, both motion types, 12 s each): left to itself the two
+ * seats of phrases reach ~3.5 above the source and ~3.9 below and its shed fragments drift ~12 above; given the room `RUN` (up / down /
+ * half-width hw) and `maxWidth` RUN.mw the engine keeps the run inside it as one block and skips fragments past its edge, its ink
+ * leaving it by at most 0.14 (smooth motion) or ~1.1 across and ~0.3 up / down (stepped: the boil) - the `margin` this seat reserves
+ * round the room. Before, the map reserved -3.1 .. +1.1 and passed no room: live the run stood on the macro bar and the bomb's pin.
+ */
+export const RUN = { up: 3.6, down: 4.2, hw: 3.5, mw: 5, margin: { smooth: { x: 0.2, u: 0.1, d: 0.1 }, stepped: { x: 1.15, u: 0.35, d: 0.3 } } };
+/** the room the engine keeps a run to, round its spot `q` */
+export const runBox = (q, k) => ({ x0: q.x - RUN.hw * k, x1: q.x + RUN.hw * k, y0: q.y - RUN.up * k, y1: q.y + RUN.down * k });
+/** what this seat keeps clear for it: the room and the margin its ink may leave it by in this motion type */
+export const runReserve = (q, k, motion = "smooth") => { const m = RUN.margin[motion] ?? RUN.margin.stepped, b = runBox(q, k);
+  return { x0: b.x0 - m.x * k, x1: b.x1 + m.x * k, y0: b.y0 - m.u * k, y1: b.y1 + m.d * k }; };
+/**
+ * Where this seat letters a fire's run for each of its spots (`spots`: scene px, in the table's order; `k` the run's cap height): the
+ * run's block where it is if clean - whole in this seat's view `v` (less the edge), off every pin and token (`hard`), at most SOFT_OK of it
+ * under this seat's panels and the table's words up (`soft`), never on the blocks of the runs laid out before it (`taken` and this call's
+ * own: another fire's run never letters into this one) -, else the least move (exact in move space, as the words; at most `maxShift`);
+ * none clean at the table's size: the largest of this seat's smaller sizes down to `kMin` (x0.9 steps) that has a clean place - the
+ * words' rule "small"; none at all: not lettered on this seat (`ok` false) - question MAPRIDE-3. `below` (the table's sizes of the lower
+ * steps) keeps the step order: no run smaller at a higher step. -> [{ dx, dy, k (its size here), room (the engine's `room` for it), box
+ * (what it keeps clear), ok }] (pure, deterministic)
+ */
+export function burnRoom(spots, { k, kMin = k, below = [], v, hard = [], soft = [], taken = [], maxShift = Infinity, rays = 48, motion = "smooth" } = {}) {
+  // (each run from `top` down x0.9 to its floor: kMin, or the size the lower step gave it)
+  const lay = (top, floors) => {
+    const out = [], held = taken.slice();
+    for ( let i = 0; i < spots.length; i++ ) {
+      const lo = Math.max(kMin, floors?.[i] ?? 0);
+      let got = null;
+      for ( let kk = Math.max(top, lo); ; kk = Math.max(lo, kk * 0.9) ) {
+        got = placeRun(spots[i], kk, { v, hard: [...hard, ...held], S: soft, maxShift, rays, motion });
+        if ( got.ok || kk <= lo + 1e-9 ) break;
+      }
+      if ( got.ok ) held.push(got.box);
+      out.push(got);
+    }
+    return out;
+  };
+  // (`below`: the table's sizes of the lower steps, ascending. The seat lays its runs out step by step: each step keeps every run the
+  // lower step lettered at least as large as there (its first run shrinking from the step's size until the rest still fit), so a higher
+  // step never letters a run of a crowded seat smaller than a lower step does; none fits so: the lower step's layout)
+  let prev = null;
+  for ( const top of [...below.filter((t) => t < k), k] ) {
+    if ( !prev ) { prev = lay(top, null); continue; }
+    const floors = prev.map((o) => (o.ok ? o.k : 0));
+    let pick = null;
+    for ( let t = top; t > Math.max(...floors, kMin) * 0.9; t *= 0.9 ) {
+      const r = lay(t, floors);
+      if ( r.every((o, i) => o.ok || !prev[i].ok) ) { pick = r; break; }
+    }
+    if ( pick ) prev = pick;
+  }
+  return prev;
+}
+function placeRun(q, k, { v, hard, S, maxShift, rays, motion }) {
+  {
+    const B = runReserve(q, k, motion), R0 = runBox(q, k), bw = B.x1 - B.x0, bh = B.y1 - B.y0;
+    if ( !v || bw > v.x1 - v.x0 || bh > v.y1 - v.y0 ) return { dx: 0, dy: 0, k, box: B, room: R0, ok: false };
+    const A = { x0: Math.max(v.x0 - B.x0, -maxShift), x1: Math.min(v.x1 - B.x1, maxShift), y0: Math.max(v.y0 - B.y0, -maxShift), y1: Math.min(v.y1 - B.y1, maxShift) };
+    const clean = (d) => {
+      const b = { x0: B.x0 + d.dx, y0: B.y0 + d.dy, x1: B.x1 + d.dx, y1: B.y1 + d.dy };
+      if ( b.x0 < v.x0 - 1e-6 || b.x1 > v.x1 + 1e-6 || b.y0 < v.y0 - 1e-6 || b.y1 > v.y1 + 1e-6 ) return false;
+      for ( const o of hard ) if ( inter(b, o) > 0 ) return false;
+      let s = 0; for ( const o of S ) s += inter(b, o);
+      return s <= SOFT_OK * area(b) + 1e-6;
+    };
+    let pick = null;
+    if ( A.x0 <= A.x1 && A.y0 <= A.y1 ) {
+      const d0 = { dx: Math.max(A.x0, Math.min(A.x1, 0)), dy: Math.max(A.y0, Math.min(A.y1, 0)) };
+      if ( clean(d0) ) pick = d0;
+      else {
+        const cands = freeRays(forbOf(B, A, hard, S), A, d0, rays).sort((a, b) => Math.hypot(a.dx, a.dy) - Math.hypot(b.dx, b.dy));
+        pick = cands.find(clean) ?? null;
+      }
+    }
+    if ( !pick ) return { dx: 0, dy: 0, k, box: B, room: R0, ok: false };
+    const mv = (b) => ({ x0: b.x0 + pick.dx, y0: b.y0 + pick.dy, x1: b.x1 + pick.dx, y1: b.y1 + pick.dy });
+    return { dx: pick.dx, dy: pick.dy, k, box: mv(B), room: mv(R0), ok: true };
+  }
+}
 /** the most candidate spots a word tries at one size (best first: the nearest clean one is found long before; the cap bounds a crowded view) */
 const MAX_EVALS = 160;
 // (the search's queue: a binary heap on `base`, nearest first)

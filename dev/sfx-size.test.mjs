@@ -187,7 +187,8 @@ group("WIRING", () => {
   ok(/if \( stepFor\(SZ\.groupOfPageWord\(w\)\) === 0 \) continue;/.test(sfx) && /const grp = SZ\.groupOfPageWord\(w, p\.grp\);\n\s*if \( stepFor\(grp\) === 0 \) return;/.test(sfx), "a page word of a group at 0 is not scheduled, nor played if the GM switched it off meanwhile");
   ok(/stepFor\("weather"\) === 0 \) return again\(2000\)/.test(sfx), "weather at 0: the storm is not even read");
   ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;\n\s*sfxBus\.entry = noDestr \? null : onEntry;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx), "destruction at 0: off the display's hooks");
-  ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), stepFor\("fire"\)\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
+  // (MAPRIDE: burnSize takes the step - the fire group's by default; the lower steps for a seat's run layout)
+  ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /function burnSize\(p, live, step = stepFor\("fire"\)\)/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), step\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
   ok(/if \( raw \) return o;\n\s*const step = d\.step\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const md = measureOf\(w\.text, o, d\)/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w, d\);/.test(sfx.slice(sfx.indexOf("function measure"))),
     "the stepped options are what the word plays AND is measured with (placement sees the stepped size)");
   ok(/o\.size = SEAT\.tableScreenSize\(engineSizeFor, L\.sizeModel, \{ \.\.\.o, size: EV\.rankSize\(spec\.rank, SEAT\.REF_VH, spec\.shrink \?\? 1\) \}, plan, step\);/.test(sfx)

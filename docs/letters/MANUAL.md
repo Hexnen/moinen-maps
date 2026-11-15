@@ -266,8 +266,8 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     room share: live, "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it;
     largest-on-any-side puts both under the pin, the GM's at 196 (MAPSFXSEAT2-6); a step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under
     step 2 ("full"); a step-1 word stays under 1 / 1.15 of what a step-2 word gets on this view ("yield": a seat short of room still
-    draws step 1 < step 2); nothing clean at all: the least covered spot at its step's own size, never on a pin ("tight"); a rider (a
-    bomb's fall) keeps the table's way ("ride"); off this view (place, subject and way): not drawn ("off"). The table may put a word
+    draws step 1 < step 2); nothing clean at all: the least covered spot at its step's own size, never on a pin ("tight"); off this
+    view (place, subject and way): not drawn ("off"). The table may put a word
     on another side at another step (the blast's word below the bomb at step 1, above it at steps 2 and 3): the step order is kept by
     these rules, not by the table;
   - *the pin a map word avoids* is the note's whole drawn box (sharedPins + pinBoxes: on The Warehouse 328 x 411 world px for a 0.6
@@ -278,6 +278,26 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     its smallest size skips straight to the least covered spot. A plain blast page (recorded panels, one pin) costs 0.9 / 1.3 / 2.1 ms
     per seat at steps 2 / 3 / 1, as before (0.4 / 1.5 / 2.3); a crowded view (40 tokens over the whole view, 6 pins) 7.7 / 11.1 / 10.8
     ms, once per page (the first rule 0.6 / 1.1 / 1.8 ms, but it covered pins and drew words smaller).
+  - *a rider* (MAPRIDE, `rideLayout`: a bomb's fall, a shock wave, debris, a meteor, a crack running out) is laid out per seat too:
+    before, it kept the table's way as it was ("ride") and live crossed the pin, the macro bar and the main word. Every sample of its
+    way (its box at this seat's size, at the instant it passes there) must stand whole in the view, off pins and tokens (the stretch
+    between samples too), at most 6 % under panels and the words up at that instant. Else the cheapest change: a wave turned out of
+    the blast (22.5 degree steps; a pressure front leaves every way), the way shortened toward the end it is tied to (a fall keeps its
+    end over the impact), the whole way moved the least (exact in move space, at most 8 box heights), then 0.7, 0.4 of its size;
+    nothing clean: not drawn on this seat ("noroom": a supporting word, it must not cover what the table must read). Its way is
+    passed to the engine as the word's `path` (`oo.path.points`).
+  - *a burning fire's run* (MAPRIDE, `burnRoom`): a sustained run is ~7.8 caps tall (its two seats of phrases, one above and one
+    below the source; unconstrained its shed fragments drift ~12 caps up) and it does not compress: a room shorter than the run is
+    overflowed downward. The map gives every run the engine's `room` (`RUN`: 3.6 up, 4.2 down, 3.5 half-width, in caps) and
+    `maxWidth` 5 caps, and keeps clear the block round it (`runReserve`: + 0.1-0.2 cap smooth, + 1.15 across / 0.3 up and down
+    stepped: the boil leaves the room by that much), whole in the view, off pins and tokens and the runs laid out before it, at most
+    6 % under panels and words up; else moved the least; else smaller on this seat (x0.9 steps down to its legibility floor), laid
+    out from the lower steps up so no run is smaller at a higher step; else not lettered on this seat. A seat whose size for a run
+    changes restarts it on the shared clock (`startAt`). Before, the map reserved -3.1 .. +1.1 caps and passed no room: live the run
+    stood on the macro bar and the pin and two fires lettered into each other (`dev/sfx-burn.test.mjs`, `sfx-seat.test.mjs` BURN).
+  - *far thunder after a storm is cleared* (MAPRIDE): the far-flash count is keyed on the storm's previous level too
+    (`EV.farIndex`, window `FAR_WIN` 30 s), and a page whose flash the storm no longer holds when it draws (`flashStill`) is skipped
+    on every seat; before, a seat that saw the clear first lettered a rumble the others did not.
 - **what the first rule got wrong** (MAPSFXSEAT, live 2026-11-15): it scaled the whole page as ONE group about the event to fit a
   closer seat's view (`seatGroup`, k 0.6 GM / 0.4 player), then shrank it five more times by 0.9 off its panels, then stepped a word
   off a pin (`groupNudge`). A seat zoomed closer drew every word weaker (the blast's main word 203 -> 159 GM, 120 -> 111 player), step

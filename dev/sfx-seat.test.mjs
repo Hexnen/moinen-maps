@@ -489,6 +489,53 @@ await group("GROUND", () => {
   ok(SEAT.groundOfPixels(new Uint8ClampedArray(0), 64) === "auto", "nothing read: auto (earth)");
 });
 
+/* ---------------------------------------------------------------- BURN (MAPRIDE) */
+// A burning fire's run on the take's two seats (The Warehouse, their recorded panels and the bomb's pin), steps 1-3: a fire burning by the
+// hotbar, one by the pin, and a second fire 4.5 run sizes above the first (two fires one above the other: SUSTAINGAP-5). Each run's block
+// (sfx-seat runReserve: the room the engine keeps the run to + the margin its ink may leave it by - measured in dev/sfx-burn.test.mjs)
+// stands whole in the view, off the pin, at most SOFT_OK under panels, never on another fire's block. The previous rule (f1d9491
+// burnOffsets: a box -2.5 .. +0.9 em, em = 1.25 x the run's size, cleared of panels and pins, the run left to take its own height) put the
+// run's real block on the hotbar, the pin or the other fire's run.
+await group("BURN", async () => {
+  // (sfx.mjs burnSize: the run's size at the fire group's step - a live fire at level 0.6)
+  const kOf = (step) => SZ.sizeAt(Math.max(4, (SEAT.REF_VH * (0.035 + 0.03 * Math.min(1, 0.6 / 0.9))) / SEAT.refZoom(WG, 0)), step);
+  const mid = (S, sx, sy) => ({ x: CAM.x + (sx - S.W / 2) / S.z, y: CAM.y + (sy - S.H / 2) / S.z });
+  let bad = 0, badPrev = 0, notLettered = 0, cases = 0;
+  const rows = [], sizesRow = [], minsOf = {};
+  for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1]] ) for ( const step of [1, 2, 3] ) for ( const motion of ["smooth", "stepped"] ) {
+    const k = kOf(step), v0 = viewOf(S), m = SEAT.SEAT_EDGE / S.z, v = { x0: v0.x0 + m, y0: v0.y0 + m, x1: v0.x1 - m, y1: v0.y1 - m };
+    const panels = S.ui.map(toScene(S));
+    // (the fires, the same on both seats: by the GM's hotbar, beside the pin, and one above the first)
+    const A0 = mid(REC.gm, 760, 800), k2 = kOf(2), spots = [A0, { x: PIN.x0 - 0.5 * k2, y: PIN.y1 + 0.5 * k2 }, { x: A0.x, y: A0.y - 4.5 * k2 }];
+    // (the previous rule)
+    const em = 1.25 * k, ui = [...panels, PIN], prevBlocks = [];
+    for ( const q of spots ) {
+      const box = { x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, d = C.clearOf(box, ui, v0, Math.max(v0.x1 - v0.x0, v0.y1 - v0.y0) * 0.45);
+      if ( d.dx || d.dy ) ui.push({ x0: box.x0 + d.dx, y0: box.y0 + d.dy, x1: box.x1 + d.dx, y1: box.y1 + d.dy });
+      prevBlocks.push(SEAT.runReserve({ x: q.x + d.dx, y: q.y + d.dy }, k, motion));
+    }
+    // (now)
+    // (as sfx.mjs burnRooms: smaller on this seat where the table's size has no room, down to half of it, never under the legibility floor)
+    const kMin = Math.min(k, SZ.floorPx(S.H, 1, L.sizeModel) / S.z);
+    const r = SEAT.burnRoom(spots, { k, kMin, below: [1, 2, 3].filter((s) => s < step).map(kOf), v, hard: [PIN], soft: panels, motion });
+    const mins = (minsOf[`${sn} ${motion}`] ??= []); mins[step] = r.map((o) => (o.ok ? o.k : 0));
+    sizesRow.push(`${sn} s${step} ${motion}: ${r.map((q) => (q.ok ? Math.round(q.k * S.z) : "-")).join("/")} px (table ${Math.round(k * S.z)})`);
+    const fault = (b, others) => (on2(b, PIN) > 0 ? "pin" : area2(b) - on2(b, v) > 1 ? "off" : panels.reduce((s, o) => s + on2(b, o), 0) > SEAT.SOFT_OK * area2(b) + 1 ? "panel" : others.some((o) => on2(b, o) > 1) ? "fire" : "");
+    prevBlocks.forEach((b, i) => { const f = fault(b, prevBlocks.filter((_, j) => j !== i)); if ( f ) { badPrev++; if ( rows.length < 40 ) rows.push(`prev ${sn} s${step} ${motion} fire${i} ${f}`); } });
+    r.forEach((q, i) => { cases++; if ( !q.ok ) { notLettered++; rows.push(`noroom ${sn} s${step} ${motion} fire${i} k ${k.toFixed(0)} block ${Math.round(q.box.x1 - q.box.x0)}x${Math.round(q.box.y1 - q.box.y0)} view ${Math.round(v.x1 - v.x0)}x${Math.round(v.y1 - v.y0)}`); return; }
+      const f = fault(q.box, r.filter((o, j) => j !== i && o.ok).map((o) => o.box)); if ( f ) { bad++; rows.push(`NOW ${sn} s${step} ${motion} fire${i} ${f}`); }
+      if ( !(q.room.x0 >= q.box.x0 - 1e-6 && q.room.x1 <= q.box.x1 + 1e-6 && q.room.y0 >= q.box.y0 - 1e-6 && q.room.y1 <= q.box.y1 + 1e-6) ) { bad++; rows.push(`room ${sn} s${step} fire${i} not inside its block`); } });
+  }
+  if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n") + "\nrun sizes on screen: " + sizesRow.join("; "));
+  ok(badPrev > 0, `the previous rule: a fire's run on the pin, a panel, off the view or on another fire's run in ${badPrev} fire x seat x step cases (${rows.filter((q) => q.startsWith("prev")).slice(0, 4).join("; ")})`);
+  ok(bad === 0, `now: every run's block whole in view, off the pin, at most an edge under panels, never on another fire's (${bad} faults; ${rows.filter((q) => q.startsWith("NOW") || q.startsWith("room")).slice(0, 3).join("; ")})`);
+  ok(notLettered === 0, `the take's fires are lettered on both seats at every step (${cases - notLettered} of ${cases}; ${rows.filter((q) => q.startsWith("noroom")).join("; ")})`);
+  const order = Object.entries(minsOf).filter(([, m]) => m[1].some((_, i) => !(m[1][i] <= m[2][i] + 1e-9 && m[2][i] <= m[3][i] + 1e-9)));
+  ok(!order.length, `a higher step never letters a crowded seat's run smaller (${order.map(([s, m]) => s + " " + m.slice(1).map((x) => x.map(Math.round).join("/")).join(" ")).join("; ")})`);
+  const sig4 = () => JSON.stringify(SEAT.burnRoom([{ x: 2400, y: 4300 }, { x: 2400, y: 4100 }], { k: 60, v: viewOf(REC.p1), hard: [PIN], soft: REC.p1.ui.map(toScene(REC.p1)) }));
+  ok(sig4() === sig4(), "a seat lays its runs out the same twice");
+});
+
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900; canvas.stage.scale.x = 1;
 if ( failed.length ) { console.error(failed.join("\n")); console.error(`sfx-seat: ${failed.length} group(s) failed, ${n} checks passed`); process.exit(1); }
 console.log(`sfx-seat: ${n} checks passed`);
