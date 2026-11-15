@@ -231,24 +231,16 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const small = it.small > 0 ? Math.min(it.small, min) : min;
     for ( let c = min * 0.95; c > small * 1.0001; c *= 0.95 ) sizes.push(c);
     if ( small < min - 1e-9 ) sizes.push(small);
-    if ( sizes.every((c) => c > fitCap) ) { sizes = [fitCap]; rules.push("fit"); } else sizes = sizes.filter((c) => c <= fitCap + 1e-9);
-    // (a word that rides keeps its table way: only its size is this seat's)
-    // (its way is the table's, held inside THIS view where that way stays off the words already laid out and the pins: the table kept it
-    // inside the reference view, which a seat zoomed closer does not show whole - live, the blast's wave word rode half off the GM's
-    // screen; held inside the view it rode over the main word there, so then the table's way stands. `ride`: the rectangle its anchor
-    // keeps to, sfx-page rideInView's margins at this seat's size)
-    if ( it.ride ) {
-      const f = sizes[0] / u, bw = (it.w?.bw > 0 ? it.w.bw : B.x1 - B.x0) * f, bh = (it.w?.bh > 0 ? it.w.bh : B.y1 - B.y0) * f;
-      const mx = Math.min(bw * 0.55, vw * 0.45), my = Math.min(bh * 0.75, vh * 0.45);
-      const r = { x0: v.x0 + mx, y0: v.y0 + my, x1: v.x1 - mx, y1: v.y1 - my };
-      const kp = (q) => ({ x: r.x1 > r.x0 ? clamp(q.x, r.x0, r.x1) : (r.x0 + r.x1) / 2, y: r.y1 > r.y0 ? clamp(q.y, r.y0, r.y1) : (r.y0 + r.y1) / 2 });
-      const way = (it.path ?? []).map(kp), moved = (it.path ?? []).some((q, i) => Math.abs(q.x - way[i].x) + Math.abs(q.y - way[i].y) > 1);
-      const hw2 = bw * 0.4, hh2 = bh * 0.4, blocks = [...pins, ...tokens, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)];
-      const meets = way.some((q) => blocks.some((o) => inter({ x0: q.x - hw2, y0: q.y - hh2, x1: q.x + hw2, y1: q.y + hh2 }, o) > 0));
-      const keep = moved && !meets;
-      out.set(it.key, { cap: sizes[0], k: f, f, px: p.x, py: p.y, dx: 0, dy: 0, box: at(f), rules: [...rules, "ride"], rule: "ride", clean: true, ...(keep ? { ride: r } : {}) });
+    // (a word that rides: MAPRIDE rideLayout - before, it kept the table's way, which the table holds inside the REFERENCE view: a seat
+    // zoomed closer showed the blast's wave word half off its screen and the bomb's falling word under its panel; held inside the view by
+    // a clamp, the wave then rode over the main word)
+    if ( it.ride && (it.path?.length ?? 0) > 1 ) {
+      const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels, placed, meet });
+      out.set(it.key, { ...r.out, px: p.x, py: p.y });
+      for ( const s of r.samples ) placed.push(s);
       continue;
     }
+    if ( sizes.every((c) => c > fitCap) ) { sizes = [fitCap]; rules.push("fit"); } else sizes = sizes.filter((c) => c <= fitCap + 1e-9);
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
     const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
@@ -400,6 +392,169 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     placed.push({ box: inkOf(pick.q), life: it.life ?? null });
   }
   return out;
+}
+/**
+ * MAPRIDE: how THIS seat draws a word that RIDES a way (a bomb's fall, a shock wave, a meteor, a crack running out, a car), pure. The
+ * table gives its way (`it.path`: scene px, ms from its start) inside the REFERENCE view; this seat keeps it where it is clean here - every
+ * sample of the way (its box at this seat's size, at the instant the word passes there): whole inside this seat's view `v` (less the
+ * edge), its ink off the pins and tokens (`hard`), at most SOFT_OK of its ink under this seat's `panels` and the words `placed` before it
+ * that are up at that instant. Else the least change that makes it clean, in this order of cost: a shock wave turned out of the blast (a
+ * pressure front leaves every way; the table's own way first, then the nearest turns), the way shortened toward the end it is tied to (a
+ * fall keeps its end over the impact, a wave or a crack its start at the blast), the whole way moved the least (the nearest free move of
+ * RIDE_RAYS directions, found exactly in move space; a pin or token is kept off the stretch between samples too); then the next smaller
+ * of this seat's `sizes`. Nothing clean at any size: not drawn on this seat ("noroom": a word that rides is a supporting
+ * word; on a pin, a token or the main word it would cover what the table must read - question MAPRIDE-1).
+ * it: { path, w: { bw, bh } (its box at the table cap u), ink [kx, ky], life [t0, t1], stop (shared ms it leaves, optional), anchor
+ *       ("start" | "end"), turn (may turn round its start) }
+ * -> { out: { cap, k, f, dx: 0, dy: 0, box (the way's whole box), way ([{x, y, ms}]: the way this seat draws), rules, rule, clean }, samples
+ *    ([{ box (ink), life }]: what the words laid out after it keep off) }
+ */
+export const RIDE_S = [1, 0.85, 0.7, 0.55, 0.4];
+export const RIDE_TURN = 22.5;
+/** the directions a rider's way may move in to stand clean (the nearest free move along each) */
+export const RIDE_RAYS = 24;
+export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [], meet = () => true }) {
+  const P = it.path, t0 = it.life?.[0] ?? 0, tEnd = Number.isFinite(it.stop) ? it.stop : it.life?.[1] ?? t0 + (P.at(-1).ms ?? 0) + 600;
+  const bw0 = it.w?.bw > 0 ? it.w.bw : u * 4, bh0 = it.w?.bh > 0 ? it.w.bh : u * 1.6;
+  const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
+  const A = it.anchor === "end" ? P.at(-1) : P[0];
+  const vw = v.x1 - v.x0, vh = v.y1 - v.y0;
+  // (the instants it is sampled at: its way's points and nine between, each a box; the last one held until it leaves)
+  const fr = []; for ( let i = 0; i <= 10; i++ ) fr.push(i / 10);
+  const total = Math.max(1, P.at(-1).ms - P[0].ms);
+  const pointAt = (f) => {
+    const ms = P[0].ms + total * f;
+    let i = 1; while ( i < P.length - 1 && P[i].ms < ms ) i++;
+    const a = P[i - 1], b = P[i], g = b.ms > a.ms ? clamp((ms - a.ms) / (b.ms - a.ms), 0, 1) : 1;
+    return { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g, ms };
+  };
+  const base = fr.map(pointAt);
+  const nearOf = (o) => o.x1 > v.x0 && o.x0 < v.x1 && o.y1 > v.y0 && o.y0 < v.y1;
+  const panG = grid(panels.filter(nearOf), v), hardG = grid(hard.filter(nearOf), v);
+  // (the words up with it, by the instant: a sample meets only those whose life holds it)
+  const lifeAt = (i) => [t0 + base[i].ms - P[0].ms - 80, i === base.length - 1 ? tEnd : t0 + base[i + 1].ms - P[0].ms + 80];
+  const upAt = base.map((_, i) => placed.filter((q) => meet(q.life, lifeAt(i))).map((q) => q.box));
+  // (the changes of its way, cheapest first: the table's own way; a small shortening; a turn (a shock wave only); then a move)
+  const pairs = [];
+  const turns = it.turn ? [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8] : [0];
+  for ( const ti of turns ) for ( const s of RIDE_S ) pairs.push({ ti, s, cost: Math.abs(ti) * 1 + (1 - s) * 6 });
+  pairs.sort((a, b) => a.cost - b.cost);
+  const into = (lo, hi, a0, z) => (hi - lo > z - a0 ? (a0 + z) / 2 - (lo + hi) / 2 : lo < a0 ? a0 - lo : hi > z ? z - hi : 0);
+  // (one change of its way at one size: its samples, and what each meets)
+  const evalWay = (pts, bw, bh) => {
+    let hardHit = 0, off = 0, worst = 0;
+    const met = [];
+    for ( let i = 0; i < pts.length; i++ ) {
+      const q = pts[i], b = { x0: q.x - bw / 2, y0: q.y - bh / 2, x1: q.x + bw / 2, y1: q.y + bh / 2 };
+      const k = { x0: q.x - (bw * kx) / 2, y0: q.y - (bh * ky) / 2, x1: q.x + (bw * kx) / 2, y1: q.y + (bh * ky) / 2 }, ia = area(k);
+      off += area(b) - inter(b, v);
+      let h1 = 0, s1 = 0;
+      const mi = [];
+      // (a pin or token is kept off the whole stretch to the next sample too: the word moves straight between them, its ink sweeps their box)
+      const n2 = pts[i + 1], kk = n2 ? { x0: Math.min(k.x0, n2.x - (bw * kx) / 2), y0: Math.min(k.y0, n2.y - (bh * ky) / 2), x1: Math.max(k.x1, n2.x + (bw * kx) / 2), y1: Math.max(k.y1, n2.y + (bh * ky) / 2) } : k;
+      for ( const o of hardG.near(kk) ) { const a2 = inter(kk, o); if ( a2 > 0 ) { h1 += a2; mi.push(o); } }
+      const ms = [];
+      for ( const o of panG.near(k) ) { const a2 = inter(k, o); if ( a2 > 0 ) { s1 += a2; ms.push(o); } }
+      for ( const o of upAt[i] ) { const a2 = inter(k, o); if ( a2 > 0 ) { s1 += a2; ms.push(o); } }
+      hardHit += h1; worst = Math.max(worst, s1 / Math.max(1, ia));
+      if ( h1 > 0 ) met.push([k, mi]);
+      if ( s1 > SOFT_OK * ia ) met.push([k, ms]);
+    }
+    return { clean: off <= 1e-6 && hardHit <= 1e-6 && worst <= SOFT_OK + 1e-9, worst, met, off };
+  };
+  // (the least move of one change that makes it clean, found exactly in the space of moves: every sample's ink against every obstacle
+  // forbids one rectangle of moves (a panel / an earlier word less the edge it may take); the view allows one; the nearest free move along
+  // RIDE_RAYS directions is swept past the forbidden rectangles in one pass each, then checked as drawn - no blind trial and error)
+  const tryPair = (cap, c, limit) => {
+    const f = cap / u, bw = bw0 * f, bh = bh0 * f, a = (c.ti * RIDE_TURN * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+    if ( bw > vw || bh > vh ) return null;
+    const pts0 = base.map((q) => { const dx = (q.x - A.x) * c.s, dy = (q.y - A.y) * c.s; return { x: A.x + dx * ca - dy * sa, y: A.y + dx * sa + dy * ca, ms: q.ms }; });
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for ( const q of pts0 ) { x0 = Math.min(x0, q.x - bw / 2); y0 = Math.min(y0, q.y - bh / 2); x1 = Math.max(x1, q.x + bw / 2); y1 = Math.max(y1, q.y + bh / 2); }
+    const D = { x0: v.x0 - x0, x1: v.x1 - x1, y0: v.y0 - y0, y1: v.y1 - y1 };     // (the moves the view allows)
+    if ( D.x0 > D.x1 + 1e-6 || D.y0 > D.y1 + 1e-6 ) return null;
+    const costOf = (d) => { const m = Math.hypot(d.dx, d.dy); return c.cost + (m / Math.max(1, bh)) * 1.5 + (m > 1 ? 2 : 0); };
+    if ( costOf({ dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }) >= limit ) return null;
+    const hx = (bw * kx) / 2, hy = (bh * ky) / 2, ex = SOFT_OK * 0.8 * 2 * hx, ey = SOFT_OK * 0.8 * 2 * hy;
+    const forb = [];
+    const add = (q, o, e, n2 = q) => { const r = { x0: o.x0 + e[0] - (Math.max(q.x, n2.x) + hx), x1: o.x1 - e[0] - (Math.min(q.x, n2.x) - hx), y0: o.y0 + e[1] - (Math.max(q.y, n2.y) + hy), y1: o.y1 - e[1] - (Math.min(q.y, n2.y) - hy) };
+      if ( r.x1 > r.x0 && r.y1 > r.y0 && r.x1 > D.x0 && r.x0 < D.x1 && r.y1 > D.y0 && r.y0 < D.y1 ) forb.push(r); };
+    const reach = { x0: v.x0 - bw, y0: v.y0 - bh, x1: v.x1 + bw, y1: v.y1 + bh };
+    const H = hard.filter(nearOf), S = panels.filter(nearOf);
+    for ( let i = 0; i < pts0.length; i++ ) {
+      const q = pts0[i];
+      for ( const o of H ) add(q, o, [0, 0], pts0[i + 1] ?? q);
+      for ( const o of S ) add(q, o, [ex, ey]);
+      for ( const o of upAt[i] ) if ( o.x1 > reach.x0 && o.x0 < reach.x1 && o.y1 > reach.y0 && o.y0 < reach.y1 ) add(q, o, [ex, ey]);
+    }
+    const cands = [{ dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }];
+    for ( let r = 0; r < RIDE_RAYS; r++ ) {
+      const an = (2 * Math.PI * r) / RIDE_RAYS, ux = Math.cos(an), uy = Math.sin(an);
+      // (the ray inside the allowed moves: [t0, t1])
+      let t0 = 0, t1 = Infinity;
+      for ( const [lo, hi, w] of [[D.x0, D.x1, ux], [D.y0, D.y1, uy]] ) {
+        if ( Math.abs(w) < 1e-9 ) { if ( lo > 1e-6 || hi < -1e-6 ) { t0 = Infinity; } continue; }
+        const ta = lo / w, tb = hi / w; t0 = Math.max(t0, Math.min(ta, tb)); t1 = Math.min(t1, Math.max(ta, tb));
+      }
+      if ( !(t0 <= t1) ) continue;
+      const iv = [];
+      for ( const o of forb ) {
+        let a0 = -Infinity, a1 = Infinity;
+        for ( const [lo, hi, w] of [[o.x0, o.x1, ux], [o.y0, o.y1, uy]] ) {
+          if ( Math.abs(w) < 1e-9 ) { if ( lo >= 0 || hi <= 0 ) { a0 = Infinity; } continue; }
+          const ta = lo / w, tb = hi / w; a0 = Math.max(a0, Math.min(ta, tb)); a1 = Math.min(a1, Math.max(ta, tb));
+        }
+        if ( a0 < a1 && a1 > t0 ) iv.push([a0, a1]);
+      }
+      iv.sort((p, q) => p[0] - q[0]);
+      let t = t0;
+      for ( const [a0, a1] of iv ) { if ( a0 >= t ) break; if ( a1 > t ) t = a1 + 0.5; }
+      if ( t <= t1 ) cands.push({ dx: ux * t, dy: uy * t });
+    }
+    const list = cands.map((d) => ({ d, cost: costOf(d) })).filter((q) => q.cost < limit).sort((p, q) => p.cost - q.cost);
+    for ( const { d, cost } of list ) {
+      const pts = pts0.map((q) => ({ ...q, x: q.x + d.dx, y: q.y + d.dy })), r = evalWay(pts, bw, bh);
+      if ( r.clean ) return { pts, d, cost, worst: r.worst, bw, bh, f, c };
+    }
+    return null;
+  };
+  let best = null;
+  const cap0 = sizes[0];
+  const at = (cap) => {
+    let win = null;
+    for ( const c of pairs ) { if ( win && c.cost >= win.cost ) break; const r = tryPair(cap, c, win?.cost ?? Infinity); if ( r && (!win || r.cost < win.cost) ) win = r; }
+    return win ? { ...win, cap } : null;
+  };
+  // (its sizes from the largest: none clean at the smallest - none at any, asked once; else by a stride of three, then the larger ones
+  // between the first hit and the miss before it)
+  const last = sizes.length - 1, low = at(sizes[last]);
+  if ( low ) {
+    let hit = last;
+    for ( let j = 0; j < last; j += 3 ) { const r = at(sizes[j]); if ( r ) { best = r; hit = j; break; } }
+    if ( !best ) { best = low; hit = last; for ( let j = Math.max(0, last - 2); j < last; j++ ) { const r = at(sizes[j]); if ( r ) { best = r; break; } } }
+    else for ( let j = Math.max(0, hit - 2); j < hit; j++ ) { const r = at(sizes[j]); if ( r ) { best = r; break; } }
+  }
+  const rules = ["ride"];
+  if ( !best ) {
+    const f0 = cap0 / u, xs = base.map((q) => q.x), ys = base.map((q) => q.y);
+    const box = { x0: Math.min(...xs) - (bw0 * f0) / 2, y0: Math.min(...ys) - (bh0 * f0) / 2, x1: Math.max(...xs) + (bw0 * f0) / 2, y1: Math.max(...ys) + (bh0 * f0) / 2 };
+    const out = { cap: cap0, k: f0, f: f0, dx: 0, dy: 0, box, way: null, rules: ["ride", "noroom"], rule: "noroom", clean: false };
+    return { out, samples: [] };
+  }
+  if ( Math.abs(best.cap - cap0) > 1e-9 ) rules.push("size");
+  if ( best.c.ti ) rules.push("turn");
+  if ( best.c.s < 1 ) rules.push("short");
+  if ( Math.hypot(best.d.dx, best.d.dy) > 1e-6 ) rules.push("shift");
+  if ( best.worst > 1e-6 ) rules.push("edge");
+  // (the way as the engine rides it: its own points, carried by the same turn, shortening and shift)
+  const T = (q) => { const a = (best.c.ti * RIDE_TURN * Math.PI) / 180, dx = (q.x - A.x) * best.c.s, dy = (q.y - A.y) * best.c.s;
+    return { x: A.x + dx * Math.cos(a) - dy * Math.sin(a), y: A.y + dx * Math.sin(a) + dy * Math.cos(a) }; };
+  const sh = { dx: best.pts[0].x - T(base[0]).x, dy: best.pts[0].y - T(base[0]).y };
+  const way = P.map((q) => { const t = T(q); return { x: t.x + sh.dx, y: t.y + sh.dy, ms: q.ms }; });
+  let bx = null;
+  for ( const q of best.pts ) { const b = { x0: q.x - best.bw / 2, y0: q.y - best.bh / 2, x1: q.x + best.bw / 2, y1: q.y + best.bh / 2 }; bx = bx ? { x0: Math.min(bx.x0, b.x0), y0: Math.min(bx.y0, b.y0), x1: Math.max(bx.x1, b.x1), y1: Math.max(bx.y1, b.y1) } : b; }
+  const samples = best.pts.map((q, i) => ({ box: { x0: q.x - (best.bw * kx) / 2, y0: q.y - (best.bh * ky) / 2, x1: q.x + (best.bw * kx) / 2, y1: q.y + (best.bh * ky) / 2 }, life: lifeAt(i) }));
+  return { out: { cap: best.cap, k: best.f, f: best.f, dx: 0, dy: 0, box: bx, way, rules, rule: rules.at(-1), clean: best.worst <= 1e-6, ok: true }, samples };
 }
 /** the share of a word's ink a seat lets lie under its own panels / the words up with it (its edge) before it moves farther or is made
     smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size

@@ -86,7 +86,7 @@ const ploughs = new Set();     // stroke id|start of the ploughs lettered here
 let soon = [];                  // boxes of words placed, not started yet ({ box, until })
 let stormTimer = 0;
 const flashSeen = new Set();
-let farCount = { key: "", k: 0, n: 0, list: new Map() };
+let farCount = { key: "", list: new Map() };
 // MAPSFXSEAT: the table picture (sfx-seat.mjs): the words every seat holds, planned from shared data; and this seat's own log of every
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
 const ledger = SEAT.makeLedger();
@@ -362,22 +362,36 @@ function pollStorm() {
     const w = EV.flashWord(ev, place, view(), canvas.scene?.id ?? "");
     if ( !w ) continue;
     const r = G * 0.5;
-    storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }], null, "weather");
+    const p = storyPage(`flash|${id}`, ev.t, [{ ...w, key: w.role, ...(w.screen ? {} : { box: { x0: w.x - r, y0: w.y - r * 0.4, x1: w.x + r, y1: w.y + r * 0.4 }, side: C.h01(`${w.seed}|s`) < 0.5 ? -1 : 1 }) }], null, "weather");
+    // (MAPRIDE: when its word is due, the flash is asked again with the storm as it stands THEN - the GM's change reaches his own seat at
+    // once and a player's a moment later, so a seat that polled before the change and one that polled after decided differently)
+    if ( !ev.preview ) p.still = () => flashStill(ev);
     stats.flashes = (stats.flashes ?? 0) + 1;
   }
   again(700);
 }
-/** How many far flashes the storm made before slot `k` since it was switched on (counted once, then kept up: the same on every client). */
+/** MAPRIDE: is a lightning flash still one this storm makes and letters, read with the storm's settings as they stand now on this seat (a
+    switch-off that reached this seat after its poll: the flash is gone, on every seat alike)? No storm shown here: as polled. */
+function flashStill(ev) {
+  try {
+    const storm = moduleApi.weather?.stormDisplay?.(), SM = moduleApi.weather?.stormModel;
+    if ( !storm?.S || !SM?.flashOf ) return true;
+    const now = SM.flashOf(storm.S, storm.seed, ev.k, storm.rainP);
+    if ( !now || now.kind !== ev.kind || now.t !== ev.t ) return false;
+    return ev.kind !== "far" || EV.farLettered(now, (k) => farBefore(storm, k));
+  } catch { return true; }
+}
+/** How many far flashes the storm made in slot `k`'s window before it (sfx-events farIndex: the same on every seat; MAPRIDE - before, a
+    count since the switch-on that restarted when a change reached this seat, so seats numbered one flash differently). */
 function farBefore(storm, k) {
   const S = storm.S, SM = moduleApi.weather?.stormModel; if ( !S || !SM?.flashOf ) return 1;
-  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}`;
-  if ( farCount.key !== key ) farCount = { key, k: Math.max(Math.floor(S.t / SM.SLOT), k - EV.FAR_SCAN), n: 0, list: new Map() };
+  const key = `${S.t}|${storm.seed}|${S.rate}|${S.near}|${S.on}|${S.prev?.on}`;
+  if ( farCount.key !== key ) farCount = { key, list: new Map() };
   if ( farCount.list.has(k) ) return farCount.list.get(k);
-  if ( k < farCount.k ) return C.hashStr(String(k)) & 1;
-  for ( ; farCount.k < k; farCount.k++ ) { const ev = SM.flashOf(S, storm.seed, farCount.k, storm.rainP); if ( ev?.kind === "far" ) { farCount.list.set(farCount.k, farCount.n); farCount.n++; } }
-  farCount.list.set(k, farCount.n);
+  const n = EV.farIndex(k, (j) => SM.flashOf(S, storm.seed, j, storm.rainP)?.kind === "far");
+  farCount.list.set(k, n);
   if ( farCount.list.size > 2000 ) farCount.list.delete(farCount.list.keys().next().value);
-  return farCount.n;
+  return n;
 }
 
 /* ---------------------------------------------------------------- preset firings as pages (EFFECTS1) */
@@ -464,6 +478,7 @@ function pageWord(p, w) {
   if ( stepFor(grp) === 0 ) return;
   const q = tb?.get(w.key);
   if ( !q ) return;
+  if ( p.still && !p.still() ) { seatSkip(q, "gone"); return; }
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
   // (this seat's own need: its performance mode keeps fewer words up - never the main word)
   const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
@@ -851,17 +866,15 @@ function seatCall(w) {
   w.group ??= { words: [w] };
   const lay = groupLayout(w.group, vw, zoom, sc), f = lay?.get(w.key ?? `${w.seed}|${w.role}`);
   if ( !f ) return { o: { ...o, startAt: w.t, reduced: reducedMotion() }, fit: { rule: "ok", rules: [], k: 1 }, box: w.box, table: { size: o.size, at } };
-  if ( f.rule === "off" ) return { o: null, fit: f, box: f.box };
+  if ( f.rule === "off" || f.rule === "noroom" ) return { o: null, fit: f, box: f.box };
   const sh = (q) => SEAT.layoutAt(q, f);
   const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
   // (the size this seat draws: its cap over the table's, this seat's own size setting counted once - the engine applies it itself)
   if ( Number.isFinite(o.size) && w.size > 0 ) oo.size = (o.size * f.cap) / (w.size * sc);
-  if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
-  else if ( o.path?.points && f.ride ) {
-    // (a rider keeps the table's way, held inside this seat's view - sfx-seat seatLayout `ride`)
-    const r = f.ride, kp = (q) => ({ ...q, x: r.x1 > r.x0 ? Math.min(Math.max(q.x, r.x0), r.x1) : (r.x0 + r.x1) / 2, y: r.y1 > r.y0 ? Math.min(Math.max(q.y, r.y0), r.y1) : (r.y0 + r.y1) / 2 });
-    oo.path = { ...o.path, points: o.path.points.map(kp) }; oo.at = kp(at);
-  }
+  if ( o.path?.points && f.way ) {
+    // (MAPRIDE: a rider rides the way THIS seat laid out - sfx-seat rideLayout: the table's, or turned / shortened / moved to stand clean)
+    oo.path = { ...o.path, points: f.way.map((q) => ({ x: q.x, y: q.y })) }; oo.at = { x: f.way[0].x, y: f.way[0].y };
+  } else if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;

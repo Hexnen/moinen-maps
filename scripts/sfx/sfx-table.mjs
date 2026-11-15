@@ -158,7 +158,10 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH };
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
+      // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
+      ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
   });
 }
 /** MAPSFXSEAT2: the share of a word's box (FIT.wordBox: its hold box with room for its entrance and outline) its INK covers - the hold
