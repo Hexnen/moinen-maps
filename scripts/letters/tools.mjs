@@ -14,7 +14,7 @@
    - keybinding "Letter this now" (GM, Shift+L, editable) and the designer button in the token controls: under the host module.
    Engine API added here (README "Tools"): L.prefs, L.settings(), L.registerMood/Palette/Font/Style, L.styles, L.saveStyle,
    L.deleteStyle, L.net.{play,burst,stream,stop,sharedNow,local}, L.letterNow, L.designer(), L.openSettings(), L.planFor. */
-import { SETTINGS, TABLE_OBJECT, TABLE_DEFAULTS, cleanTable, seatPrefs, resolveOpts, filterPlan } from "./prefs.mjs";
+import { TABLE, TABLE_OBJECT, TABLE_DEFAULTS, cleanTable, seatPrefs, resolveOpts, filterPlan } from "./prefs.mjs";
 import { STRINGS } from "./strings.mjs";
 import * as A from "./author.mjs";
 import * as N from "./net.mjs";
@@ -122,10 +122,10 @@ export function planFor(L, text, opts = {}) {
    (prefs.seatPrefs: its system's reduced motion, Foundry's photosensitive mode); the photosensitivity guard is always on. */
 const TABLE_KEY = "table", MIGRATED_KEY = "tableMigrated", MIGRATION = 1;
 const NOTICE_LS = `${NS}.tableNotice`;   // localStorage: a player was told once that the GM now chooses (players cannot write the world)
-/* invincible-plus-ultra's outside mirror (GMALL, its scripts/table/): its world setting with the table's lettering values. While it is
-   registered the engine keeps the two equal from the GM's seat, so plus-ultra's own window keeps working until plus-ultra drops the
-   mirror (README "Settings"). Delete PU_KEY, bridgeIn and bridgeOut then. */
-const PU_MOD = "invincible-plus-ultra", PU_KEY = `${PU_MOD}.lettersTable`;
+/* ENGDROP (1.9.19): invincible-plus-ultra's old world copy of the lettering values (GMALL, plus-ultra 132-135). plus-ultra keeps no copy
+   since UNMIRROR (it reads L.table, writes L.setTable); the engine reads the old copy's DOCUMENT only as a migration source (no
+   registration needed) and, on a GM's seat that still runs an older plus-ultra, takes what that older window writes (adoptOld). */
+const PU_KEY = "invincible-plus-ultra.lettersTable";
 const has = (id) => { try { return !!globalThis.game?.settings?.settings?.has?.(id); } catch { return false; } };
 const getS = (k, d) => { try { return game.settings.get(NS, k); } catch { return d; } };
 const photosensitive = () => { try { return has("core.photosensitiveMode") && !!game.settings.get("core", "photosensitiveMode"); } catch { return false; } };
@@ -144,7 +144,6 @@ export function readPrefs() {
   state.seat = seatNow();
   state.prefs = seatPrefs(state.table, state.seat);
   applyLimits();
-  bridgeOut();
   try { globalThis.Hooks?.callAll?.("moinenLettersTable", { ...state.table }, { ...state.seat }); } catch {}
   refreshWindow();
 }
@@ -175,14 +174,17 @@ function guardWrite(doc) {
 }
 
 /* MIGRATION (once per world, by the first GM seat after the update): the GM's own earlier choices become the table's, unless the
-   world already holds a table. Source, in order: invincible-plus-ultra's table (`lettersTable`: the GM's choices for the table made in
-   its window, itself migrated from his old values), else the GM's own old client values (localStorage "moinen-letters.<key>"). An old
+   world already holds a table. Source, in order: invincible-plus-ultra's old copy (`lettersTable`, GMALL: the GM's choices for the table
+   made in its window), read from its world DOCUMENT (whether or not any plus-ultra registers it: a world never opened since that copy
+   keeps it, with or without plus-ultra active), else the GM's own old client values (localStorage "moinen-letters.<key>"). An old
    "full" motion becomes "auto" (full unless a seat asks for less); the old photosensitivity switch is dropped (the guard is always
    on). Players' old values are not taken: they stay in their browsers, unused; a player whose old values differed is told once. */
 function rawLocal(id) {
   try { const raw = globalThis.localStorage?.getItem(id); if ( raw == null ) return undefined; try { return JSON.parse(raw); } catch { return raw; } } catch { return undefined; }
 }
 const worldDoc = (id) => { try { return game.settings.storage?.get("world")?.getSetting?.(id, null) ?? null; } catch { return null; } };
+/* a Setting document's value as an object (v14 holds it parsed; an older store or a hand-made one may hold the JSON text) */
+const docObject = (doc) => { let v = doc?.value; if ( typeof v === "string" ) { try { v = JSON.parse(v); } catch { return null; } } return v && typeof v === "object" ? v : null; };
 /* this browser's old per-seat values (1.9.14 and before), as stored */
 export function legacyValues() {
   const o = {};
@@ -196,7 +198,7 @@ export async function migrate() {
   if ( done >= MIGRATION ) return out;
   if ( !worldDoc(`${NS}.${TABLE_KEY}`) ) {
     let src = null, from = null;
-    const pu = has(PU_KEY) && worldDoc(PU_KEY) ? puTable() : null;
+    const pu = docObject(worldDoc(PU_KEY));
     if ( pu ) { src = pick(pu, TABLE_OBJECT); from = "plus-ultra"; }
     else { src = legacyValues(); from = "gm"; }
     const next = cleanTable({ ...TABLE_DEFAULTS, ...src });
@@ -211,10 +213,10 @@ export async function migrate() {
   readPrefs();
   return out;
 }
-/* a player's seat: told once (per browser) when his own old values differ from the table (plus-ultra's mirror tells him itself) */
+/* a player's seat: told once (per browser) when his own old values differ from the table */
 export function noticeOnce() {
   try {
-    if ( isGM() || has(PU_KEY) ) return false;
+    if ( isGM() ) return false;
     const ls = globalThis.localStorage; if ( !ls || ls.getItem(NOTICE_LS) !== null ) return false;
     const mine = legacyValues();
     const differ = Object.keys(mine).some((k) => !sameV(cleanTable({ ...state.table, [k]: mine[k] })[k], state.table[k]));
@@ -224,22 +226,33 @@ export function noticeOnce() {
   } catch { return false; }
 }
 
-/* BRIDGE to invincible-plus-ultra's mirror (GM's seat only; both are world settings): plus-ultra's window writes `lettersTable` -> the
-   table follows; the table changes (this window, L.setTable, another GM) -> `lettersTable` follows, so plus-ultra's window shows it.
-   Each side writes only what differs, so the two meet in one round. Off until the GM's ready (after the migration). */
+/* AN OLDER invincible-plus-ultra next to this engine (ENGDROP-1: plus-ultra 132-135, before UNMIRROR, still runs its GMALL mirror).
+   Its mirror writes the engine's old CLIENT settings, none of which is registered since 1.9.16: inert on every seat, so every seat
+   applies the engine's table and no seat is left on other values. Its own window still writes its old copy `lettersTable`; on the GM's
+   seat that wrote it, the keys that write CHANGED become the table's (setTable), so a choice made there is not lost. Nothing is written
+   back into that copy (the engine keeps no mirror), so that older window can show older values: the GM is told once per session to
+   update plus-ultra. plus-ultra 136+ never writes the copy and registers it only while the engine has not migrated (its own carry). */
 const isReady = () => !!globalThis.game?.ready;
-function puTable() { try { const v = game.settings.get(PU_MOD, "lettersTable"); return v && typeof v === "object" ? v : null; } catch { return null; } }
-function bridgeOut() {
-  if ( !state.bridged || !isReady() || !isGM() || !has(PU_KEY) ) return;
-  const pu = puTable() ?? {};
-  if ( sameT(cleanTable({ ...state.table, ...pick(pu, TABLE_OBJECT) }), state.table) ) return;
-  game.settings.set(PU_MOD, "lettersTable", { ...pu, ...pick(state.table, TABLE_OBJECT) }).catch((e) => console.warn(`${LOG} bridge`, e));
+const old = { last: null, said: false, seen: false };
+function oldPlusUltraAtSetup() {
+  /* registered by a plus-ultra while the engine had migrated already (or with no copy in the world): a plus-ultra before 136 */
+  try { let m = worldDoc(`${NS}.${MIGRATED_KEY}`)?.value; if ( typeof m === "string" ) m = Number(m);
+    old.seen = has(PU_KEY) && (Number(m) >= 1 || !worldDoc(PU_KEY)); } catch { old.seen = false; }
+  old.last = docObject(worldDoc(PU_KEY));
 }
-function bridgeIn(doc) {
-  if ( (doc?.key ?? doc?._source?.key) !== PU_KEY || !state.bridged || !isReady() || !isGM() ) return;
-  const pu = puTable(); if ( !pu ) return;
-  const next = cleanTable({ ...state.table, ...pick(pu, TABLE_OBJECT) });
-  if ( !sameT(next, state.table) ) setTable(pick(next, TABLE_OBJECT)).catch((e) => console.warn(`${LOG} bridge`, e));
+function sayOld() {
+  if ( old.said || !isGM() ) return; old.said = true;
+  console.warn(`${LOG} an older invincible-plus-ultra runs next to this engine: its "Comic effects" window still reaches the table, but may show older lettering values. Update invincible-plus-ultra.`);
+  try { globalThis.ui?.notifications?.warn(t("Settings.OldPlusUltra")); } catch {}
+}
+function adoptOld(doc, _change, _options, userId) {
+  if ( (doc?.key ?? doc?._source?.key) !== PU_KEY || !isReady() || !isGM() || (userId != null && userId !== game.user?.id) ) return;
+  const next = docObject(doc); if ( !next ) return;
+  const prev = cleanTable(old.last ?? {}), now = cleanTable({ ...TABLE_DEFAULTS, ...next });
+  old.last = next;
+  const keys = TABLE_OBJECT.filter((k) => k in next && !sameV(now[k], prev[k]) && !sameV(now[k], state.table[k]));
+  sayOld();
+  if ( keys.length ) setTable(pick(now, keys)).catch((e) => console.warn(`${LOG} older plus-ultra`, e));
 }
 /* the settings window open on this seat follows the table (a player's at once; a GM's while he has not started editing) */
 function refreshWindow() { try { if ( state.settingsApp?.rendered ) state.settingsApp.follow?.(); } catch {} }
@@ -248,7 +261,7 @@ function registerSettings() {
   const type = { bool: Boolean, num: Number, pick: String };
   game.settings.register(NS, TABLE_KEY, { scope: "world", config: false, type: Object, default: pick(TABLE_DEFAULTS, TABLE_OBJECT), onChange: () => readPrefs() });
   for ( const k of ["movement", "face"] ) {
-    const d = SETTINGS[k];
+    const d = TABLE[k];
     game.settings.register(NS, k, { name: `LETR.Settings.${k}.Name`, hint: `LETR.Settings.${k}.Hint`, scope: "world", config: false,
       type: type[d.type], default: d.default, onChange: () => readPrefs() });
   }
@@ -258,7 +271,7 @@ function registerSettings() {
   Hooks.on("deleteSetting", (doc) => { const k = doc?.key ?? ""; if ( k.startsWith(`${NS}.`) ) readPrefs(); });
   Hooks.on("preCreateSetting", guardWrite);
   Hooks.on("preUpdateSetting", guardWrite);
-  for ( const h of ["createSetting", "updateSetting", "deleteSetting"] ) Hooks.on(h, bridgeIn);
+  for ( const h of ["createSetting", "updateSetting"] ) Hooks.on(h, adoptOld);
   Hooks.on("clientSettingChanged", (key) => { if ( key === "core.photosensitiveMode" ) readPrefs(); });
   try { globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.addEventListener?.("change", () => readPrefs()); } catch {}
   const { ApplicationV2 } = foundry.applications.api;
@@ -508,6 +521,7 @@ export function init(REG) {
   });
   state.reg = REG;
   Hooks.once("setup", () => {
+    oldPlusUltraAtSetup();                // ENGDROP: every module has registered its settings by now (plus-ultra at its init)
     readPrefs();
     syncStyles();
     const p = REG.engine();               // created now (fonts load in the background), so the filters are on before the first word
@@ -518,10 +532,10 @@ export function init(REG) {
     state.clock.start();                  // ENGREG: the table's clock (a burst of "time" pings, then one every 10 s)
     setTimeout(() => sendHello(false), 500);
     syncStyles();
-    /* ENGTABLE: the GM's seat migrates once and starts the bridge (the table wins over plus-ultra's copy from here on); a player is told once */
+    /* ENGTABLE: the GM's seat migrates once; a player is told once. ENGDROP: an older plus-ultra on the GM's seat is named once */
     (async () => {
       try { if ( isGM() ) await migrate(); } catch ( e ) { console.warn(`${LOG} migration`, e); }
-      state.bridged = true; readPrefs();
+      if ( old.seen ) sayOld();
       noticeOnce();
     })();
     document.addEventListener("pointermove", (e) => { state.mouse = { x: e.clientX, y: e.clientY }; }, { passive: true });

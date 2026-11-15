@@ -602,8 +602,10 @@ this seat draws with), `L.setTable(partial)` (GM; a player's call writes nothing
 
 The photosensitivity guard is NOT a setting (1.9.16): always on, `photosafe: false` changes nothing (at most 2 flash frames per
 second, none on a word taller than 20 % of the viewport, colour plates held still). Migration once per world (`tableMigrated`):
-plus-ultra's `lettersTable` if plus-ultra is active and it is stored, else the GM's old client values, else defaults; players' old values stay unused in their
-browsers. While plus-ultra keeps its GMALL mirror, the GM's seat keeps `table` and `invincible-plus-ultra.lettersTable` equal.
+plus-ultra's old copy `lettersTable` when the world holds its document (read directly, with or without plus-ultra), else the GM's old client
+values, else defaults; players' old values stay unused in their browsers. No bridge since 1.9.19 (ENGDROP): plus-ultra 136+ keeps no copy;
+an OLDER plus-ultra's window write is taken into the table key by key (only what that write changed), nothing is written back, the GM is
+told once to update it (manual 15).
 World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
 
 Authoring (any client, this session; `L.saveStyle` also stores a style in the world):

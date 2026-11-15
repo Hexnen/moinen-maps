@@ -344,10 +344,10 @@ export async function run(ok) {
 
   /* FXI-ENGINE (ADVI 12, WIRE1-4): the per-client choice full / local / off is a row of the engine's own settings window */
   {
-    const { SETTINGS, DEFAULTS } = await import("../prefs.mjs");
+    const { TABLE, TABLE_DEFAULTS } = await import("../prefs.mjs");
     const { STRINGS } = await import("../strings.mjs");
     const ui = fs.readFileSync(new URL("../ui.mjs", import.meta.url), "utf8");
-    ok(SETTINGS.impact?.type === "pick" && SETTINGS.impact.choices.join() === "full,local,off" && DEFAULTS.impact === "full", "impact: the setting impact = full | local | off, default full");
+    ok(TABLE.impact?.type === "pick" && TABLE.impact.choices.join() === "full,local,off" && TABLE_DEFAULTS.impact === "full", "impact: the setting impact = full | local | off, default full");
     ok(/\["flashes", "impact", "photosafe"\]/.test(ui), "impact: the impact row sits in the settings window's flashes group, next to the always-on guard");
     for ( const lang of ["en", "pl"] ) for ( const k of ["Name", "Hint", "full", "local", "off"] ) ok(typeof STRINGS[lang][`LETR.Settings.impact.${k}`] === "string", `impact: setting words ${lang} ${k}`);
   }

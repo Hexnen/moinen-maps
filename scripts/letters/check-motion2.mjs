@@ -347,7 +347,7 @@ async function engineChecks() {
      already playing keeps its motion; a call's look.motion beats the setting; reduced motion beats both; the legacy styles ignore it */
   await block(async () => {
     const E = await setup(); const L = E.engine; L.lookStyle("invincible");
-    const { applyPrefs } = await import("./tools.mjs"); const { DEFAULTS } = await import("./prefs.mjs");
+    const { applyPrefs } = await import("./tools.mjs"); const { TABLE_DEFAULTS: DEFAULTS } = await import("./prefs.mjs");
     applyPrefs(L, { ...DEFAULTS });
     const at = { x: 2000, y: 1500 }, base = { kind: "punch", magnitude: 1.2, space: "world", at };
     const a = L.play("BLAM!", { ...base, seed: "md1" });

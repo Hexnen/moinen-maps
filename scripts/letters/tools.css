@@ -145,22 +145,37 @@
 .letr-dlg .hint { margin: 0 0 0.3rem; font-size: 0.78rem; color: var(--letr-muted, inherit); }
 
 /* ---------------------------------------------------------------- settings */
+/* ENGDROP (1.9.19): one row = label | control in a fixed column (every control starts on the same line, on both seats), the hint
+   under both in a quieter voice; sliders show their value as words; a read-only value sits where the control would. */
 .letr-settings .window-content { padding: 0.75rem 0.9rem 0.6rem; }
-.letr-s fieldset { margin: 0 0 0.7rem; padding: 0.3rem 0.7rem 0.4rem; border: 1px solid var(--letr-edge); border-radius: 8px; }
-.letr-s legend { padding: 0 0.3rem; font-weight: 700; }
-.letr-s .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
-.letr-s range-picker { accent-color: var(--letr-accent); }
+.letr-settings .letr-s fieldset { display: block; gap: 0; margin: 0 0 0.7rem; padding: 0.1rem 0.85rem 0.15rem; border: 1px solid var(--letr-edge); border-radius: 8px; }
+.letr-s legend { padding: 0 0.35rem; font-weight: 700; font-size: var(--font-size-14, 0.9rem); }
+.letr-s .letr-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; column-gap: 1rem; row-gap: 0.15rem; align-items: center;
+  margin: 0; padding: 0.45rem 0; transition: opacity 0.15s var(--letr-ease);
+}
+.letr-s .letr-row + .letr-row { border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.letr-s .letr-row > label { flex: none; margin: 0; font-weight: 600; line-height: 1.3; }
+.letr-s .letr-row > .form-fields { display: flex; align-items: center; justify-content: flex-start; min-width: 0; flex: none; }
+.letr-s .letr-row > .form-fields > select { width: 100%; }
+.letr-s .letr-row > .form-fields > input[type="checkbox"] { margin: 0; }
+.letr-s .letr-row > .hint { grid-column: 1 / -1; margin: 0; padding: 0; font-size: 0.8rem; line-height: 1.35; color: var(--letr-muted); }
+.letr-s .letr-slide { display: flex; align-items: center; gap: 0.7rem; width: 100%; }
+.letr-s .letr-slide input[type="range"] { flex: 1; min-width: 0; margin: 0; accent-color: var(--letr-accent); }
+.letr-s .letr-slide output { flex: none; min-width: 3.7rem; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .letr-s .letr-s-ro { font-weight: 600; }
+.letr-s.is-player .letr-s-ro:not(.letr-s-pin) { flex: none; display: inline-block; padding: 0.15rem 0.6rem; border-radius: 6px; background: var(--letr-raise);
+  border: 1px solid var(--letr-edge); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.letr-s.is-off .letr-row:not([data-key="enabled"]) { opacity: 0.5; }
+.letr-s .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
 /* ENGTABLE: whose settings these are (one line under the title), the always-on guard, this screen's own signals */
 .letr-s-banner { display: flex; align-items: flex-start; gap: 0.55rem; margin: 0 0 0.75rem; padding: 0.5rem 0.7rem; border-radius: 8px;
   background: var(--letr-raise); border: 1px solid var(--letr-edge); line-height: 1.35; }
 .letr-s-banner i { margin-top: 0.15rem; color: var(--letr-accent); }
 .letr-s.is-player .letr-s-banner i { color: inherit; opacity: 0.8; }
-.letr-s.is-player .form-group .form-fields { justify-content: flex-end; }
-.letr-s.is-player .letr-s-ro { padding: 0.1rem 0.55rem; border-radius: 999px; background: var(--letr-raise); border: 1px solid var(--letr-edge); white-space: nowrap; }
-.letr-s .letr-s-pin { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.letr-s .letr-s-pin { display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
 .letr-s .letr-s-pin i { color: var(--letr-accent); }
-.letr-s-seat { margin: 0 0 0.6rem; padding: 0.45rem 0.7rem 0.55rem; border: 1px solid var(--color-border-light-2, rgba(255,255,255,0.12)); border-radius: 8px; }
+.letr-s-seat { margin: 0 0 0.6rem; padding: 0.45rem 0.8rem 0.55rem; border: 1px solid var(--letr-edge); border-radius: 8px; }
 .letr-s-seat h4 { margin: 0 0 0.3rem; padding: 0; border: 0; font-family: inherit; font-size: var(--font-size-14, 0.9rem); font-weight: 700; text-transform: none; letter-spacing: normal; line-height: 1.3; color: inherit; }
 .letr-s-seat ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.2rem; }
 .letr-s-seat li { display: flex; align-items: baseline; gap: 0.45rem; font-size: 0.82rem; color: var(--letr-muted); }

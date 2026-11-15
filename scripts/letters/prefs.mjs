@@ -76,40 +76,9 @@ export function seatPrefs(table, seat = {}) {
 /* how the seat's own signals change what it shows (for the settings window's "this screen" lines) */
 export const seatNotes = (table, seat = {}) => ({ reduced: !!seat.osReduced && cleanTable(table).motion !== "reduced", photo: !!seat.photosensitive });
 
-/* ---------- LEGACY (1.9.14 and before): the per-seat client settings ----------
-   NOT registered and NOT read for any word since ENGTABLE. Kept only as a description: the migration reads a GM's old client values
-   (localStorage "moinen-letters.<key>") through it, and invincible-plus-ultra's outside mirror (its scripts/table/defs.mjs imports
-   SETTINGS / DEFAULTS / clean / scopeOf from its vendored copy) still builds its rows from this shape. Remove it once plus-ultra has
-   dropped that mirror (README "Settings"). */
-export const SETTINGS = {
-  enabled:     { type: "bool", default: true },
-  scale:       { type: "num", default: 1, min: 0.5, max: 2.5, step: 0.05 },
-  motion:      { type: "pick", default: "auto", choices: ["auto", "full", "gentle", "reduced"] },
-  flashes:     { type: "bool", default: true },
-  photosafe:   { type: "bool", default: true },
-  impact:      { type: "pick", default: "full", choices: ["full", "local", "off"] },   // FXI-ENGINE: impact frames (impact/), per client
-  palette:     { type: "pick", default: "mood", choices: ["mood", "contrast", "cvd"] },
-  announce:    { type: "bool", default: true },
-  limitScreen: { type: "num", default: 16, min: 1, max: 32, step: 1 },
-  limitWorld:  { type: "num", default: 48, min: 4, max: 96, step: 1 },
-  movement:    { type: "pick", default: DEFAULT_MOTION, choices: MOTION_MODES.slice(), scope: "world" },   // MODE: the GM's, for the table
-  face:        { type: "pick", default: DEFAULT_FACE, choices: INV_FACES.slice(), scope: "world" }          // FONTSEL: the GM's, for the table
-};
-/* the settings a GM sets for the whole table (scope "world"); every other one is this computer's own */
-export const WORLD_KEYS = Object.keys(SETTINGS).filter((k) => SETTINGS[k].scope === "world");
-export const scopeOf = (k) => SETTINGS[k]?.scope ?? "client";
-export const DEFAULTS = Object.fromEntries(Object.entries(SETTINGS).map(([k, v]) => [k, v.default]));
-
-/* a value as the setting allows it (a stored value from an older build or a hand-edited one never breaks a word) */
-export function clean(key, v) {
-  const d = SETTINGS[key];
-  if ( !d ) return undefined;
-  if ( d.type === "bool" ) return typeof v === "boolean" ? v : d.default;
-  if ( d.type === "pick" ) return d.choices.includes(v) ? v : d.default;
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.max(d.min, Math.min(d.max, n)) : d.default;
-}
-export const cleanAll = (o = {}) => Object.fromEntries(Object.keys(SETTINGS).map((k) => [k, clean(k, o[k])]));
+/* ENGDROP (1.9.19): the LEGACY description of 1.9.14's per-seat client settings (SETTINGS, WORLD_KEYS, scopeOf, DEFAULTS, clean, cleanAll)
+   is gone: no seat registers or reads them, and invincible-plus-ultra builds its window from TABLE since UNMIRROR. The keys of TABLE are
+   the old ones minus `photosafe` (the guard is no setting); an old stored value is read through cleanTableValue. */
 
 /* ---------- photosensitivity ---------- */
 export const PHOTO = {
