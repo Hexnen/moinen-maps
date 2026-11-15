@@ -41,38 +41,58 @@ export function freeRuns(ui, x0, x1, y0, y1) {
 export const hitOf = (b, ui, v) => ui.reduce((s, u) => s + inter(b, u), 0) + (v ? area(b) - inter(b, v) : 0);
 const boxAt = (x, y, bw, bh) => ({ x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 });
 
+/** how far a word's entrance reaches beyond its box (sfx.mjs measure's box), as a factor of it: the engine keeps the whole REACH in the
+    view (its keepInView), so a word fitted only by its box is pushed by the engine onto what it was placed off. Measured on the engine
+    (dev/sfx-fit.test.mjs REACH): a slam's contact pose up to 1.33 x the box, a rise up to 1.37 x its height, the others about 1.12 */
+export const REACH = { slam: 1.36, rise: 1.4, other: 1.15 };
+export const reachOf = (stageIn) => REACH[stageIn] ?? REACH.other;
+
 /**
- * A spot (screen px) for an unlocated word of box `bw` x `bh` on a screen `view` ({ x0, y0, x1, y1 }) with this seat's panels `ui`.
- * `today` = the spot the word took before (kept when the word's REAL box is clean there: inside the view by `m` and off every panel),
+ * A spot (screen px) for an unlocated word of box `bw` x `bh` (its hold picture with room for its outline: wordBox) on a screen `view`
+ * ({ x0, y0, x1, y1 }) with this seat's panels `ui`; `rk` = how far its entrance reaches beyond the box (REACH): the whole reach stays
+ * inside the view by `m`, the box off every panel. `today` = the spot the word took before (kept when the word is clean there),
  * `want` = where it should sound (the edge toward a strike, a free spot of the upper middle). Else the nearest clean spot: along the
  * band of `want`, then bands above and below it; only when no band holds it whole the word is made smaller (down to `minK` of its
  * size, the largest share that fits clean; at `minK` the least covered spot). -> { x, y, k (size share), hit (px² still covered) }
  */
-export function screenFit({ today = null, want, bw, bh, view, ui = [], m = EDGE, minK = 0.55 }) {
+export function screenFit({ today = null, want, bw, bh, rk = 1, view, ui = [], m = EDGE, minK = 0.55 }) {
   const v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
-  if ( today ) { const b = boxAt(today.x, today.y, bw, bh); if ( hitOf(b, ui, v) <= 1e-6 ) return { x: today.x, y: today.y, k: 1, hit: 0 }; }
-  const ks = [1]; for ( let k = 0.92; k > minK + 1e-9; k -= 0.08 ) ks.push(Math.round(k * 100) / 100); ks.push(minK);
-  for ( const k of ks ) {
-    const w = bw * k, h = bh * k;
-    if ( w > v.x1 - v.x0 || h > v.y1 - v.y0 ) continue;
+  const R = Math.max(1, rk);
+  // (the centre's range for a word w x h: its reach inside v)
+  const range = (w, h) => ({ x0: v.x0 + (w * R) / 2, x1: v.x1 - (w * R) / 2, y0: v.y0 + (h * R) / 2, y1: v.y1 - (h * R) / 2 });
+  const clean = (x, y, w, h) => { const c = range(w, h); return x >= c.x0 - 1e-6 && x <= c.x1 + 1e-6 && y >= c.y0 - 1e-6 && y <= c.y1 + 1e-6 && hitOf(boxAt(x, y, w, h), ui, null) <= 1e-6; };
+  if ( today && clean(today.x, today.y, bw, bh) ) return { x: today.x, y: today.y, k: 1, hit: 0 };
+  // (the nearest clean spot for the word at share k of its size, or null)
+  const spotAt = (k) => {
+    const w = bw * k, h = bh * k, c = range(w, h);
+    if ( c.x0 > c.x1 || c.y0 > c.y1 ) return null;
     // (bands: the wanted one, then half a word, a word ... above and below it, inside the view)
     const ys = [0]; for ( let d = 0.5; d <= 6; d += 0.5 ) ys.push(-d, d);
     let best = null;
     for ( const dy of ys ) {
-      const y = clamp(want.y + dy * h, v.y0 + h / 2, v.y1 - h / 2);
+      const y = clamp(want.y + dy * h, c.y0, c.y1);
       for ( const r of freeRuns(ui, v.x0, v.x1, y - h / 2, y + h / 2) ) {
-        if ( r.b - r.a < w - 1e-6 ) continue;
-        const x = clamp(want.x, r.a + w / 2, r.b - w / 2), d = Math.hypot(x - want.x, y - want.y);
+        const a = Math.max(r.a + w / 2, c.x0), b = Math.min(r.b - w / 2, c.x1);
+        if ( a > b + 1e-6 ) continue;
+        const x = clamp(want.x, a, b), d = Math.hypot(x - want.x, y - want.y);
         if ( !best || d < best.d - 1e-6 ) best = { x, y, d };
       }
     }
-    if ( best ) return { x: best.x, y: best.y, k, hit: 0 };
+    return best;
+  };
+  const ks = [1]; for ( let k = 0.92; k > minK + 1e-9; k -= 0.08 ) ks.push(Math.round(k * 100) / 100); ks.push(minK);
+  let lo = null, hi = 1;
+  for ( const k of ks ) { const s0 = spotAt(k); if ( s0 ) { lo = { k, s: s0 }; break; } hi = k; }
+  if ( lo ) {
+    // (the LARGEST share that fits, not the next rung of the ladder: a bigger size step never ends smaller than a smaller one)
+    if ( lo.k < 1 ) for ( let i = 0; i < 10; i++ ) { const k = (lo.k + hi) / 2, s0 = spotAt(k); if ( s0 ) lo = { k, s: s0 }; else hi = k; }
+    return { x: lo.s.x, y: lo.s.y, k: lo.k, hit: 0 };
   }
-  // (nowhere clean even at minK: the least covered spot at minK, near where it should sound)
-  const w = bw * minK, h = bh * minK;
+  // (nowhere clean even at minK: the least covered spot at minK inside the view, near where it should sound)
+  const w = bw * minK, h = bh * minK, c = range(w, h);
   let best = null;
   for ( let fy = 0; fy <= 1; fy += 0.125 ) for ( let fx = 0; fx <= 1; fx += 0.125 ) {
-    const x = v.x0 + w / 2 + (Math.max(0, v.x1 - v.x0 - w)) * fx, y = v.y0 + h / 2 + (Math.max(0, v.y1 - v.y0 - h)) * fy;
+    const x = c.x0 <= c.x1 ? c.x0 + (c.x1 - c.x0) * fx : (v.x0 + v.x1) / 2, y = c.y0 <= c.y1 ? c.y0 + (c.y1 - c.y0) * fy : (v.y0 + v.y1) / 2;
     const hit = hitOf(boxAt(x, y, w, h), ui, v), d = Math.hypot(x - want.x, y - want.y);
     if ( !best || hit < best.hit - 1e-6 || (Math.abs(hit - best.hit) <= 1e-6 && d < best.d) ) best = { x, y, hit, d };
   }
@@ -85,3 +105,28 @@ export const LADDER = [1, 0.5, 0];
 /** Is a placed word clean (sfx-core place penalties `pen`): inside the view, off the panels, the tokens, the pins and the other words,
     and over its subject no more than its voice allows? */
 export const isClean = (pen) => !!pen && pen.off <= 1e-6 && pen.pui <= 0.02 && pen.tok <= 1e-6 && (pen.pin ?? 0) <= 1e-6 && pen.wrd <= 0.05 && pen.sub <= 1e-6;
+
+/**
+ * The placement of words of which some may stand at a BIGGER step than today's: `place(specs, ctx)` (sfx-core place) at their stepped
+ * size first; when that leaves a word dropped or the main word not clean, the words that `grows(w)` try smaller sizes, `resize(w, f)`
+ * (f = the share of their extra size kept: LADDER, down to 0 = today's size), and the first size where every word stands and the main
+ * word is clean is taken, else the one that keeps most words with the main word clean, the bigger first. Live 2026-11-15: at step 3 a
+ * blast's main word covered its own marker and the pins, and its side words were dropped for want of room. Nothing grows (today's step,
+ * a smaller one): `place` itself, untouched.
+ */
+export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (w) => w } = {}) {
+  const placed = place(specs, ctx);
+  if ( !specs.some(grows) ) return placed;
+  const n = specs.filter((w) => w.text || w.stream).length, hasMain = specs.some((w) => w.role === "main");
+  const mainOk = (r) => !hasMain || isClean(r.find((q) => q.role === "main")?.pen);
+  const score = (r, i) => (mainOk(r) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && isClean(q.pen)).length - i * 0.5;
+  const full = (r) => mainOk(r) && r.length >= n;
+  if ( full(placed) ) return placed;
+  let best = { r: placed, s: score(placed, 0) };
+  for ( let i = 1; i < LADDER.length; i++ ) {
+    const r = place(specs.map((w) => (grows(w) ? resize(w, LADDER[i]) : w)), ctx), sc = score(r, i);
+    if ( full(r) ) return r;
+    if ( sc > best.s ) best = { r, s: sc };
+  }
+  return best.r;
+}

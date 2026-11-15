@@ -442,6 +442,14 @@ export const burnCrowded = (pts, taken, em, k = BURN_BOX) => pts.some((q) => tak
     bigger one's phrases) and the room its own spots need from each other (THUNDERFIT: a phrase is about four to five of its letters wide,
     rocking a little to either side, and two of them stand one above the other: about 6.5 x 3.3 letters) */
 export const BURN_BOX = { w: 8.8, h: 3.4 }, BURN_OWN = { w: 5.2, h: 2.6 };
+/** THUNDERFIT: the spots of one burning fire that are lettered (indices into its points `pts`, scene px): the first always, each next one
+    only when its phrases (letter size `em` x 1.25, scene px) do not stand on a spot already kept (BURN_OWN) - live at a far zoom or a
+    bigger size step one fire's phrases stood on each other */
+export function burnSpots(pts, em) {
+  const kept = [];
+  pts.forEach((q, i) => { if ( !kept.length || !burnCrowded([q], kept.map((k) => pts[k]), em, BURN_OWN) ) kept.push(i); });
+  return kept;
+}
 /** Fire strokes that burn together (paths within their radii plus a square): groups (deterministic order). */
 export function burnGroups(fires, grid = 100) {
   const list = fires.slice().sort((a, b) => (a.id < b.id ? -1 : 1)), parent = list.map((_, i) => i);

@@ -570,10 +570,11 @@ function screenPlace(text, o, today, fixed) {
   if ( !(b.bw > 0) ) return null;
   const sb = document.getElementById("sidebar")?.getBoundingClientRect?.();
   const W = innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0), H = innerHeight;
-  const kv = FIT.viewFit(b.bw, b.bh, W, H);
+  // (its entrance reaches beyond the box - a slam's contact pose by a third: the engine keeps that reach in the view, so the fit does)
+  const rk = FIT.reachOf(o.in), kv = FIT.viewFit(b.bw * rk, b.bh * rk, W, H);
   uiBoxes();
   const want = fixed ? { x: fixed.fx * innerWidth, y: fixed.fy * innerHeight } : today;
-  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: uiCache.rects ?? [] });
+  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, rk, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: uiCache.rects ?? [] });
   const k = kv * r.k, w2 = b.bw * k / 2, h2 = b.bh * k / 2;
   return { x: r.x, y: r.y, k, hit: r.hit, box: { x0: Math.round(r.x - w2), y0: Math.round(r.y - h2), x1: Math.round(r.x + w2), y1: Math.round(r.y + h2) } };
 }
@@ -658,7 +659,7 @@ function reconcileBurn() {
       const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (L?.prefs?.scale ?? 1);
       // (THUNDERFIT: the spots of ONE fire crowd each other too when its phrases are big for the way its path runs on this screen - a far
       // zoom, a bigger size step: live their phrases stood on each other; the first spot stays, a spot on an earlier one is heard in it)
-      const idx = burnSpots(all, em), pts = idx.map((i) => all[i]);
+      const idx = C.burnSpots(all, em), pts = idx.map((i) => all[i]);
       if ( C.burnCrowded(pts, spots, em) ) continue;
       spots.push(...pts.map((q) => ({ x: q.x, y: q.y, em })));
       if ( isLive ) live++;
@@ -693,13 +694,6 @@ function burnOffsets(p, live, idx = null) {
       if ( d.dx || d.dy ) ui.push({ x0: box.x0 + d.dx, y0: box.y0 + d.dy, x1: box.x1 + d.dx, y1: box.y1 + d.dy });
       return d; });
   } catch { return []; }
-}
-/** THUNDERFIT: the spots of one burning fire that are lettered (indices into its plan's points `pts`): the first always, each next one
-    only when its phrases (letter size `em`, scene px) do not stand on a spot already kept (sfx-core burnCrowded) */
-function burnSpots(pts, em) {
-  const kept = [];
-  pts.forEach((q, i) => { if ( !kept.length || !C.burnCrowded([q], kept.map((k) => pts[k]), em, C.BURN_OWN) ) kept.push(i); });
-  return kept;
 }
 /** The cap height (scene px) of a burning fire's words: a share of the screen height at this zoom (live: 3.5..6 %, by the fire's
     level; ambient: 3 %), never more than the engine's own size for it - its phrases sit over the flames for as long as they burn,
@@ -776,23 +770,8 @@ const placeCtx = () => { const v = view(); return { view: v, ui: uiBoxes(), toke
  * today's step (and at a smaller one) this is sfx-core place itself.
  */
 function placeFit(specs, ctx) {
-  const placed = C.place(specs, ctx);
-  const grows = (w) => !!w.text && !w.stream && !w.path && stepFor(grpOf(w)) > SZ.SIZE_DEFAULT;
-  if ( !specs.some(grows) ) return placed;
-  const n = specs.filter((w) => w.text || w.stream).length, hasMain = specs.some((w) => w.role === "main");
-  const score = (r, i) => { const m = r.find((q) => q.role === "main");
-    return (!hasMain || FIT.isClean(m?.pen) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && FIT.isClean(q.pen)).length - i * 0.5; };
-  const full = (r) => (!hasMain || FIT.isClean(r.find((q) => q.role === "main")?.pen)) && r.length >= n;
-  if ( full(placed) ) return placed;
-  let best = { r: placed, s: score(placed, 0) };
-  for ( let i = 1; i < FIT.LADDER.length; i++ ) {
-    const f = FIT.LADDER[i];
-    const s2 = specs.map((w) => { if ( !grows(w) ) return w; const q = { ...w, fitK: f }; measure(q); return q; });
-    const r = C.place(s2, ctx), sc = score(r, i);
-    if ( sc > best.s ) best = { r, s: sc };
-    if ( full(r) ) return r;
-  }
-  return best.r;
+  return FIT.ladderPlace(specs, ctx, { place: C.place, grows: (w) => !!w.text && !w.stream && !w.path && stepFor(grpOf(w)) > SZ.SIZE_DEFAULT,
+    resize: (w, f) => { const q = { ...w, fitK: f }; measure(q); return q; } });
 }
 /** The interface panels over the canvas on this client (Foundry's and any module's), in scene px. */
 function uiBoxes() {
