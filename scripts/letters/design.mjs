@@ -1311,6 +1311,27 @@ const LOOK_KEYS = {
   warp2: ["arc", "persp", "bulge", "fan", "none"], stack: ["stack", "merge"], outline: ["ink", "sticker", "color", "inner"]
 };
 const TILTS = { calm: [4.5, 0.02], lively: [12, 0.055], wild: [21, 0.095] };
+/* RIMUNDER (ADVX 18: a word lettered on the MAP gets lost among the map's own drawings on bright, mid and busy ground): the letterer's
+   holding line. A rim round the WHOLE lettering, the letters and their coloured duplicate block together, painted UNDER them, so the
+   approved look (letters, keyline, duplicate) stays whole on top of it; it follows the letters' own outline (round joins, no box).
+   - "ink"   the default on the map: a heavy ink rim. It adapts to the ground by itself: on a dark floor ink on dark is next to
+             invisible (today's look), on bright, mid, busy or fire-lit ground it is the black edge that separates the word.
+   - "paper" opt-in: a paper rim with a thin ink line round it (the knock-out of the impact frames' kept word, KEEPBOX), for a caller
+             who wants the word to stand out on a DARK ground too.
+   - "none"  today's picture.
+   Default ("auto" / not given): "ink" for a word in world space (`space: "world"`, every world layer) without a backdrop, "none" on the
+   screen. Sizes in cap units of the drawn picture with pixel floors (a far-zoom word still gets a visible rim); see paint.mjs. */
+export const INV_RIM = {
+  kinds: ["ink", "paper", "none"],
+  ink: { w: 0.07, min: 2.5, max: 16 },
+  paper: { w: 0.05, min: 2, max: 12, line: 0.022, lineMin: 1.25, lineMax: 4 },
+  paperColor: "#fffdf2"
+};
+export function invRim(want, space, back) {
+  const v = want === true ? "ink" : want === false ? "none" : want;
+  if ( INV_RIM.kinds.includes(v) ) return v === "none" ? null : v;
+  return space === "world" && !back ? "ink" : null;
+}
 export function applyLook(hand, opts = {}) {
   const L = opts.look && typeof opts.look === "object" ? opts.look : {};
   for ( const [k, vals] of Object.entries(LOOK_KEYS) ) if ( typeof L[k] === "string" && vals.includes(L[k]) ) hand[k] = L[k];
@@ -1334,6 +1355,8 @@ export function applyLook(hand, opts = {}) {
   /* on the map (busy ground, no backdrop by default) an ink-only outline gets a thin light keyline outside it, so the word separates
      from dark and light ground alike */
   if ( opts.space === "world" && !hand.back && hand.outline === "ink" && !hand.out2W && hand.style !== "invincible" ) { hand.out2W = 0.035; hand.pal = { ...hand.pal, out2: "#fffaf0" }; hand.keyline = true; }
+  /* RIMUNDER: the invincible word's rim UNDER the whole lettering (letters AND their duplicate block), see `invRim` */
+  if ( hand.style === "invincible" ) { const r = invRim(L.rim, opts.space, hand.back); if ( r ) hand.halo = r; else delete hand.halo; }
   hand.id = [hand.font, hand.treat, hand.env, hand.colorFam, hand.outline, hand.fill].join("/");
   return hand;
 }

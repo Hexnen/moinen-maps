@@ -205,6 +205,9 @@ await (await import("./check-fontsel.mjs")).run(ok, { bank, fontsApi });
 /* 8d5. KERNEX: punctuation never reads as a diacritic of its neighbour: every letter x ! !! ? - in both faces, line and column, plan,
    110 px and 26 px (check-marks.mjs; `node check-marks.mjs <other letters folder>` runs it on another engine: 1.9.7 fails) */
 await (await import("./check-marks.mjs")).run(ok, { bank, fontsApi });
+/* 8d6. RIMUNDER: the invincible word's rim under the whole lettering (letters and duplicate block), default on the map, off on the screen;
+   calls without it draw what they drew (check-rim.mjs; `node check-rim.mjs <other letters folder>` runs it on another engine) */
+await (await import("./check-rim.mjs")).run(ok, { bank, fontsApi });
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
