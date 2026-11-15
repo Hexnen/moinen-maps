@@ -140,7 +140,10 @@ export function capLadder(px2, step, floor, W = (px) => px) {
   // room, step 1 stays under what it gets, so a seat short of room still draws step 1 < step 2: seatLayout rule "yield")
   let probe = null;
   if ( s < SZ.SIZE_DEFAULT && s > 0 ) { probe = [W(px2)]; for ( let px = px2 * 0.95; px > lo * 1.0001; px *= 0.95 ) probe.push(W(px)); if ( lo < px2 ) probe.push(W(lo)); }
-  return { sizes, min, full, small, probe, floor: W(floor), cap2: W(px2) };
+  // (MAPSAME: the three steps' own sizes on this seat - the seat layout draws the step's share inside ONE envelope for every step, so a
+  // seat short of room keeps 3 > 2 > 1 as drawn: sfx-seat seatLayout)
+  const nom = [W(Math.min(SEAT.stepPx(px2, 1, floor), px2 / SEAT.MIN_GAIN)), W(px2), W(SEAT.stepPx(px2, 3, floor))];
+  return { sizes, min, full, small, probe, floor: W(floor), cap2: W(px2), nom, step: s };
 }
 /** MAPSFXSEAT2: the sizes THIS seat draws an unlocated (screen) word at, CSS px of cap height (its own size setting in): a ranked word its
     rank's share of THIS window's height, another the engine's own size on this window - as the map sized it before - then the step's share
@@ -161,7 +164,7 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
+      probe: c?.probe ?? null, floor: c?.floor ?? 0, nom: c?.nom ?? null, step: c?.step ?? null, side: w.side ?? null, cov2: w.cov2 ?? null, box2: w.box2 ?? null, u2: w.size2 ?? null, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH,
       // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
       // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
       ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
@@ -278,8 +281,8 @@ export function placeFit(specs, ctx, d) {
  * keeps (CAPS.high), the words written in order, sized, measured and placed on the table; every placed word into the ledger.
  * -> [{ g, placed }] (placed: the words with x, y, box, size, t (this page's clock), ts (shared), key)
  */
-export function planMoment(due, d, recent = []) {
-  const G = d.grid, out = [];
+export function planMoment(due, d0, recent = []) {
+  const G = d0.grid, out = [], d = atStep2(d0);
   const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
@@ -294,6 +297,9 @@ export function planMoment(due, d, recent = []) {
     for ( const w of specs ) { write(w, taken, d); w.alive = d.ledger.count(w.ts, w.ts + lifeMs(w)); measure(w, d); }
     const t0 = Math.min(...specs.map((w) => w.ts)), t1 = Math.max(...specs.map((w) => w.ts + lifeMs(w)));
     const placed = placeFit(specs.filter((w) => w.text || w.stream), tableCtx(c, z, t0, t1, null, d), d);
+    const mw = placed.find((w) => w.role === "main");
+    if ( mw ) mainSide(mw, d0);
+    for ( const w of placed ) restep(w, d0);
     for ( const w of placed ) if ( w.box ) d.ledger.add({ key: w.key, box: lifeBox(w), t0: w.ts, t1: w.ts + lifeMs(w), main: w.role === "main" });
     const main = placed.find((w) => w.role === "main");
     if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
@@ -307,8 +313,8 @@ export function planMoment(due, d, recent = []) {
  * map: `p.ground`), sized on the reference view, measured by the engine, placed off the shared obstacles and the words the table already
  * holds, timed on the shared clock. -> Map(word key -> the placed word | { screenAt } | { dropped, why })
  */
-export function planPage(p, d) {
-  const table = new Map(), G = d.grid;
+export function planPage(p, d0) {
+  const table = new Map(), G = d0.grid, d = atStep2(d0);
   const words = p.pg.words, main = words.find((q) => q.role === "main") ?? words[0];
   if ( !main ) return table;
   // (the reference view: centred on the page's main sound, at the zoom that holds its subject)
@@ -327,10 +333,96 @@ export function planPage(p, d) {
     if ( !word?.text ) continue;
     p.texts.add(word.text);
     const q = pageWordPlan(p, w, word, sd, env, d);
+    if ( w.role === "main" && q?.box && !q.screenAt ) { mainSide(q, d0); d.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: true }); }
     table.set(w.key, q);
     if ( w.role === "main" && q?.box ) env.mainBox = q.box;
   }
+  // (MAPSAME: placed at step 2's sizes, drawn at the group's own step - each word scaled about its point nearest the thing)
+  for ( const q of table.values() ) if ( q?.box && !q.screenAt && !q.dropped ) { restep(q, d0); d0.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: q.role === "main" }); }
   return table;
+}
+/** MAPSAME: the deps a table picture is PLACED with - the size step of every group at step 2 (0 stays 0): the table's places, the words it
+    keeps and drops and the sides they stand on are the same whatever step the table plays at; each word is then drawn at its step's own
+    size about its point nearest the thing (restep). Before, every step placed its own picture: a word stood below the bomb at step 1 and
+    above it at steps 2 / 3 (MAPSFXSEAT2-6), and a seat's step 3 could get less room than its step 2. */
+export function atStep2(d) {
+  if ( d.__step2 ) return d;
+  return { ...d, __step2: true, step: (g) => { const s = d.step(g); return s > 0 ? SZ.SIZE_DEFAULT : s; } };
+}
+/** MAPSAME: a placed table word drawn at its group's own size step: measured again at that step and scaled about the point of its step-2
+    box nearest its subject's centre (its side and its gap kept); a word that rides keeps its way. */
+export function restep(w, d) {
+  try {
+    if ( !w || !w.text || w.stream || !w.box ) return;
+    const st = d.step(grpOf(w));
+    if ( st === SZ.SIZE_DEFAULT || st === 0 ) return;
+    const u2 = w.size, b2 = w.box;
+    // (the share of its subject the table's step-2 box covers: what every step's seat layout lets it cover - one picture at every step)
+    if ( w.subject ) { const sb = w.subject, ix = Math.max(0, Math.min(b2.x1, sb.x1) - Math.max(b2.x0, sb.x0)), iy = Math.max(0, Math.min(b2.y1, sb.y1) - Math.max(b2.y0, sb.y0));
+      w.cov2 = (ix * iy) / Math.max(1, (sb.x1 - sb.x0) * (sb.y1 - sb.y0)); }
+    // (the step-2 place every seat searches its envelope from: the same at every step)
+    w.box2 = b2; w.size2 = u2;
+    measure(w, d);
+    if ( !(u2 > 0) || !(w.size > 0) ) return;
+    const f = w.size / u2;
+    if ( w.path?.length > 1 ) { w.box = C.boxOf(w); return; }
+    // (the same side of its subject in the same proportion as at step 2: SEAT.shrinkOnSide, the seats' own rule for a smaller step)
+    const nb = SEAT.shrinkOnSide(b2, f, w.subject ?? null), mx = (b2.x0 + b2.x1) / 2, my = (b2.y0 + b2.y1) / 2;
+    w.x = (nb.x0 + nb.x1) / 2 + (w.x - mx) * f; w.y = (nb.y0 + nb.y1) / 2 + (w.y - my) * f;
+    w.box = C.boxOf(w);
+  } catch ( err ) { d.warn?.("restep", err); }
+}
+/** MAPSAME: the probe seats the table chooses its main word's side on (shared: the reference window centred on the word's subject at the
+    moment's reference zoom and closer - where seats usually look from -, the shared panel zones of the reference window, the shared pins
+    and tokens) */
+export const SIDE_PROBES = [1, 1.45, 2];
+/**
+ * MAPSAME: THE SIDE of a main word - the side of its subject every seat draws it on (seatLayout keeps it). The table's own placement
+ * looks only at the reference view, where a big word has room above a blast that a closer seat has not (live 2026-11-15: on the take's
+ * seats the blast's word above the bomb had room for 181 / 88 world px at step 2, below it 222 / 126). So the table tries each side of its
+ * shared order on the probe seats (SIDE_PROBES) and takes the side whose WORST probe holds the largest share of its step-3 size clean
+ * (the earlier side of the order within 4 %); the table's word moves there on the reference probe when it stands clean there at its own
+ * size. Pure, shared data only: every seat chooses the same. Sets w.side ({ x, y }).
+ */
+export function mainSide(w, d) {
+  try {
+    if ( !w?.subject || !w.box || w.path?.length > 1 ) return;
+    const sub = w.subject, c = { x: (sub.x0 + sub.x1) / 2, y: (sub.y0 + sub.y1) / 2 }, z0 = w.z ?? SEAT.refZoom(d.grid, w.zr ?? 0);
+    const order = [];
+    for ( const [ox, oy] of (w.around ?? C.AROUND) ) { if ( !ox && !oy ) continue; const s = Math.abs(ox) > Math.abs(oy) ? { x: Math.sign(ox), y: 0 } : { x: 0, y: Math.sign(oy) }; if ( !order.some((q) => q.x === s.x && q.y === s.y) ) order.push(s); }
+    for ( const s of [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }] ) if ( !order.some((q) => q.x === s.x && q.y === s.y) ) order.push(s);
+    const d2 = atStep2(d), probes = SIDE_PROBES.map((k) => {
+      const z = z0 * k, u = 1 / z, view = { x0: c.x - (SEAT.REF_VW / 2) * u, y0: c.y - (SEAT.REF_VH / 2) * u, x1: c.x + (SEAT.REF_VW / 2) * u, y1: c.y + (SEAT.REF_VH / 2) * u };
+      const panels = SEAT.SCREEN_ZONES.map((r) => ({ x0: view.x0 + r.x0 * u, y0: view.y0 + r.y0 * u, x1: view.x0 + r.x1 * u, y1: view.y0 + r.y1 * u }));
+      const item = seatItems([w], d2, { vw: SEAT.REF_VW, vh: SEAT.REF_VH, zoom: z, scale: 1 })[0];
+      return { z, view, panels, item, pins: d.pins?.(view) ?? [], tokens: d.tokens?.(view) ?? [] };
+    });
+    let best = null;
+    for ( const s of order ) {
+      let worst = Infinity, ref = null;
+      for ( const pr of probes ) {
+        if ( !pr.item?.nom ) { worst = 0; break; }
+        const f = SEAT.seatLayout([{ ...pr.item, side: s, step: 3, prio: 0 }], { view: pr.view, panels: pr.panels, pins: pr.pins, tokens: pr.tokens, zoom: pr.z }).get(pr.item.key);
+        const r = f?.ok && !f.rules.includes("side") ? f.cap / pr.item.nom[2] : 0;
+        worst = Math.min(worst, r);
+        if ( pr === probes[0] ) ref = f;
+      }
+      if ( !best || worst > best.worst * 1.04 + 1e-9 ) best = { s, worst, ref };
+    }
+    if ( !best ) return;
+    w.side = best.s;
+    // (the table's own word on that side: where the reference probe stands it at step 2's size, when clean there)
+    const s0 = SEAT.sideOfBox(w.box, sub);
+    if ( s0 && s0.x === best.s.x && s0.y === best.s.y ) return;
+    const pr = probes[0], f = SEAT.seatLayout([{ ...pr.item, side: best.s, step: 2, prio: 0 }], { view: pr.view, panels: pr.panels, pins: pr.pins, tokens: pr.tokens, zoom: pr.z }).get(pr.item.key);
+    if ( f?.ok && f.box && !f.rules.includes("side") ) {
+      const sc = w.size / Math.max(1e-6, f.cap), b = f.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+      // (its box there at the table's own size, about the point nearest the subject)
+      const px = Math.min(b.x1, Math.max(b.x0, c.x)), py = Math.min(b.y1, Math.max(b.y0, c.y));
+      const nx = px + (cx - px) * sc, ny = py + (cy - py) * sc, ox = (w.box.x0 + w.box.x1) / 2, oy = (w.box.y0 + w.box.y1) / 2;
+      w.x += nx - ox; w.y += ny - oy; w.box = C.boxOf(w);
+    }
+  } catch ( err ) { d.warn?.("main side", err); }
 }
 /** One word of a page on the TABLE: its spot (a landing or a fire the reference view holds), its size, its box, its way, its place. */
 function pageWordPlan(p, w0, word, sd, env, d) {

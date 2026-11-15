@@ -442,12 +442,29 @@ function planPage(rec, tries = 0) {
   pending = pending.filter((e) => !isOwned(e));
   for ( const [k, s] of sched ) if ( s.ev && isOwned(s.ev) ) { clearTimeout(s.id); sched.delete(k); }
   if ( mode() === "off" ) return;
+  let first = Infinity;
   for ( const w of pg.words ) {
     if ( stepFor(SZ.groupOfPageWord(w)) === 0 ) continue;                                // (SFXSIZE: its group letters nothing)
     const t = toPerf(w.t), lead = 140;
     if ( lifeOver({ ...w, t }) ) continue;                                                 // (a late joiner: its whole life on the table is over)
+    first = Math.min(first, t - lead);
     later(`pg|${rec.id}|${w.key}`, t - lead - performance.now(), () => pageWord(p, w, t));
   }
+  // (MAPSAME cost: the table picture and this seat's layout of it made AHEAD of the first word, in an idle moment - not inside the frame
+  // the first word starts in (live 2026-11-15 one layout took 114 ms on the player's seat at that frame). A camera moved since lays it
+  // out again at the word, as before.)
+  if ( Number.isFinite(first) ) later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));
+}
+/** how long before a page's first word its table and layout are made (ms; an idle moment within it) */
+const PREP_LEAD = 500;
+const idle = (fn) => { try { if ( typeof requestIdleCallback === "function" ) return requestIdleCallback(fn, { timeout: PREP_LEAD - 200 }); } catch { /* below */ } return setTimeout(fn, 0); };
+/** MAPSAME: a page's table and this seat's layout of it for the current view, made ahead (groupLayout keeps it while the view holds) */
+function prepPage(p) {
+  try {
+    if ( mode() === "off" || !L || !canvas?.ready || !pages.has(p.rec.id) ) return;
+    tablePage(p);
+    if ( p.group?.words?.length ) groupLayout(p.group, view(), canvas.stage?.scale?.x || 1, L.prefs?.scale ?? 1);
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a page's layout failed`, err); }
 }
 /** MAPSFXSEAT: the ground at a firing's impact from the map's pixels (sfx-seat groundOfPixels: the destruction bake's own rule). */
 function groundAt(rec) {
@@ -538,7 +555,7 @@ function playScreen(spec, fixed = null) {
     const box = { x0: ref.box.x0 + off.x, y0: ref.box.y0 + off.y, x1: ref.box.x1 + off.x, y1: ref.box.y1 + off.y }, now = sharedNow();
     screenUp = screenUp.filter((q) => q.life[1] > now);
     const life = [spec.ts ?? toShared(spec.t), (spec.ts ?? toShared(spec.t)) + lifeMs(spec)];
-    const item = { key: "s", prio: 0, box, u: ref.cap, sub: null, sizes: caps?.sizes ?? [ref.cap * sc], min: caps?.min ?? ref.cap * sc, full: caps?.full ?? 0, small: caps?.small ?? 0, life };
+    const item = { key: "s", prio: 0, box, u: ref.cap, sub: null, sizes: caps?.sizes ?? [ref.cap * sc], min: caps?.min ?? ref.cap * sc, full: caps?.full ?? 0, small: caps?.small ?? 0, floor: caps?.floor ?? 0, nom: caps?.nom ?? null, step: caps?.step ?? null, life };
     const f = SEAT.seatLayout([item], { view: { x0: 0, y0: 0, x1: W, y1: H }, panels: [...(uiCache.rects ?? []), ...screenUp.filter((q) => q.life[0] < life[1]).map((q) => q.box)], pins: pinRects(), zoom: 1 }).get("s");
     const at = SEAT.layoutAt({ x: ref.x + off.x, y: ref.y + off.y }, f);
     const oo = { ...o, at, size: f.cap / ((plan?.sizeK ?? 1) * sc), startAt: spec.t, reduced: reducedMotion() };
@@ -701,8 +718,10 @@ function burnRooms(want) {
       const kMin = Math.min(k, SZ.floorPx(globalThis.innerHeight || 900, 1, L.sizeModel) / z), below = [1, 2, 3].filter((s) => s < st).map((s) => burnSize(p, w.live, s) * sc);
       // (a spot off this screen stays where it is: its words are not pulled into view, and it takes no room here)
       const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
-      for ( const i of w.idx ) if ( !on.includes(i) ) arr[i] = { dx: 0, dy: 0, box: null, room: null, ok: true, off: true };
-      const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion: L?.motionMode?.() === "stepped" ? "stepped" : "smooth" });
+      // (MAPSAME: one whose run would still reach into this view, cut at its edge, is not lettered here - sfx-seat offSpot)
+      const motion = L?.motionMode?.() === "stepped" ? "stepped" : "smooth";
+      for ( const i of w.idx ) if ( !on.includes(i) ) arr[i] = { dx: 0, dy: 0, box: null, room: null, ok: SEAT.offSpot(p.at(i, now), k, v0, motion) === "out", off: true };
+      const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion });
       on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / k }; if ( r[j].ok ) taken.push(r[j].box); });
       out.set(key, arr);
     }

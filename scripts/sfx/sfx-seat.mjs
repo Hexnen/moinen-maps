@@ -228,106 +228,152 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const sc = sub ? { x: (sub.x0 + sub.x1) / 2, y: (sub.y0 + sub.y1) / 2 } : { x: (B.x0 + B.x1) / 2, y: (B.y0 + B.y1) / 2 };
     const p = { x: clamp(sc.x, B.x0, B.x1), y: clamp(sc.y, B.y0, B.y1) };
     const at = (f) => ({ x0: p.x + (B.x0 - p.x) * f, y0: p.y + (B.y0 - p.y) * f, x1: p.x + (B.x1 - p.x) * f, y1: p.y + (B.y1 - p.y) * f });
+    // (MAPSAME: the table's STEP-2 box (`box2`, `u2`: where the table placed it before drawing it at its step) is where every step's search
+    // starts, so the envelope a seat finds is the same at every step - from the stepped box a seat found a different envelope per step and
+    // step 1 could draw larger than step 2)
+    const B2 = it.box2 && it.u2 > 0 ? it.box2 : B, u2 = it.box2 && it.u2 > 0 ? it.u2 : u;
+    const p2c = { x: clamp(sc.x, B2.x0, B2.x1), y: clamp(sc.y, B2.y0, B2.y1) };
+    const at2 = (cap) => { const f = cap / u2; return { x0: p2c.x + (B2.x0 - p2c.x) * f, y0: p2c.y + (B2.y0 - p2c.y) * f, x1: p2c.x + (B2.x1 - p2c.x) * f, y1: p2c.y + (B2.y1 - p2c.y) * f }; };
+    const moveOf = (q, cap) => { const b = at(cap / u); return { dx: (q.x0 + q.x1) / 2 - (b.x0 + b.x1) / 2, dy: (q.y0 + q.y1) / 2 - (b.y0 + b.y1) / 2 }; };
     // (off this view: its place and its subject both)
-    if ( inter(B, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); continue; }
+    if ( inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); continue; }
     const rules = [];
     // (its sizes, the first that fits the view whole; a word bigger than the view: the size that fits)
-    const fitCap = (B.x1 - B.x0) > 0 && (B.y1 - B.y0) > 0 ? u * Math.min(vw / (B.x1 - B.x0), vh / (B.y1 - B.y0)) : Infinity;
+    const fitCap = (B2.x1 - B2.x0) > 0 && (B2.y1 - B2.y0) > 0 ? u2 * Math.min(vw / (B2.x1 - B2.x0), vh / (B2.y1 - B2.y0)) : Infinity;
     let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0);
-    let min = Math.min(it.min > 0 ? it.min : sizes.at(-1), sizes.at(-1));
-    // (no clean spot at any of its sizes on this view: smaller - the largest size that stands clean, never under `small` (this seat's
-    // step-1 size: the legibility floor's side of it) - rule "small", question MAPSFXSEAT2-1: clean before as big as before)
-    const small = it.small > 0 ? Math.min(it.small, min) : min;
-    for ( let c = min * 0.95; c > small * 1.0001; c *= 0.95 ) sizes.push(c);
-    if ( small < min - 1e-9 ) sizes.push(small);
-    // (a word that rides: MAPRIDE rideLayout - before, it kept the table's way, which the table holds inside the REFERENCE view: a seat
-    // zoomed closer showed the blast's wave word half off its screen and the bomb's falling word under its panel; held inside the view by
-    // a clamp, the wave then rode over the main word)
-    if ( it.ride && (it.path?.length ?? 0) > 1 ) {
-      const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels: strips, placed, meet });
-      out.set(it.key, { ...r.out, px: p.x, py: p.y });
-      for ( const s of r.samples ) placed.push(s);
-      continue;
-    }
-    if ( sizes.every((c) => c > fitCap) ) { sizes = [fitCap]; rules.push("fit"); } else sizes = sizes.filter((c) => c <= fitCap + 1e-9);
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
     const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
-    const softList = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), hardG = grid([...pins, ...tokens].filter(near), view), softG = grid(softList, view);
+    const hardList = [...pins, ...tokens].filter(near);
     // (its own subject: covered no more than its kind allows, or than the table picture itself covers it - the table's placement weighs
     // that share, it does not forbid it: a big blast's word stands over the top of its crater on the table)
-    const hw0 = sub ? (sub.x1 - sub.x0) / 2 : 0, hh0 = sub ? (sub.y1 - sub.y0) / 2 : 0;
-    const cover = sub ? Math.max(it.cover ?? 0.3, inter(B, sub) / Math.max(1, area(sub))) + 0.02 : 0;
-    // (what may not be covered is the word's INK - its hold picture with the rim under it (`ink`: shares of its box) -, not the room its
-    // box keeps for the entrance and the outline: the box stays whole inside the view)
-    const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
-    const inkOf = (b) => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw = ((b.x1 - b.x0) * kx) / 2, hh = ((b.y1 - b.y0) * ky) / 2; return { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }; };
-    // (nothing clean at any size: the least covered spot, at a size that still keeps its step - a step-3 word not under `full`)
-    let fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
-    const offView = (b) => area(b) - inter(b, v);
-    // (its side of the thing: the way the table put it from the subject's centre, along the axis it stands out most - above, below, left,
-    // right; kept on every seat, left only where this seat has no clean spot on it)
+    const hw = sub ? (sub.x1 - sub.x0) / 2 : 0, hh = sub ? (sub.y1 - sub.y0) / 2 : 0;
+    // (MAPSAME: its side of the thing - the way the table put it from the subject's centre, along the axis it stands out most: above,
+    // below, left, right - is THE TABLE'S on every seat: a seat moves the word along that side and away from the thing, and makes it
+    // smaller, but never stands it on another side while its own side holds it clean at its legibility floor (live 2026-11-15 the blast's
+    // word stood below the bomb on the GM's seat and right of it on the player's: each seat took "the largest clean size on any side")
     const sideOf = (b) => {
-      const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw0 + (b.x1 - b.x0) / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh0 + (b.y1 - b.y0) / 2);
+      const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw + (b.x1 - b.x0) / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh + (b.y1 - b.y0) / 2);
       if ( Math.max(Math.abs(ox), Math.abs(oy)) < 0.15 ) return null;
       return Math.abs(ox) > Math.abs(oy) ? { x: Math.sign(ox), y: 0 } : { x: 0, y: Math.sign(oy) };
     };
-    const side0 = sideOf(B), side = side0 ?? { x: 0, y: 0 };
+    const side0 = sub ? (it.side && (it.side.x || it.side.y) ? { x: Math.sign(it.side.x), y: Math.sign(it.side.y) } : sideOf(B2)) : null;
     const flips = (b) => { if ( !side0 ) return 0; const s2 = sideOf(b); return !s2 || s2.x !== side0.x || s2.y !== side0.y ? 1 : 0; };
-    // (the table's side order round the subject, and which of its sides a box stands on)
+    // (a word that rides (a bomb's fall, a shock wave): MAPRIDE rideLayout, its way kept on the table's side of its subject - MAPSAME)
+    if ( it.ride && (it.path?.length ?? 0) > 1 ) {
+      const nomR = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
+      if ( nomR ) {
+        // (MAPSAME: as a standing word - its envelope is the largest size up to its step-3 size whose way stands clean here, the same at
+        // every step; the step draws its share on that way, inside it)
+        const fl = Math.min(it.floor > 0 ? it.floor : Infinity, nomR[0]);
+        sizes = [nomR[2]]; for ( let c = nomR[2] * 0.95; c > fl * 1.0001; c *= 0.95 ) sizes.push(c); if ( fl < nomR[2] - 1e-9 ) sizes.push(fl);
+      } else {
+        let min = Math.min(it.min > 0 ? it.min : sizes.at(-1), sizes.at(-1));
+        const small = it.small > 0 ? Math.min(it.small, min) : min;
+        for ( let c = min * 0.95; c > small * 1.0001; c *= 0.95 ) sizes.push(c);
+        if ( small < min - 1e-9 ) sizes.push(small);
+      }
+      const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels: strips, placed, meet, sub });
+      const o = { ...r.out, px: p.x, py: p.y };
+      if ( nomR && o.way ) {
+        const st = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2, env = o.cap, G = MIN_GAIN, fl = Math.min(it.floor > 0 ? it.floor : Infinity, nomR[0], env);
+        const d2 = Math.max(fl, Math.min(nomR[1], env / G)), d1 = Math.max(fl, Math.min(nomR[0], d2 / G)), dr = Math.min(env, [d1, d2, env][st - 1]);
+        const rr = o.rules.filter((q) => q !== "size");
+        if ( Math.abs(dr - u) > 1e-6 ) rr.splice(1, 0, "size");
+        if ( dr < nomR[st - 1] - 1e-6 ) rr.push("room");
+        Object.assign(o, { cap: dr, k: dr / u, f: dr / u, env: env, rules: rr, rule: rr.at(-1) });
+      }
+      out.set(it.key, o);
+      for ( const s2 of r.samples ) placed.push(s2);
+      continue;
+    }
+    const softList = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), hardG = grid(hardList, view), softG = grid(softList, view);
+    const cover = sub ? Math.max(it.cover ?? 0.3, Number.isFinite(it.cov2) ? it.cov2 : inter(B, sub) / Math.max(1, area(sub))) + 0.02 : 0;
+    // (what may not be covered is the word's INK - its hold picture with the rim under it (`ink`: shares of its box) -, not the room its
+    // box keeps for the entrance and the outline: the box stays whole inside the view)
+    const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
+    const inkOf = (b) => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw2 = ((b.x1 - b.x0) * kx) / 2, hh2 = ((b.y1 - b.y0) * ky) / 2; return { x0: cx - hw2, y0: cy - hh2, x1: cx + hw2, y1: cy + hh2 }; };
+    const offView = (b) => area(b) - inter(b, v);
+    // (the table's side order round the subject - for a word that has no room on its own side at all -, and which of its sides a box stands on)
     const around = it.around?.length ? it.around : AROUND, touch = Number.isFinite(it.touch) ? it.touch : 0.18;
-    const hw = sub ? (sub.x1 - sub.x0) / 2 : 0, hh = sub ? (sub.y1 - sub.y0) / 2 : 0;
-    const rankOf = (b, bw, bh) => {
-      const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw + bw / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh + bh / 2);
-      let k = around.length, dk = Infinity;
-      for ( let i = 0; i < around.length; i++ ) { const dd = Math.hypot(ox - around[i][0], oy - around[i][1]); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } }
-      return k;
-    };
-    let best = null, fallback = null;
-    const hardList = [...pins, ...tokens].filter(near);
-    const trySize = (cap, prune = false) => {
-      const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
+    // (MAPSAME: by SIDE - the sides in the order their first entry of `around` names them -, not by the nearest entry of `around`: a
+    // candidate a few px lower on the same side ranked two entries later and the search never reached the clean spot just past a panel)
+    const sideOrder = [];
+    for ( const [ox, oy] of [...around, [0, -1], [0, 1], [-1, 0], [1, 0]] ) { if ( !ox && !oy ) continue; const s = Math.abs(ox) > Math.abs(oy) ? `${Math.sign(ox)},0` : `0,${Math.sign(oy)}`; if ( !sideOrder.includes(s) ) sideOrder.push(s); }
+    const rankOf = (b) => { const s2 = sideOf(b); const i = s2 ? sideOrder.indexOf(`${s2.x},${s2.y}`) : -1; return i < 0 ? sideOrder.length : i; };
+    let best = null, fallback = null, fmin = Infinity;
+    // (one size: the nearest clean spot - `strict`: on the table's side only. Candidates searched nearest first (a candidate's score is
+    // never under its `base`, so the search stops at the first whose base is not better than the best clean one): the table's place
+    // scaled about its pivot, held into the view; away from the thing and along it on its side; spots touching the subject along its
+    // side; the nearest free moves (exact, in move space) from the table's place and from its side's touching spot; and, from every
+    // candidate that meets an obstacle, just past that obstacle on each side (so a word between two obstacles finds the gap)
+    const trySize = (cap, prune, strict, scan = false) => {
+      const f = cap / u, b0 = at2(cap), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
       const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
-      // (MAPRIDE cost: a size whose ink has no spot in the view off every pin and token - proven exactly by hardFree - has no clean spot:
-      // its search is skipped where only a clean spot counts)
       const A = { x0: Math.min(d0.dx, v.x0 - b0.x0), x1: Math.max(d0.dx, v.x1 - b0.x1), y0: Math.min(d0.dy, v.y0 - b0.y0), y1: Math.max(d0.dy, v.y1 - b0.y1) };
-      const F = forbOf(inkOf(b0), A, hardList, softList);
-      if ( prune && !freeIn(F, A) ) return;
+      const F = prune ? forbOf(inkOf(b0), A, hardList, softList) : [];
+      // (MAPRIDE cost: a size whose ink has no spot in the view off every pin and token - proven exactly - has no clean spot)
+      // (checked lazily - once the nearest candidates found nothing clean: a size that stands clean near its place skips the sweep)
+      let proven = !prune;
       const clampD = (d) => { const q = mv(b0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
-      // candidate shifts, searched nearest first (best first: a candidate's score is never under its `base`, so the search stops at the
-      // first candidate whose base is not better than the best clean one): none / into the view; away from the thing and along it on its
-      // own side; beside its subject on each side of the table's own order; and, from every candidate that meets an obstacle, just past
-      // that obstacle on each side (so a word between two obstacles finds the gap)
       const queue = [], seen = new Set();
-      const add = (d) => {
+      const add = (d, g = false) => {
         const c = clampD(d), k = Math.round(c.dx) * 2097152 + Math.round(c.dy);
         if ( seen.has(k) ) return;
         seen.add(k);
-        const q = mv(b0, c), fl = flips(q), dist = Math.hypot(c.dx, c.dy) / Math.max(1, bh);
-        heapPush(queue, { d: c, q, fl, base: fl ? 6 + 2 * rankOf(q, bw, bh) + dist : dist });
+        const q = mv(b0, c), fl = flips(q);
+        if ( strict && fl ) return;
+        const dist = Math.hypot(c.dx, c.dy) / Math.max(1, bh);
+        heapPush(queue, { d: c, q, fl, g, base: fl ? 6 + 2 * rankOf(q, bw, bh) + dist : dist });
       };
       add(d0);
-      const ax = side.x || (side.y ? 0 : 1), ay = side.y || (side.x ? 0 : -1);
-      for ( const s of [0.25, 0.5, 1, 1.5, 2.5] ) { add({ dx: d0.dx + ax * s * bh, dy: d0.dy + ay * s * bh }); add({ dx: d0.dx + s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx - s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx, dy: d0.dy + s * bh }); add({ dx: d0.dx, dy: d0.dy - s * bh }); }
-      // (beside its subject on each side of the table's own order `around`, touching it as the table places - and a step farther out:
-      // a seat that must leave the table's side takes the first side of that SHARED order it can show clean, so two seats that both
+      const s = side0 ?? { x: 0, y: -1 }, ax = s.x, ay = s.y, px = -ay, py = ax;
+      // (toward the thing too: a seat's edge or panels may hold it nearer than the table's place, still on its side)
+      for ( const g of [0.25, 0.5] ) add({ dx: d0.dx - ax * g * bh, dy: d0.dy - ay * g * bh });
+      for ( const g of [0.25, 0.5, 1, 1.5, 2.5] ) { add({ dx: d0.dx + ax * g * bh, dy: d0.dy + ay * g * bh }); add({ dx: d0.dx + px * g * bw * 0.5, dy: d0.dy + py * g * bw * 0.5 }); add({ dx: d0.dx - px * g * bw * 0.5, dy: d0.dy - py * g * bw * 0.5 }); }
+      if ( !strict ) for ( const g of [0.25, 0.5, 1, 1.5, 2.5] ) { add({ dx: d0.dx, dy: d0.dy + g * bh }); add({ dx: d0.dx, dy: d0.dy - g * bh }); }
+      // (along its own side of the subject, touching it as the table places and farther out, from one end of that side to the other)
+      let dSide = null;
+      if ( sub && side0 ) {
+        const hs = ax ? hw : hh, bs = ax ? bw : bh, hp = ax ? hh : hw, bp = ax ? bh : bw;
+        for ( const g of [0, 0.5, 1.5] ) for ( const t of [0, -0.5, 0.5, -1, 1] ) {
+          const o = hs + bs / 2 - touch * bh + g * bh, l = t * (hp + bp / 2) * 0.9;
+          const tx = sc.x + ax * o + px * l, ty = sc.y + ay * o + py * l, d = { dx: tx - (b0.x0 + b0.x1) / 2, dy: ty - (b0.y0 + b0.y1) / 2 };
+          if ( g === 0 && t === 0 ) dSide = clampD(d);
+          add(d);
+        }
+      }
+      // (another side only where its own has no room: beside its subject on each side of the table's own order, so two seats that both
       // must leave it agree)
-      if ( sub ) for ( const [ox, oy] of around ) for ( const g of [0, 0.5] ) {
+      if ( sub && !strict ) for ( const [ox, oy] of around ) for ( const g of [0, 0.5] ) {
         const tx = sc.x + ox * (hw + bw / 2 - touch * bh + g * bh), ty = sc.y + oy * (hh + bh / 2 - touch * bh + g * bh);
         add({ dx: tx - (b0.x0 + b0.x1) / 2, dy: ty - (b0.y0 + b0.y1) / 2 });
       }
-      // (MAPRIDE cost: the nearest move off every pin and token and out from under any one panel / word, along SEAT_RAYS directions -
-      // found exactly in move space, so a crowded view's clean spot is among the first tried, not after the escapes of every nearer one)
-      if ( prune ) for ( const d of freeRays(F, A, d0, SEAT_RAYS) ) add(d);
+      if ( prune ) { for ( const d of freeRays(F, A, d0, SEAT_RAYS) ) add(d); if ( dSide ) for ( const d of freeRays(F, A, dSide, SEAT_RAYS / 2) ) add(d); }
+      // (MAPSAME `scan`: every move of a grid over the view too - SCAN_X of its width, SCAN_Y of its height apart, at most SCAN_N of them -:
+      // a spot that needs a move along two ways at once (off a panel AND off its subject's allowed share) is not reached from the seeds)
+      let lim = MAX_EVALS;
+      if ( scan ) {
+        const sx = Math.max(bw * SCAN_X, (A.x1 - A.x0) / SCAN_N_X), sy = Math.max(bh * SCAN_Y, (A.y1 - A.y0) / SCAN_N_Y);
+        const k0 = inkOf(b0), sa = sub ? cover * area(sub) : 0;
+        for ( let gy = A.y0; gy <= A.y1 + 1e-6; gy += sy ) for ( let gx = A.x0; gx <= A.x1 + 1e-6; gx += sx ) {
+          // (only the points off every forbidden move and not over too much of the subject reach the queue)
+          let no = false;
+          for ( let i = 0; i < F.length && !no; i++ ) { const r = F[i]; no = r.x0 < gx && gx < r.x1 && r.y0 < gy && gy < r.y1; }
+          if ( no || (sub && inter({ x0: k0.x0 + gx, y0: k0.y0 + gy, x1: k0.x1 + gx, y1: k0.y1 + gy }, sub) > sa + 1e-6) ) continue;
+          add({ dx: gx, dy: gy }, true); lim++;
+        }
+      }
       let evals = 0;
-      while ( queue.length && evals < MAX_EVALS ) {
+      while ( queue.length && evals < lim ) {
         const c = heapPop(queue);
-        if ( best && best.cap === cap && c.base >= best.score - 1e-9 ) break;
-        // (where only a clean spot counts, a move that is forbidden - on a pin / token, or under one panel / word beyond the edge - cannot
-        // be one: skipped; the free moves near it were seeded above)
+        if ( best && c.base >= best.score - 1e-9 ) break;
         if ( prune && F.some((r) => r.x0 < c.d.dx && c.d.dx < r.x1 && r.y0 < c.d.dy && c.d.dy < r.y1) ) continue;
         evals++;
+        if ( !proven && !best && evals > 12 ) { proven = true; if ( !freeIn(F, A) ) return; }
         const { d, q, fl } = c, k = inkOf(q);
+        // (a grid point over too much of its subject: nothing more to learn from it)
+        if ( c.g && sub && inter(k, sub) > cover * area(sub) + 1e-6 ) continue;
         let hh2 = 0, soft = 0;
         const met = [];
         for ( const o of hardG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { hh2 += a; met.push(o); } }
@@ -337,85 +383,90 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         // (clean: whole in the view, off every pin and token, its own subject covered no more than allowed, and at most SOFT_OK of its ink
         // under this seat's panels / words up with it - an edge under a panel is read, a word made smaller is weaker: MAPSFXSEAT2-1)
         const clean = hh2 <= 1e-6 && off <= 1e-6 && subX <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
-        // (clean first; on its own side; off it, the earliest side of the shared order; then the nearest, the least covered)
         const score = c.base + (soft / Math.max(1, ia)) * 40;
-        // (made smaller for want of room: the largest clean size on any side - its own side first at a size, then the shared order -:
-        // the roomiest side is the one seats short of room share, and the word stays as strong as this view lets it; live 2026-11-15
-        // "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it, MAPSFXSEAT2-6)
-        // (the larger size wins, then the lower score: the sizes under `min` are not tried in order, see below)
-        const over = (o) => !o || cap > o.cap + 1e-9 || (Math.abs(cap - o.cap) <= 1e-9 && score < o.score - 1e-9);
         if ( clean ) {
-          if ( over(best) ) best = { cap, f, d, q, score, fl, soft };
-          // (clean with an edge under a panel / word: the spot just past it too - a seeded move may land inside the edge it may take)
+          if ( !best || score < best.score - 1e-9 ) best = { cap, f, d, q, score, fl, soft };
           if ( prune && soft > 1e-6 ) for ( const o of metSoft ) { add({ dx: d.dx + o.x0 - k.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - k.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - k.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - k.y0 + 1 }); }
           continue;
         }
-        else if ( cap >= fmin - 1e-9 ) {
-          // (nothing clean at any size: the least covered at a size not under `fmin` - off pins and tokens first, then on its own side, then
-          // the least covered and the least cut by the view edge)
+        if ( cap >= fmin - 1e-9 ) {
+          // (nothing clean at all: the least covered at its step's size - off pins and tokens first, then on its own side, then the least
+          // covered and the least cut by the view edge)
           const fs = ((soft + subX + hh2 * 1000 + off * 4) / Math.max(1, area(q))) * 100 + fl * 20 + score;
-          if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs };
+          if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs, fl };
         }
-        // (escapes: past each pin / token it meets, and past the panels / words it meets only when they cover more than the edge allowed)
         if ( soft > SOFT_OK * ia + 1e-6 ) met.push(...metSoft);
         for ( const o of met ) { add({ dx: d.dx + o.x0 - k.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - k.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - k.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - k.y0 + 1 }); }
-        if ( sub && subX > 1e-6 ) { add({ dx: d.dx, dy: d.dy + (side.y || -1) * Math.min(bh, subX / Math.max(1, k.x1 - k.x0)) }); }
-      }
-    };
-    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") down to the
-    // legibility floor x MIN_GAIN, on any side (its own first at a size). Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
-    // fits where a larger one did nearly always, and a view with no room at all tries a third of the sizes. The run under `min` is the
-    // same on every step (`min` x 0.95^k), so its search finds the same size whichever step the word was asked at)
-    const gallop = (list) => {
-      let hit = -1;
-      for ( let j = 0; list.length; j = Math.min(j + 4, list.length - 1) ) {
-        trySize(list[j], true);
-        if ( best ) { hit = j; break; }
-        if ( j === list.length - 1 ) break;
-      }
-      if ( hit > 0 ) for ( let j = Math.max(1, hit - 3); j < hit; j++ ) { const was = best; trySize(list[j], true); if ( best !== was ) break; }
-    };
-    const search = (list) => {
-      gallop(list.filter((c) => c >= min - 1e-9));
-      if ( !best ) gallop(list.filter((c) => c < min - 1e-9));
-    };
-    // (step 1 yields: where a step-2 word would have to shrink for room here (`probe`: its sizes on this seat), step 1 stays at most
-    // 1 / MIN_GAIN of what step 2 gets - a seat short of room keeps step 1 < step 2 as drawn, never under the legibility floor)
-    if ( it.probe?.length && !rules.includes("fit") ) {
-      const keep = [min, fmin], pr = it.probe.filter((c) => c <= fitCap + 1e-9);
-      if ( pr.length ) {
-        min = fmin = pr[0];
-        search(pr);
-        const c2 = best?.cap ?? pr.at(-1);
-        best = fallback = null; [min, fmin] = keep;
-        const lim = Math.max(c2 / MIN_GAIN, it.floor > 0 ? it.floor : 0);
-        if ( sizes[0] > lim + 1e-9 ) {
-          const s2 = sizes.filter((c) => c <= lim + 1e-9);
-          sizes = s2.length ? s2 : [lim]; min = Math.min(min, sizes.at(-1)); fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
-          rules.push("yield");
+        if ( sub && subX > 1e-6 ) {
+          // (too much of its subject under it: away from the thing, or along its side by as much (MAPSAME: a word that must also clear a
+          // panel past the subject - the blast's word between the crater and the hotbar - finds its spot only sideways))
+          const ow = Math.max(1, Math.min(k.x1, sub.x1) - Math.max(k.x0, sub.x0)), oh = Math.max(1, Math.min(k.y1, sub.y1) - Math.max(k.y0, sub.y0)), ga = Math.min(bh, subX / (ax ? oh : ow)), gp = Math.min(bw, subX / (ax ? ow : oh));
+          add({ dx: d.dx + ax * ga, dy: d.dy + ay * ga }); add({ dx: d.dx + px * gp, dy: d.dy + py * gp }); add({ dx: d.dx - px * gp, dy: d.dy - py * gp });
         }
       }
+    };
+    const cleanAt = (cap, strict, scan = false) => { best = null; trySize(cap, true, strict, scan); const b = best; best = null; return b; };
+    // (MAPSAME, the size: ONE layout for every step - the word's ENVELOPE, the largest size up to its step-3 size on this seat (`nom`
+    // [step 1, 2, 3]: the engine's own size for this window and zoom at step 2 and the steps' shares) that stands clean on its side; then
+    // each step draws its own share INSIDE that envelope, scaled about the envelope's point nearest the thing: step 3 the envelope,
+    // step 2 its own size but at most the envelope / MIN_GAIN, step 1 its own but at most step 2 / MIN_GAIN, none under the legibility floor.
+    // So the sliders mean what they say as drawn on every seat (3 > 2 > 1, each at least MIN_GAIN apart wherever the floor allows), a
+    // seat short of room keeps its words where they stand at every step (the same picture, only bigger or smaller), and the words laid out
+    // after it keep off its envelope whatever the step - before, step 3 and step 2 of a crowded seat drew the same size (live 185 / 186,
+    // question MAPSAME-1), and each step searched its own spots)
+    const nom = Array.isArray(it.nom) && it.nom.length === 3 && it.nom.every((c) => c > 0) ? it.nom : null;
+    const step = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2;
+    const floorC = Math.min(it.floor > 0 ? it.floor : Infinity, nom ? nom[0] : Infinity, it.small > 0 ? it.small : Infinity, it.min > 0 ? it.min : Infinity, ...sizes);
+    let top = nom ? nom[2] : sizes[0], fitted = false;
+    if ( top > fitCap ) { top = fitCap; fitted = true; }
+    const lo = Math.min(floorC, top);
+    // (the sizes the envelope may take, from the largest down to the floor: 0.95 apart, searched by halving)
+    const ladder = [top]; for ( let c = top * 0.95; c > lo * 1.0001; c *= 0.95 ) ladder.push(c); if ( lo < top - 1e-9 ) ladder.push(lo);
+    const largest = (strict) => {
+      let r = cleanAt(ladder[0], strict);
+      if ( r || ladder.length < 2 ) return r;
+      const rl = cleanAt(ladder.at(-1), strict) ?? cleanAt(ladder.at(-1), strict, true);
+      if ( !rl ) return null;
+      let a = 0, b = ladder.length - 1; r = rl;
+      while ( b - a > 1 ) { const mid = (a + b) >> 1, rm = cleanAt(ladder[mid], strict); if ( rm ) { b = mid; r = rm; } else a = mid; }
+      // (MAPSAME: the sizes just above the one found, each with the grid scan too, while they stand clean (at most SCAN_UP of them): the
+      // nearest-first search misses a spot that needs two moves at once; live 2026-11-15 the player's blast word stood one or two sizes
+      // smaller than its room on the take)
+      for ( let i = b - 1, n = 0; i >= 0 && n < SCAN_UP; i--, n++ ) { const rs = cleanAt(ladder[i], strict, true); if ( !rs ) break; r = rs; }
+      return r;
+    };
+    let env = largest(true);
+    if ( !env && sub && side0 ) { env = largest(false); if ( env?.fl ) rules.push("side"); }
+    const want = nom ? nom[step - 1] : sizes[0];
+    let pick;
+    if ( env ) {
+      const r = env.cap, G = MIN_GAIN, fl = Math.min(floorC, r);
+      const d3 = r, d2 = nom ? Math.max(fl, Math.min(nom[1], r / G)) : r, d1 = nom ? Math.max(fl, Math.min(nom[0], d2 / G)) : r;
+      const dr = Math.min(r, nom ? [d1, d2, d3][step - 1] : Math.min(want, r));
+      // (the step's word inside the envelope, on the same side of the thing in the same proportion: shrinkOnSide)
+      const q = env.q, qd = shrinkOnSide(q, dr / r, sub, [kx, ky]);
+      // (its move: the drawn box's centre against the table's box of this step at that size, scaled about p)
+      pick = { cap: dr, f: dr / u, d: moveOf(qd, dr), q: qd, env: q, soft: env.soft };
+      if ( dr < want - 1e-6 ) rules.push("room");
+      if ( nom && step > 1 && dr < [d1, d2, d3][step - 2] * G - 1e-6 ) rules.push("floor");
+    } else {
+      // (nothing clean on any side even at the floor: the least covered spot at its step's size (capped to the view), its own side first)
+      best = null; fallback = null; fmin = Math.min(want, top);
+      trySize(fmin, false, false);
+      const fb = fallback ?? { cap: fmin, q: at2(fmin) };
+      pick = { cap: fb.cap, f: fb.cap / u, d: moveOf(fb.q, fb.cap), q: fb.q, env: fb.q, soft: 1 };
+      rules.push("tight");
+      if ( fb.fl ) rules.push("side");
     }
-    // (a view with no clean spot even at its smallest size has none at any: only the least covered spot at the largest size and the
-    // smallest that keeps its step (`fmin`) is sought)
-    if ( sizes.length > 2 ) {
-      trySize(sizes.at(-1));
-      const none = !best;
-      best = null;
-      if ( none ) { const fs = sizes.filter((c) => c >= fmin - 1e-9); for ( const cap of new Set([fs[0], fs.at(-1)]) ) if ( cap > 0 ) trySize(cap); }
-      else search(sizes);
-    } else for ( const cap of sizes ) { trySize(cap); if ( best ) break; }
-    const pick = best ?? fallback ?? { cap: sizes[0], f: sizes[0] / u, d: { dx: 0, dy: 0 }, q: at(sizes[0] / u) };
-    if ( Math.abs(pick.f - 1) > 1e-6 && !rules.includes("fit") ) rules.push("size");
-    if ( Math.abs(pick.d.dx) > 1e-6 || Math.abs(pick.d.dy) > 1e-6 ) rules.push("shift");
-    if ( best && best.fl ) rules.push("side");
-    if ( !best ) rules.push("tight");
-    if ( best && it.full > 0 && best.cap < it.full - 1e-9 && best.cap >= min - 1e-9 ) rules.push("full");
-    if ( best && best.cap < min - 1e-9 ) rules.push("small");
-    if ( best?.soft > 1e-6 ) rules.push("edge");
-    const r = { cap: pick.cap, k: pick.f, f: pick.f, px: p.x, py: p.y, dx: pick.d.dx, dy: pick.d.dy, box: pick.q, rules, rule: rules.at(-1) ?? "ok", clean: !!best && !(best.soft > 1e-6), ok: !!best };
+    if ( fitted ) rules.push("fit");
+    if ( Math.abs(pick.f - 1) > 1e-6 && !rules.includes("fit") ) rules.unshift("size");
+    if ( Math.abs(pick.d.dx) > 1e-6 || Math.abs(pick.d.dy) > 1e-6 ) rules.splice(rules.includes("size") ? 1 : 0, 0, "shift");
+    if ( env && env.soft > 1e-6 ) rules.push("edge");
+    const r = { cap: pick.cap, k: pick.f, f: pick.f, px: p.x, py: p.y, dx: pick.d.dx, dy: pick.d.dy, box: pick.q, env: pick.env, rules, rule: rules.at(-1) ?? "ok",
+      clean: !!env && !(env.soft > 1e-6), ok: !!env, side: side0 ? `${side0.x},${side0.y}` : null };
     out.set(it.key, r);
-    placed.push({ box: inkOf(pick.q), life: it.life ?? null });
+    // (the words laid out after it keep off its envelope - the same arrangement at every step)
+    placed.push({ box: inkOf(pick.env), life: it.life ?? null });
   }
   return out;
 }
@@ -442,10 +493,10 @@ export const RIDE_RAYS = 16;
 /** the farthest a rider's way moves to stand clean, in its box heights (farther: a smaller size first) */
 export const RIDE_MOVE = 8;
 /** the changes of a rider's way (cheapest first) whose moves are searched at one size (bounds the cost on a crowded view) */
-export const RIDE_PAIRS = 30;
+export const RIDE_PAIRS = 10; // (MAPSAME: 30 before - the moved searches past the tenth cheapest change never won on the take's or the crowded seats and cost half the page's layout)
 /** samples per stretch kept off pins and tokens as one box in the move search (the check itself still sweeps sample to sample) */
 export const RIDE_SPAN = 3;
-export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [], meet = () => true }) {
+export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [], meet = () => true, sub = null }) {
   const P = it.path, t0 = it.life?.[0] ?? 0, tEnd = Number.isFinite(it.stop) ? it.stop : it.life?.[1] ?? t0 + (P.at(-1).ms ?? 0) + 600;
   const bw0 = it.w?.bw > 0 ? it.w.bw : u * 4, bh0 = it.w?.bh > 0 ? it.w.bh : u * 1.6;
   const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
@@ -461,6 +512,19 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     return { x: a.x + (b.x - a.x) * g, y: a.y + (b.y - a.y) * g, ms };
   };
   const base = fr.map(pointAt);
+  // (MAPSAME: the side of its subject the table's way stands on - the union of its samples' boxes - is kept on every seat: a way moved,
+  // turned or shortened to stand clean stays on that side; live 2026-11-15 the bomb's falling word rode right of the pin on one seat and
+  // above it on the other)
+  const sideWay = (pts, bw, bh) => {
+    if ( !sub ) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for ( const q of pts ) { x0 = Math.min(x0, q.x - bw / 2); y0 = Math.min(y0, q.y - bh / 2); x1 = Math.max(x1, q.x + bw / 2); y1 = Math.max(y1, q.y + bh / 2); }
+    return sideOfBox({ x0, y0, x1, y1 }, sub);
+  };
+  const side0 = sideWay(base, bw0 * (sizes[0] / u), bh0 * (sizes[0] / u));
+  // (measured with the word at its largest size whatever size a candidate tries: the side of the WAY - a smaller word on the same way
+  // stands on the same side; measured at each size, a way of a small word read as beside the subject where the large one read above it)
+  const keeps = (pts) => { if ( !side0 ) return true; const s2 = sideWay(pts, bw0 * (sizes[0] / u), bh0 * (sizes[0] / u)); return !!s2 && s2.x === side0.x && s2.y === side0.y; };
   const nearOf = (o) => o.x1 > v.x0 && o.x0 < v.x1 && o.y1 > v.y0 && o.y0 < v.y1;
   const panG = grid(panels.filter(nearOf), v), hardG = grid(hard.filter(nearOf), v);
   // (the words up with it, by the instant: a sample meets only those whose life holds it)
@@ -509,7 +573,7 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     const d0 = { dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }, c0 = costOf(d0);
     if ( c0 >= limit ) return null;
     // (the least move first - the table's way, or held into the view: clean, nothing cheaper exists for this change)
-    if ( !move ) { const pts = pts0.map((q) => ({ ...q, x: q.x + d0.dx, y: q.y + d0.dy })), r = evalWay(pts, bw, bh); return r.clean ? { pts, d: d0, cost: c0, worst: r.worst, bw, bh, f, c } : { miss: r.met.length / pts.length }; }
+    if ( !move ) { const pts = pts0.map((q) => ({ ...q, x: q.x + d0.dx, y: q.y + d0.dy })), r = evalWay(pts, bw, bh); return r.clean && keeps(pts, bw, bh) ? { pts, d: d0, cost: c0, worst: r.worst, bw, bh, f, c } : { miss: r.met.length / pts.length }; }
     // (the farthest move worth its cost against `limit` and RIDE_MOVE heights: only the obstacles within it count)
     const Rm = Math.min(RIDE_MOVE * bh, Number.isFinite(limit) ? ((limit - c.cost - 2) / 1.5) * bh : Infinity);
     if ( !(Rm > 0) ) return null;
@@ -538,7 +602,9 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     const cands = freeRays(forb, M, { dx: 0, dy: 0 }, RIDE_RAYS);
     const list = cands.map((d) => ({ d, cost: costOf(d) })).filter((q) => q.cost < limit).sort((p, q) => p.cost - q.cost);
     for ( const { d, cost } of list ) {
-      const pts = pts0.map((q) => ({ ...q, x: q.x + d.dx, y: q.y + d.dy })), r = evalWay(pts, bw, bh);
+      const pts = pts0.map((q) => ({ ...q, x: q.x + d.dx, y: q.y + d.dy }));
+      if ( !keeps(pts, bw, bh) ) continue;
+      const r = evalWay(pts, bw, bh);
       if ( r.clean ) return { pts, d, cost, worst: r.worst, bw, bh, f, c };
     }
     return null;
@@ -594,6 +660,32 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
   const samples = best.pts.map((q, i) => ({ box: { x0: q.x - (best.bw * kx) / 2, y0: q.y - (best.bh * ky) / 2, x1: q.x + (best.bw * kx) / 2, y1: q.y + (best.bh * ky) / 2 }, life: lifeAt(i) }));
   return { out: { cap: best.cap, k: best.f, f: best.f, dx: 0, dy: 0, box: bx, way, rules, rule: rules.at(-1), clean: best.worst <= 1e-6, ok: true }, samples };
 }
+/** MAPSAME: the side of `sub` box `b` stands on - along the axis it stands out most, its centre's offset over the two half sizes -:
+    { x, y } (one of them 0), null when it stands over the subject's centre. The seat layout keeps every word on the table's side. */
+export function sideOfBox(b, sub) {
+  const sx = (sub.x0 + sub.x1) / 2, sy = (sub.y0 + sub.y1) / 2;
+  const ox = ((b.x0 + b.x1) / 2 - sx) / Math.max(1, (sub.x1 - sub.x0) / 2 + (b.x1 - b.x0) / 2), oy = ((b.y0 + b.y1) / 2 - sy) / Math.max(1, (sub.y1 - sub.y0) / 2 + (b.y1 - b.y0) / 2);
+  if ( Math.max(Math.abs(ox), Math.abs(oy)) < 0.15 ) return null;
+  return Math.abs(ox) > Math.abs(oy) ? { x: Math.sign(ox), y: 0 } : { x: 0, y: Math.sign(oy) };
+}
+/** MAPSAME: box `q` drawn `f` times its size (f <= 1) on the same side of `sub` as `q`: its centre's offset from the subject's centre keeps
+    its share of the two half sizes on both axes (the side test of sideOfBox reads the same), held inside `q`. Scaling about the point of
+    `q` nearest the subject's centre moved a word that overlaps its subject (a blast's word over the top of its crater) into the subject:
+    the player's step-1 word read as standing ON the bomb while the GM's stood below it. Without a subject: about `q`'s centre. */
+export function shrinkOnSide(q, f, sub, ink = null) {
+  const w = (q.x1 - q.x0) * f, h = (q.y1 - q.y0) * f;
+  let cx = (q.x0 + q.x1) / 2, cy = (q.y0 + q.y1) / 2;
+  if ( sub && f !== 1 ) {
+    const sx = (sub.x0 + sub.x1) / 2, sy = (sub.y0 + sub.y1) / 2, hw = (sub.x1 - sub.x0) / 2, hh = (sub.y1 - sub.y0) / 2;
+    const ox = (cx - sx) / Math.max(1, hw + (q.x1 - q.x0) / 2), oy = (cy - sy) / Math.max(1, hh + (q.y1 - q.y0) / 2);
+    cx = sx + ox * Math.max(1, hw + w / 2); cy = sy + oy * Math.max(1, hh + h / 2);
+    // (smaller: inside `q`, so it stands where `q` stood clean; larger (the table drawing a step-2 place at step 3): as it falls)
+    // (`ink` [kx, ky]: its ink inside q's ink - what q kept clean -, which also holds the box inside q)
+    const kx = ink?.[0] > 0 ? Math.min(1, ink[0]) : 1, ky = ink?.[1] > 0 ? Math.min(1, ink[1]) : 1, qx = (q.x0 + q.x1) / 2, qy = (q.y0 + q.y1) / 2;
+    if ( f < 1 ) { cx = clamp(cx, qx - ((q.x1 - q.x0 - w) * kx) / 2, qx + ((q.x1 - q.x0 - w) * kx) / 2); cy = clamp(cy, qy - ((q.y1 - q.y0 - h) * ky) / 2, qy + ((q.y1 - q.y0 - h) * ky) / 2); }
+  }
+  return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
+}
 /** the share of a word's ink a seat lets lie under its own panels / the words up with it (its edge) before it moves farther or is made
     smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size
     between the challenges panel, the scene bar, the hotbar and the bomb's pin) */
@@ -619,8 +711,10 @@ export function freeRays(F, A, d0, n = 16) {
     else { const ta = y0 / uy, tb = y1 / uy; a0 = Math.max(a0, Math.min(ta, tb)); a1 = Math.min(a1, Math.max(ta, tb)); }
     return a0 < a1 || (!open && a0 <= a1) ? [a0, a1] : null;
   };
-  // (each ray: the forbidden intervals of t once, into a flat array; then t pushed past any that holds it until none does)
-  const m = F.length, iv = new Float64Array(2 * m);
+  // (each ray: the forbidden intervals of t once, into a flat array; then t pushed past any that holds it until none does. The rectangles
+  // relative to d0 once for every ray, in flat arrays: the seat layout's hottest loop on a crowded view)
+  const m = F.length, iv = new Float64Array(2 * m), X0 = new Float64Array(m), X1 = new Float64Array(m), Y0 = new Float64Array(m), Y1 = new Float64Array(m);
+  for ( let i = 0; i < m; i++ ) { const o = F[i]; X0[i] = o.x0 - d0.dx; X1[i] = o.x1 - d0.dx; Y0[i] = o.y0 - d0.dy; Y1[i] = o.y1 - d0.dy; }
   for ( let r = 0; r < n; r++ ) {
     const an = (2 * Math.PI * r) / n, ux = Math.cos(an), uy = Math.sin(an), ray = slab(A, ux, uy, false);
     if ( !ray ) continue;
@@ -629,10 +723,10 @@ export function freeRays(F, A, d0, n = 16) {
     let k = 0;
     const ix = Math.abs(ux) < 1e-9 ? 0 : 1 / ux, iy = Math.abs(uy) < 1e-9 ? 0 : 1 / uy;
     for ( let i = 0; i < m; i++ ) {
-      const o = F[i];
       let a0 = -Infinity, a1 = Infinity;
-      const x0 = o.x0 - d0.dx, x1 = o.x1 - d0.dx, y0 = o.y0 - d0.dy, y1 = o.y1 - d0.dy;
+      const x0 = X0[i], x1 = X1[i], y0 = Y0[i], y1 = Y1[i];
       if ( ix === 0 ) { if ( x0 >= 0 || x1 <= 0 ) continue; } else { const ta = x0 * ix, tb = x1 * ix; if ( ta < tb ) { a0 = ta; a1 = tb; } else { a0 = tb; a1 = ta; } }
+      if ( a1 <= t0 || a0 >= t1 ) continue;
       if ( iy === 0 ) { if ( y0 >= 0 || y1 <= 0 ) continue; } else { const ta = y0 * iy, tb = y1 * iy; if ( ta < tb ) { if ( ta > a0 ) a0 = ta; if ( tb < a1 ) a1 = tb; } else { if ( tb > a0 ) a0 = tb; if ( ta < a1 ) a1 = ta; } }
       if ( a0 < a1 && a1 > t0 && a0 < t1 ) { iv[k++] = a0; iv[k++] = a1; }
     }
@@ -726,6 +820,10 @@ export const runBox = (q, k) => ({ x0: q.x - RUN.hw * k, x1: q.x + RUN.hw * k, y
 /** what this seat keeps clear for it: the room and the margin its ink may leave it by in this motion type */
 export const runReserve = (q, k, motion = "smooth") => { const m = RUN.margin[motion] ?? RUN.margin.stepped, b = runBox(q, k);
   return { x0: b.x0 - m.x * k, x1: b.x1 + m.x * k, y0: b.y0 - m.u * k, y1: b.y1 + m.d * k }; };
+/** MAPSAME: a fire's spot whose source is off this seat's view (`view`: the whole view): "cut" when its run's block still reaches into the
+    view - its phrases would rise in from the edge, cut by it (live 2026-11-15 the second of two fires lettered its run off the player's
+    view): not lettered on this seat -, "out" when the block lies wholly outside (lettered, unseen: a pan brings it in whole). */
+export const offSpot = (q, k, view, motion = "smooth") => (inter(runReserve(q, k, motion), view) > 0 ? "cut" : "out");
 /**
  * Where this seat letters a fire's run for each of its spots (`spots`: scene px, in the table's order; `k` the run's cap height): the
  * run's block where it is if clean - whole in this seat's view `v` (less the edge), off every pin and token (`hard`), at most SOFT_OK of it
@@ -796,6 +894,9 @@ function placeRun(q, k, { v, hard, S, maxShift, rays, motion }) {
 }
 /** the most candidate spots a word tries at one size (best first: the nearest clean one is found long before; the cap bounds a crowded view) */
 const MAX_EVALS = 160;
+/** MAPSAME: the grid scan of a standing word's moves (seatLayout trySize `scan`): its steps in shares of the word's box (at least the
+    allowed moves over SCAN_N_X x SCAN_N_Y), and how many sizes above the nearest-first search's it climbs */
+export const SCAN_X = 0.05, SCAN_Y = 0.1, SCAN_N_X = 28, SCAN_N_Y = 20, SCAN_UP = 2;
 // (the search's queue: a binary heap on `base`, nearest first)
 function heapPush(h, e) { h.push(e); let i = h.length - 1; while ( i > 0 ) { const pi = (i - 1) >> 1; if ( h[pi].base <= e.base ) break; h[i] = h[pi]; i = pi; } h[i] = e; }
 function heapPop(h) {
