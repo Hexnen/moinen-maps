@@ -2,14 +2,14 @@
    and the public API (see README.md). Works without Foundry for the screen space (gallery page, node-free browser tests). */
 import { makePlan, MOODS, MOOD_IDS, TICK, FONTS, syllablesOf, STYLES, INV_FACES, DEFAULT_FACE } from "./design.mjs";
 import { FontBank } from "./fontbank.mjs";
-import { paintPicture } from "./paint.mjs";
+import { paintPicture, inkPad } from "./paint.mjs";
 import { settleCenter } from "./shape.mjs";
 import { sizeFor, SIZE, magnitudeOf } from "./size.mjs";
 import { onOf, stepT, easeOf, orientAngle, pathSpec, pathPoints, pathAt, orbitAt, bendLayout, addTrail, TICK_MS } from "./move.mjs";
 import { rng, hash } from "./rng.mjs";
 import { makeSustain, AMBIENT_MAX } from "./sustain.mjs";
 import { createVocab } from "./words.mjs";
-import { MOTION_MODES, DEFAULT_MOTION, playOpts, trackPose, trackReach, holdEnergy, gridQ, gridAge, gridCeil } from "./motion.mjs";
+import { MOTION_MODES, DEFAULT_MOTION, playOpts, trackPose, trackReach, holdEnergy, gridQ, gridAge, gridCeil, exitReach, trackSpan } from "./motion.mjs";
 
 export const VERSION = "1.9.14";   // 1.9.14 = ENGWORDS 1.9.13 merged with RIMUNDER 1.9.12. 1.9.13 = ENGWORDS (1.9.12 left to the parallel RIMUNDER branch): both deny lists read both languages (crossRefusal, CROSS: a word may not read as a word of the other language either); the words that did were replaced (pl hero going down KA-DUMP -> the owner's landing KA-DUUM, BOINNG, TINNG, HAH, HUUH, UUH, MIII, SPLASZ, TWAK, SZNAP, SWISZK; en PTAK, PTAKT, SHTUK, BUDDA, GRROMM); only those kinds and tiers letter other words. 1.9.12 = RIMUNDER: an invincible word on the map gets the letterer's holding line, an ink rim UNDER the whole lettering (letters and their coloured duplicate block together, counters open, round joins), so it reads on bright, mid, busy and fire-lit ground while ink on a dark floor stays next to invisible; look.rim ink|paper|none, default ink in world space (no backdrop), none on the screen; a world word asked with rim none, every screen word and the legacy styles draw exactly what they drew. (1.9.13 = ENGWORDS, a parallel branch.) 1.9.11 = ENGREG: one rule picks the engine copy on every seat (after init, highest VERSION, then the more recently synced content; L.build, L.seats() names a seat on another build), the table's own minimum-filter clock (clock.mjs) under the stepped grid and L.net (L.clock), a caller's ceiling share `ceil` reaches the size model (`ceilK` stays unread: today's pictures unchanged), L.measure (the real hold box and entrance reach before placing), a settle memo and faster mark rows (many words planned in one frame: same pictures, a fraction of the time). 1.9.10 = HOLDS: a held invincible word lives as long as it stands (after its sound's own body the lettering keeps moving in the manner of the sound: echo, settle, hum, sag, slosh, rumble, breath; small, inside its placement, the same on every seat, still under reduced motion; smooth and stepped). (1.9.9 = KEEPBOX, a parallel branch.) 1.9.8 = KERNEX: punctuation never reads as a diacritic of its neighbour (a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; invincible style only). 1.9.7 = FONTSEL: the invincible style in League Gothic (default) or Anton, world setting face, per-face tuning, optical sizes. 1.9.6 = WORDS3 merged (thunder without BOOM/BUM; FIRE_BLASTS check). 1.9.5 = MODE 1.9.2 (table motion type set by the GM, shared grid clock L.gridClock) merged with LOOK3 1.9.4. 1.9.4 = LOOK3 + the owner's 20 % for a linked three; 1.9.3 = LOOK3 (1.9.2 = MODE, a parallel branch): interlocked O staggered (first up, second down, third up; two O always, three rarely, four never), first letter as tall as its neighbour, no hole before the last letter (union-keyline pairs part only as far as a touch). 1.9.1 = FIN-ENGINE: FXI-ENGINE 1.8.2 (impact frames: every scene change counted by the guard, six-step ladder, red-safe, gentle per call, settings row) merged onto MOTION2 1.9.0; plan.contactMs, per-word flash:false, impact size from the subject, impact keep rect. 1.9.0 = MOTION2 (contract v10): invincible motion as per-frame tracks from a sound-family table (motion.mjs), pictures shared by key, smooth|stepped switch (look.motion, L.motionMode), reduced exit = fade. 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE 1.9.9 = KEEPBOX: impact frames give identical pictures on every seat from identical calls (one at a time on time windows, the guard on every planned call, a word's own flash gives way inside an impact's second, no drawing skipped on a slow seat); a kept word is drawn ON the impact with a rim round its letters instead of a box cut into the drawing. 1.9.8 = KERNEX: punctuation never reads as a diacritic of its neighbour (a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; invincible style only). 1.9.7 = FONTSEL: the invincible style in League Gothic (default) or Anton, world setting face, per-face tuning, optical sizes. 1.9.6 = WORDS3 merged (thunder without BOOM/BUM; FIRE_BLASTS check). 1.9.5 = MODE 1.9.2 (table motion type set by the GM, shared grid clock L.gridClock) merged with LOOK3 1.9.4. 1.9.4 = LOOK3 + the owner's 20 % for a linked three; 1.9.3 = LOOK3 (1.9.2 = MODE, a parallel branch): interlocked O staggered (first up, second down, third up; two O always, three rarely, four never), first letter as tall as its neighbour, no hole before the last letter (union-keyline pairs part only as far as a touch). 1.9.1 = FIN-ENGINE: FXI-ENGINE 1.8.2 (impact frames: every scene change counted by the guard, six-step ladder, red-safe, gentle per call, settings row) merged onto MOTION2 1.9.0; plan.contactMs, per-word flash:false, impact size from the subject, impact keep rect. 1.9.0 = MOTION2 (contract v10): invincible motion as per-frame tracks from a sound-family table (motion.mjs), pictures shared by key, smooth|stepped switch (look.motion, L.motionMode), reduced exit = fade. 1.8.1 = LOOK2 1.8.0 + IMPACT/KINDS1 merged. LOOK2 (contract v9): invincible = tall tight flat lettering (Anton, one union keyline, optical kerning, flat palettes, joined OO, tucked prefix, vertical column), legacy look frozen as style "expressive"; v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE | 1.7.2 IMPACT merged (impact frames, impact/, L.impact); 1.7.1 KINDS1: material, impact, debris, shock wave, fire ladder, chain + TAILS, whizz, casings, dry fire, grenade. v7+v8 merged: MOVE (contract v7, 1.5.0: travel, choreography, rates, escalation, shards, push, glow, continuous sounds) + LOOK (contract v8, 1.6.0: lines, backdrops, deformation, fills, legibility, accent, look styles, sound->look); 1.4.1 TOOL; 1.3.1 WORD; 1.2.1 FXLE
 /* Where a word is drawn. World layers live in the canvas (scene coordinates); screen layers are HTML over the page.
@@ -622,6 +622,41 @@ export function createEngine(base) {
     const pad = 0.18;
     return { l: l + pad, r: r + pad, u: u + pad, d: d + pad };
   }
+  /* SUSTAINGAP: how far a started word's INK reaches from the point it is placed at, in its space's units ({ l, r, u, d, k }): its
+     entrance, hold and life poses around the letters (reachOf without the view pad) plus the keyline, rim and duplicate block (paint
+     inkPad); null until the word is prepared (its track is not known before). Runs of phrases and stream syllables are spaced by it. */
+  function inkBoxOf(h) {
+    if ( !h?.plan || !(h.sprite || h.box) ) return null;
+    if ( h._ink && h._ink.size === h.size && (h._ink.pic || !h.shown) ) return h._ink;
+    const e = { ...reachOf(h) }, k = h.size * h.plan.sizeK, ip = inkPad(h.plan.hand, pxPerUnit(h, renderScale(h))), pad = 0.18;
+    /* (a track word whose parts or letters are drawn in from their own offsets, a split phrase's syllables dropping in one by one: the
+       pictures carry those offsets, the track does not) */
+    if ( h.track ) {
+      const hb = h.plan._holdBox ?? { w: 3, h: 1 }, tl = h.plan.timeline;
+      for ( const p of [...(tl?.ent ?? []), ...(tl?.hold ?? [])] ) for ( const q of p.letters ?? [] ) {
+        if ( !Number.isFinite(q.y) || q.y === 0 ) continue;
+        const y = Math.max(-3, Math.min(3, q.y));
+        e.u = Math.max(e.u, hb.h / 2 - y + pad); e.d = Math.max(e.d, hb.h / 2 + y + pad);
+      }
+    }
+    /* (the picture as drawn: what it carries around its letters beyond the keyline and rim, a glow, puffs, sparks, is drawn ink too;
+       measured on the first picture shown, at the hold box's scale) */
+    const c = h.shown;
+    if ( c?.canvas && Number.isFinite(c.ax) && c.rs > 0 ) {
+      const hb = h.plan._holdBox ?? { w: 3, h: 1 }, u = (h.size / (c.size0 || h.size)) / c.rs / k;
+      const m = { l: c.ax * u - hb.w / 2 - ip.l, r: (c.canvas.width - c.ax) * u - hb.w / 2 - ip.r, u: c.ay * u - hb.h / 2 - ip.u, d: (c.canvas.height - c.ay) * u - hb.h / 2 - ip.d };
+      for ( const q of ["l", "r", "u", "d"] ) if ( m[q] > 0 ) e[q] += m[q];
+    }
+    /* (a track word turned: its own rotation and its poses' turns, over the whole entrance and hold) */
+    if ( h.track && Number.isFinite(h.entMs) && Number.isFinite(h.holdMs) ) {
+      const hb = h.plan._holdBox ?? { w: 3, h: 1 }, W = hb.w + ip.l + ip.r, H = hb.h + ip.u + ip.d;
+      const sp = trackSpan(h.track, W, H, h.entMs, h.holdMs, h.rot || 0, (ip.r - ip.l) / 2, (ip.d - ip.u) / 2);
+      for ( const q of ["l", "r", "u", "d"] ) e[q] = Math.max(e[q], sp[q] - ip[q] + pad);
+    }
+    /* (eu / ed: how much further its exit takes it up / down while legible; a track word only: the legacy timeline is not measured) */
+    const x = h.track ? exitReach(h.track, h.plan._holdBox?.h ?? 1) : { u: 0, d: 0, drawn: false };
+    return (h._ink = { l: (e.l - pad + ip.l) * k, r: (e.r - pad + ip.r) * k, u: (e.u - pad + ip.u) * k, d: (e.d - pad + ip.d) * k, eu: x.u * k, ed: x.d * k, drawn: x.drawn, k, size: h.size, pic: !!c?.canvas });
+  }
   /* the visible rectangle in the word's space (world: scene coordinates), minus the insets (sidebar, letterbox, set by L.viewInset) */
   function viewRect(h) {
     const ins = typeof viewInset === "function" ? (viewInset(h.space) ?? {}) : viewInset;
@@ -1177,16 +1212,38 @@ export function createEngine(base) {
       try { hand = mk(syl[0], { mood, seed: `${seedBase}:0`, colors: o.colors, style: o.style, look: o.look }, fontsApi, []).hand; remember(hand); } catch { hand = null; }
       return hand;
     };
+    /* SUSTAINGAP: lanes. Syllables that are up at the same time stand one beyond the other along the stream's direction, never on
+       each other: syllable j takes the nearest lane whose last syllable is no longer legible at j's instant (decided from the
+       schedule, so a seat that joins late puts every syllable in the same lane). Lanes stand in two staggered columns side by side
+       (lane j in column j % 2, half a step further out than lane j - 1), so a fast stream's trail is half as long; a column's lanes are
+       a step apart: the biggest syllable's ink along the direction, plus air, plus how much further an older syllable has flown. A
+       trail kept in view (the default) that reaches the view's edge goes on behind its source; the lanes lay the syllables out
+       themselves, the engine does not move them one by one. */
+    const lanes = !o.orbit && !o.path, laneOf = [], laneBusy = [], laneT = [];
+    const LEGIBLE_MS = life + 260;   // a syllable's entrance + hold + the legible start of its exit
+    let laneStep = 0, laneW = 0, minBeat = every;
+    const laneFor = (j) => {
+      while ( laneOf.length <= j ) {
+        const jj = laneOf.length, t = laneT[jj];
+        if ( !Number.isFinite(t) ) return 0;
+        let s = 0; while ( s < laneBusy.length && laneBusy[s] > t ) s++;
+        laneBusy[s] = t + LEGIBLE_MS; laneOf.push(s);
+      }
+      return laneOf[j];
+    };
     const beat = (text, when, idx) => {
       if ( !alive ) return null;
       try {
         const i = idx ?? k; k = i + 1;
+        if ( !Number.isFinite(laneT[i]) ) laneT[i] = when ?? now();
         const word = text != null ? String(text) : (syl[i === 0 ? 0 : 1 + ((i - 1) % Math.max(1, syl.length - 1))] ?? syl[0]);
         const p0 = src();
         if ( srcH.gone || !p0 ) { if ( srcH.gone ) stop(); return null; }
-        const ang = dirAt(p0) + (((i % 2) ? 1 : -1) * (Number.isFinite(o.spread) ? o.spread : 10) * Math.PI) / 180;
+        const lane = lanes && handOf()?.style === "invincible" ? laneFor(i) : -1, hb = { h: null };   // (the legacy styles: frozen, no lanes)
+        /* (in lanes: along the stream's own direction, no alternating spread; the columns give the stagger) */
+        const ang = dirAt(p0) + (lane >= 0 ? 0 : (((i % 2) ? 1 : -1) * (Number.isFinite(o.spread) ? o.spread : 10) * Math.PI) / 180);
         const unit = fixedSize ?? streamUnit();
-        const travel = (Number.isFinite(o.travel) ? o.travel : 1.6) * unit, side = ((i % 3) - 1) * unit * 0.25, t0 = when ?? now();
+        const travel = (Number.isFinite(o.travel) ? o.travel : lane >= 0 ? 0.45 : 1.6) * unit, side = lane >= 0 ? 0 : ((i % 3) - 1) * unit * 0.25, t0 = when ?? now();
         /* FXLE F17: loud 0 is quiet (it was read as "not given") */
         let lv = 1;
         if ( typeof o.loud === "function" ) { try { lv = o.loud(i); } catch { lv = 1; } } else if ( o.loud != null ) lv = o.loud;
@@ -1194,7 +1251,31 @@ export function createEngine(base) {
         const at = () => {
           const p = src() ?? p0, u = Math.min(1, stepT(Math.max(0, now() - t0), on) / (life + 200));
           const e = 1 - (1 - u) * (1 - u);
-          return { x: p.x + Math.cos(ang) * (unit * 0.5 + travel * e) - Math.sin(ang) * side, y: p.y + Math.sin(ang) * (unit * 0.5 + travel * e) + Math.cos(ang) * side };
+          let along = unit * 0.5 + travel * e, lat = side;
+          if ( lane >= 0 ) {
+            const b = inkBoxOf(hb.h);
+            if ( b ) {
+              const c = Math.abs(Math.cos(ang)), sn = Math.abs(Math.sin(ang));
+              /* (an older syllable in the same column has flown at most the whole travel further out) */
+              laneStep = Math.max(laneStep, c * (b.l + b.r) + sn * (b.u + b.d) + 0.25 * b.k + travel);
+              laneW = Math.max(laneW, sn * (b.l + b.r) + c * (b.u + b.d) + 0.25 * b.k);
+            }
+            const step = laneStep || unit * 2.6, W = laneW || unit * 4.5;
+            /* rows forward as far as the room goes (the view, unless keepInView: false), the rest behind the source */
+            let F = Infinity;
+            if ( o.keepInView !== false ) {
+              const v = viewRect({ space });
+              if ( v ) {
+                const dx = Math.cos(ang), dy = Math.sin(ang);
+                const reach = Math.min(dx > 1e-6 ? (v.x1 - p.x) / dx : dx < -1e-6 ? (v.x0 - p.x) / dx : Infinity, dy > 1e-6 ? (v.y1 - p.y) / dy : dy < -1e-6 ? (v.y0 - p.y) / dy : Infinity);
+                F = Math.max(1, Math.floor((reach - unit * 0.5 - step / 2) / (step / 2)) + 1);
+              }
+            }
+            const row = lane < F ? lane : F - 1 - lane;
+            along += row * (step / 2);
+            lat = (((row % 2) + 2) % 2 ? 0.5 : -0.5) * W;
+          }
+          return { x: p.x + Math.cos(ang) * along - Math.sin(ang) * lat, y: p.y + Math.sin(ang) * along + Math.cos(ang) * lat };
         };
         /* upright by default (to read); `orient: "lean"` tilts each syllable toward where it flies, "tangent" lays it along */
         const tilt = o.orient && !o.orbit && !o.path ? (orientAngle(ang, o.orient) * 180) / Math.PI : 0;
@@ -1210,8 +1291,9 @@ export function createEngine(base) {
         const inv = handOf()?.style === "invincible";
         const h = play(word, { _stream: i === 0 ? syl.join(" ") : true, alt: i === 0 ? o.alt : undefined, palette: o.palette, mood, space, size: unit * (0.85 + 0.25 * loud) * (i === 0 ? 1.15 : 1), magnitude: o.magnitude, fit: o.fit, ceilK: o.ceilK ?? 0.55, ceil: o.ceil, seed: `${seedBase}:${i}`, hand: handOf() ?? undefined,
           in: inv ? o.in : o.in ?? "slam", out: inv ? o.out : o.out ?? "pop", holdKind: inv ? o.holdKind : "shake", kind: inv ? o.kind : undefined, look: inv ? o.look : undefined, hold: life, tempo: o.tempo ?? 1.6, at, pixel: o.pixel, rotation: (Number.isFinite(o.rotation) ? o.rotation : 0) + tilt + (((i * 7) % 5) - 2) * 3,
-          zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation,
+          zIndex: o.zIndex, reduced: o.reduced, parent: o.parent, colors: o.colors, layer: o.layer, startAt: when, token: tokenRef, vision: o.vision, elevation: o.elevation, ...(lane >= 0 ? { keepInView: false } : {}),
           on: o.on, fps: o.fps, glow: o.glow, ...travel2 });
+        hb.h = h;
         emitted++;
         /* FXLE F10: only the syllables still alive are kept */
         handles.push(h);
@@ -1236,11 +1318,14 @@ export function createEngine(base) {
     const over = (when) => when + life + 200 < now();
     if ( Array.isArray(o.beats) ) {
       const bs = o.beats.filter((ms) => Number.isFinite(ms) && ms >= 0).sort((a, b) => a - b);
+      bs.forEach((ms, j) => { laneT[j] = tStart + ms; if ( j ) minBeat = Math.min(minBeat, Math.max(1, ms - bs[j - 1])); });
       bs.forEach((ms, j) => { const when = tStart + ms; if ( !over(when) ) later(() => beat(undefined, when, j), when); });
       later(() => stop(), tStart + (bs.at(-1) ?? 0) + 20);
     } else if ( !o.manual ) {
       const n = cnt != null ? Math.floor(cnt) : (duration ? Math.max(1, Math.floor(duration / every)) : o.until ? Infinity : 6);
       const timeOf = (j) => tStart + every * (j + (o.swing && j % 2 ? 0.15 : 0));
+      if ( o.swing ) minBeat = every * 0.85;
+      for ( let j = 0; j < Math.min(n, 100000) && laneT.length < 100000; j++ ) { if ( laneT[j] !== undefined ) continue; laneT[j] = timeOf(j); if ( j > 2 && timeOf(j) > now() + 4 * LEGIBLE_MS ) break; }
       let j = Math.max(0, Math.floor((now() - life - 200 - tStart) / every) - 1);
       while ( j < n && over(timeOf(j)) ) j++;
       const tick = (i) => { if ( !alive ) return; if ( i >= n ) { stop(); return; } beat(undefined, timeOf(i), i); later(() => tick(i + 1), timeOf(i + 1)); };
@@ -1392,7 +1477,7 @@ export function createEngine(base) {
   /* continuous sounds (sustain.mjs, README "Motion: continuous sounds"): a phrase score over play(); stopAll and a scene change stop
      them like streams */
   const styleOf = (o) => (STYLES.includes(o?.look?.style) ? o.look.style : typeof o?.style === "string" && STYLES.includes(o.style) ? o.style : defLook);
-  const sustain = makeSustain({ play, now, streams, vocab: () => vocab, pointOf, syllablesOf, styleOf,
+  const sustain = makeSustain({ play, now, streams, vocab: () => vocab, pointOf, syllablesOf, styleOf, boxOf: inkBoxOf, viewBox: (space) => viewRect({ space }),
     inView: (space, p, pad = 0) => { const v = viewRect({ space }); return !v || !p || (p.x >= v.x0 - pad && p.x <= v.x1 + pad && p.y >= v.y0 - pad && p.y <= v.y1 + pad); } });
   const api = {
     version: VERSION, base, limits, stats, defaults, layers: LAYERS, layerChoices,

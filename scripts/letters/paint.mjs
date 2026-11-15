@@ -34,6 +34,15 @@ export function hexToHsl(h) {
 const hsl = (h, s, l, a = 1) => `hsla(${((h % 360) + 360) % 360},${Math.max(0, Math.min(100, s)).toFixed(0)}%,${Math.max(0, Math.min(100, l)).toFixed(0)}%,${a})`;
 const rot = (hex, dh, dl = 0) => { const [h, s, l] = hexToHsl(hex); return hsl(h + dh, s, l + dl); };
 
+/* SUSTAINGAP: how far the INK of a picture reaches past its letters' box, in cap units ({ l, r, u, d }): the keyline, the second
+   outline, the rim (world words) and the duplicate block / shadow on their side; the same terms as extents() below without the
+   effects (sparks, embers) and the paper backdrop. A run of phrases (sustain.mjs) spaces its words by the letters' reach + this. */
+export function inkPad(H, S = 0) {
+  const outer = H.inflate + H.inkW + H.out2W + 0.05 + (H.halo && S > 0 ? rimReach(H, S) : 0);
+  const dx = Math.cos(H.depthAng) * H.depth, dy = Math.sin(H.depthAng) * H.depth;
+  const sx = H.shadow ? Math.cos(H.shadow.ang) * H.shadow.d : 0, sy = H.shadow ? Math.sin(H.shadow.ang) * H.shadow.d : 0;
+  return { l: outer - Math.min(0, dx, dx + sx), r: outer + Math.max(0, dx, dx + sx), u: outer - Math.min(0, dy, dy + sy), d: outer + Math.max(0, dy, dy + sy) };
+}
 /* the extents (word units) a picture needs around its letters */
 function extents(plan, geo, p, back, S = 0) {
   const H = plan.hand, b = bbox(geo.flatMap((l) => l.cs));

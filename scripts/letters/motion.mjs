@@ -118,6 +118,8 @@ export const KIND_MOTION = {
   creak: K("device"), scrape: K("device", { in: "drag", hold: "shudder", travel: "drift" }), fizzle: K("device", { in: "sputterIn", hold: "sputter", out: "sputterOut" }),
   whiff: K("device", { in: "zip", hold: "pass", out: "zipout", travel: "pass", ms: [300, 600] })
 };
+/* SUSTAINGAP: the exit a phrase of `kind` (or plain text of `mood`) gets from its row when nothing pins one */
+export function rowOut(kind, mood) { const row = kind && KIND_MOTION[kind] ? KIND_MOTION[kind] : KIND_MOTION[MOOD_KIND[mood] ?? "punch"]; return row?.out ?? FAMILIES[row?.family]?.out ?? "cut"; }
 /* plain text: the row of its mood's typical kind */
 export const MOOD_KIND = { impact: "punch", crack: "crack", crash: "crash", boom: "boom", roar: "roar", fire: "fire", whoosh: "whoosh", zap: "zap",
   tick: "click", pain: "pain", powerup: "powerup", heal: "relief", splash: "splash", fail: "fizzle" };
@@ -464,7 +466,9 @@ export function trackPose(tr, t, ent, hold, exitAt = null, ctx = {}, tq = t) {
   const pose = (tt) => {
     const xStart = exitAt ?? ent + hold;
     if ( tt < ent && tr.in !== "choreo" ) return sampleKeys(tr.entKeys, tt);
-    if ( tt < xStart ) return holdPose(tr, tt - ent, hold);
+    /* (SUSTAINGAP: a drawn entrance, parts or a count-in, stands in the hold's first pose until the hold begins; the hold's envelopes
+       decay with time, and read at a negative time they grew without bound: a split phrase jumped two cap heights and more) */
+    if ( tt < xStart ) return holdPose(tr, Math.max(0, tt - ent), hold);
     const h = tt - xStart, base = holdPose(tr, Math.max(0, xStart - ent), hold), x = sampleKeys(tr.exitKeys, h);
     /* the exit runs from where the hold was (its motion fades out over the first 120 ms of the exit) */
     const f = clamp(1 - h / 120, 0, 1);
@@ -490,6 +494,38 @@ export function trackReach(tr, W = 3, H = 1) {
   /* HOLDS: the life of a long hold stays inside LIFE_REACH of the rest pose */
   if ( tr.life ) { s = Math.max(s, LIFE_REACH.s); l = Math.max(l, LIFE_REACH.xy); r = Math.max(r, LIFE_REACH.xy); u = Math.max(u, LIFE_REACH.xy); d = Math.max(d, LIFE_REACH.xy); }
   return { l: W / 2 * s + Math.min(1.6, l), r: W / 2 * s + Math.min(1.6, r), u: H / 2 * s + Math.min(1.6, u), d: H / 2 * s + Math.min(1.6, d) };
+}
+/* SUSTAINGAP: the box (units, around the placing point) a track word's ink covers over its entrance and hold, turned by the word's own
+   rotation (rad) and by every pose's turn: a wide word tilted a few degrees reaches a good part of a cap height further up and down
+   at its ends. W x H = its ink box at rest, cx / cy = that box's centre off the point. Sampled every 20 ms (at most 160 samples). */
+export function trackSpan(tr, W, H, ent, hold, rot = 0, cx = 0, cy = 0) {
+  let l = 0, r = 0, u = 0, d = 0;
+  const end = Math.max(0, ent) + Math.max(0, hold), step = Math.max(20, end / 160);
+  for ( let t = 0; t <= end + 1e-6; t += step ) {
+    const p = trackPose(tr, t, ent, hold, null, { W, H }), a = rot + p.r, c = Math.cos(a), sn = Math.sin(a);
+    const hw = W / 2 * p.s * p.sx, hh = H / 2 * p.s * p.sy;
+    /* (the pose's offset is turned by the word's rotation, as the engine places it) */
+    const ox = p.x * Math.cos(rot) - p.y * Math.sin(rot), oy = p.x * Math.sin(rot) + p.y * Math.cos(rot);
+    for ( const [x, y] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] ) {
+      const X = ox + (x + cx * p.s * p.sx) * c - (y + cy * p.s * p.sy) * sn, Y = oy + (x + cx * p.s * p.sx) * sn + (y + cy * p.s * p.sy) * c;
+      l = Math.max(l, -X); r = Math.max(r, X); u = Math.max(u, -Y); d = Math.max(d, Y);
+    }
+  }
+  return { l, r, u, d };
+}
+/* SUSTAINGAP: how far an exit takes the word up and down (cap heights past its rest box, H = the box height in caps) while it is still
+   legible (opacity >= 0.5), so a run can keep the next word clear of a leaving one; the broken pieces of a shards / crumble exit are
+   pictures that fall the whole way at full opacity (drawn: true, d = Infinity) */
+export function exitReach(m, H = 1, legible = 0.5) {
+  if ( m?.out === "shards" || m?.out === "crumble" ) return { u: 0, d: Infinity, drawn: true };
+  const keys = exitKeys(m ?? {}), end = keysEnd(keys);
+  let u = 0, d = 0;
+  for ( let t = 0; t <= end; t += 10 ) {
+    const q = sampleKeys(keys, t); if ( q.a < legible ) break;
+    const grow = (q.s * q.sy - 1) * H / 2;
+    u = Math.max(u, -q.y + grow); d = Math.max(d, q.y + grow);
+  }
+  return { u, d, drawn: false };
 }
 /* the global drawing grid (stepped mode): every word's drawn channels change on the same instants of the page clock */
 export const gridQ = (on = 2) => Math.max(1, Math.round(on)) * TICK;
