@@ -410,6 +410,17 @@ export function heldPixels(d, mode, o = {}) {
 }
 
 /* the pictures of one figure's art (worked out once per picture, shared by every impact on it) */
+let PIX_UID = 0;
+/* ENG24 (CALLER5-E3/E4): an art a drawing needs (a held twin, a posterised picture, a slice's projection) costs 10-35 ms of pixel work on a
+   256 px picture (3-5 x that on a loaded machine). Worked out in the frame that shows the drawing, that frame ran 100-250 ms and the seats
+   dropped DIFFERENT drawings. artJobs() walks a plan's drawings without drawing (e._jobs set) and lists the arts still missing as jobs the
+   player works off between frames, before they are due. -> the art, or null in that dry walk */
+function need(e, P, key, make) {
+  if ( !e._jobs ) return make();
+  const k = `${P.uid ?? 0}|${key}`;
+  if ( !e._jobs.has(k) ) e._jobs.set(k, make);
+  return null;
+}
 function figPix(e, s) {
   const sh = sharedOf(s), sk = skey(s, "figpix");
   e._figs ??= new Map();
@@ -427,7 +438,7 @@ function figPix(e, s) {
       let on = 0; for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { alpha[i] = 1; on++; }
       const m = figureMask(d, w, h);
       const put = (rgba) => { const cv = e.makeCanvas(w, h), cx = ctx2d(e, cv), id = cx.createImageData(w, h); id.data.set(rgba); cx.putImageData(id, 0, 0); return cv; };
-      P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null, kind: m.kind,
+      P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null, kind: m.kind, uid: ++PIX_UID,
         inv: put(invPixels(d)), orig: put(origPixels(d)), ink: put(inkPixels(d, w, h, alpha, false)), post: new Map(), held: new Map(), proj: new Map(), put };
     }
     c.width = 0; c.height = 0;
@@ -445,8 +456,21 @@ export function warmFigs(e, list = e.figs) {
     const P = figPix(e, g.sil);
     if ( !P.pixels ) continue;
     edgeOf(P); heldArt(e, P, "n");
-    const lit = rimFor(e, P); if ( !P.post.get(lit) ) P.post.set(lit, P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))));
+    postArt(e, P, rimFor(e, P));
   }
+  return (globalThis.performance?.now?.() ?? Date.now()) - t0;
+}
+/* the posterised art lit by `lit` (cached per lit colour, as before) */
+function postArt(e, P, lit) {
+  if ( !P.post.get(lit) ) P.post.set(lit, P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))));
+  return P.post.get(lit);
+}
+/* ENG24: the base of every figure (its pictures, its edge colour): the part a drawing's treatment is decided on (figTreat reads the art's
+   area), worked out at the call; the rest (held twins, posterised) are artJobs -> ms spent */
+export function warmBase(e, list = e.figs) {
+  const t0 = globalThis.performance?.now?.() ?? Date.now();
+  for ( const g of list ?? [] ) { if ( !g?.sil ) continue; const P = figPix(e, g.sil); if ( P.pixels ) edgeOf(P); }
+  if ( e.sil ) figureOf(e);
   return (globalThis.performance?.now?.() ?? Date.now()) - t0;
 }
 /* the held art of a figure (IMPACT4), cached per treatment and parameter */
@@ -454,9 +478,8 @@ function heldArt(e, P, t, turn = 0.33) {
   if ( !P.pixels ) return null;
   const A = hexRgb(safeColor(e.tone.a)), B = hexRgb(safeColor(e.tone.b));
   const key = t === "d" ? `d:${A}:${B}` : t === "h" ? `h:${Math.round(turn * 12)}` : "n";
-  let c = P.held.get(key);
-  if ( !c ) { c = P.put(heldPixels(P.d, t, { a: A, b: B, turn: Math.round(turn * 12) / 12 })); P.held.set(key, c); }
-  return c;
+  const c = P.held.get(key);
+  return c ?? need(e, P, key, () => P.held.get(key) ?? (P.held.set(key, P.put(heldPixels(P.d, t, { a: A, b: B, turn: Math.round(turn * 12) / 12 }))), P.held.get(key)));
 }
 /* the figure's whole outline (its alpha, not the cut-out) in one flat colour: needs no pixel read */
 function alphaTint(e, s, color) {
@@ -474,9 +497,8 @@ function alphaTint(e, s, color) {
 function cutTint(e, P, color) {
   if ( !P.cut ) return null;
   const key = `cut:${color}`;
-  let c = P.held.get(key);
-  if ( !c ) { const rgb = hexRgb(color), a = new Uint8ClampedArray(P.w * P.h * 4); for ( let i = 0; i < P.w * P.h; i++ ) if ( P.cut[i] ) a.set([rgb[0], rgb[1], rgb[2], 255], i * 4); c = P.put(a); P.held.set(key, c); }
-  return c;
+  const c = P.held.get(key);
+  return c ?? need(e, P, key, () => { if ( !P.held.has(key) ) { const rgb = hexRgb(color), a = new Uint8ClampedArray(P.w * P.h * 4); for ( let i = 0; i < P.w * P.h; i++ ) if ( P.cut[i] ) a.set([rgb[0], rgb[1], rgb[2], 255], i * 4); P.held.set(key, P.put(a)); } return P.held.get(key); });
 }
 /* the accent that lights the rims (seeded per impact: tone a or b; never saturated red under the guard) */
 export const rimColor = (e) => { const c = e.rimTone === "b" ? e.tone.b : e.tone.a; return e.redOk ? c : isRed(c) ? (isRed(e.tone.b) ? PAPER : e.tone.b) : c; };
@@ -592,15 +614,17 @@ export function figTreat(e, f) {
   return { t, list, each, zs, offs, slices, area: a, flash };
 }
 /* the projections of a figure's pixels on a direction (local units), sorted: the slice's cut line for a share of its area */
-function cutAt(P, w, h, ang, share) {
+function cutAt(e, P, w, h, ang, share) {
   const key = Math.round(((ang % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 16)) % 32;
-  let list = P.proj.get(key);
-  if ( !list ) {
-    const c = Math.cos((key * Math.PI) / 16), s = Math.sin((key * Math.PI) / 16);
-    list = []; for ( let y = 0; y < P.h; y++ ) for ( let x = 0; x < P.w; x++ ) if ( P.alpha[y * P.w + x] ) list.push(((x + 0.5) / P.w - 0.5) * c + ((y + 0.5) / P.h - 0.5) * s);
-    list = Float32Array.from(list).sort(); P.proj.set(key, list);
-  }
-  if ( !list.length ) return null;
+  const list = P.proj.get(key) ?? need(e, P, `proj:${key}`, () => {
+    if ( !P.proj.has(key) ) {
+      const c = Math.cos((key * Math.PI) / 16), s = Math.sin((key * Math.PI) / 16), l = [];
+      for ( let y = 0; y < P.h; y++ ) for ( let x = 0; x < P.w; x++ ) if ( P.alpha[y * P.w + x] ) l.push(((x + 0.5) / P.w - 0.5) * c + ((y + 0.5) / P.h - 0.5) * s);
+      P.proj.set(key, Float32Array.from(l).sort());
+    }
+    return P.proj.get(key);
+  });
+  if ( !list?.length ) return null;
   const v = list[Math.max(0, Math.min(list.length - 1, Math.floor(list.length * (1 - share))))];
   return { ang: (key * Math.PI) / 16, at: v };   // the slice = local points whose projection (x / w, y / h, on ang) is above `at`
 }
@@ -632,7 +656,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   const artOf = (tt) => {
     if ( tt === "i" ) return P.inv;
     if ( tt === "k" ) return P.ink;
-    if ( tt === "p" ) { let a = P.post.get(lit); if ( !a && P.pixels ) { a = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))); P.post.set(lit, a); } return a; }
+    if ( tt === "p" ) { const a = P.post.get(lit); return a || !P.pixels ? a ?? null : need(e, P, `post:${lit}:${e.tone.a}`, () => postArt(e, P, lit)); }
     if ( tt === "n" || tt === "d" || tt === "h" ) return heldArt(e, P, tt, turn);
     return P.pixels ? P.orig : null;
   };
@@ -642,7 +666,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   /* the slice: the bright treatment on the struck side of a line along the blow, as much as the area left allows */
   if ( slice > 0 && P.pixels ) {
     const bt = FIG_BRIGHT.has(f.fig) ? f.fig : "i";
-    const ang = da != null ? Math.atan2(ly, lx) : R.f(0, Math.PI * 2), cut = cutAt(P, w, h, ang, slice), b = artOf(bt);
+    const ang = da != null ? Math.atan2(ly, lx) : R.f(0, Math.PI * 2), cut = cutAt(e, P, w, h, ang, slice), b = artOf(bt);
     if ( cut && b ) {
       const c = Math.cos(cut.ang), sn = Math.sin(cut.ang), D = Math.hypot(w, h);
       /* the line in local px: points p with (p.x / w) c + (p.y / h) sn = at; the slice is beyond it */
@@ -697,6 +721,25 @@ export function paintFigLayers(e, f, q = 1) {
 }
 /* a context that draws nothing (keeps the seeded order of a figure that is not shown) */
 const skipCtx = new Proxy({}, { get: () => () => {} });
+/* ENG24: the arts a plan's drawings will need on this env and do not have yet (held twins, posterised pictures, slice projections, the
+   subject's inked figure), as jobs in the order the drawings need them: [() => art]. The walk draws nothing: it runs every drawing's figure
+   part on skipCtx with the same seeded draws as paintFigLayers / paintFigs, so the jobs are exactly the arts those will ask for (and a job
+   not yet done when its drawing is painted is simply worked out there, as before: the picture is the same either way) */
+export function artJobs(e, plan) {
+  const jobs = new Map();
+  if ( e?.sil && !e._tints?.has("fig") ) jobs.set("fig", () => figureOf(e));
+  e._jobs = jobs;
+  try {
+    for ( const f of plan?.frames ?? [] ) {
+      if ( !f?.fig || !FRAMES[f.type] ) continue;
+      const ee = e.figLayers ? e : frameEnv(guarded(e), f), tr = figTreat(ee, f);
+      if ( !tr ) continue;
+      const R = rng((f.seed ^ 0x5bd1e995) >>> 0);
+      tr.list.forEach((g, i) => drawFig(skipCtx, ee, f, g, tr.each[i], R, tr.zs[i], tr.slices[i]));
+    }
+  } finally { delete e._jobs; }
+  return [...jobs.values()];
+}
 /* the outline of a figure as a ring (for the knock-back echoes), cached per figure, colour and width */
 function ringOf(e, s, color, wpx) {
   const key = `ring:${color}:${wpx.toFixed(1)}:${s.w.toFixed(0)}x${s.h.toFixed(0)}`, sh = sharedOf(s), sk = skey(s, key);
