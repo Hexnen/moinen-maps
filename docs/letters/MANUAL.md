@@ -1210,7 +1210,7 @@ plus-ultra (132-135, the GMALL mirror) next to this engine: its mirror writes th
 since 1.9.16 (inert: every seat applies the engine's table); its window still writes its copy, and on the GM's seat that wrote it the
 keys that write CHANGED become the table's (a choice made there is not lost; its stale other values do not undo the table). Nothing
 is written back, so that older window may show older values: the GM gets one notice per session to update plus-ultra (at once when
-the copy is registered after the engine had migrated, else at the older window's first write). Provisional, combat-questions ENGDROP-1.
+the copy is registered after the engine had migrated, else at the older window's first write). Provisional, combat-questions ENGDROP-1 [V live, lane 5, plus-ultra 135 next to 1.9.19: a GM write of 0.8 in its copy reached the table and Test Gracz 1, the GM notice shows at load.]
 The legacy description of 1.9.14's client settings (prefs.mjs `SETTINGS`, `WORLD_KEYS`, `scopeOf`, `DEFAULTS`, `clean`, `cleanAll`) is
 gone: `TABLE`, `TABLE_DEFAULTS`, `cleanTableValue`, `cleanTable`, `seatPrefs` are the one model.
 
