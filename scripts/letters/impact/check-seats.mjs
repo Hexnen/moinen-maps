@@ -7,6 +7,7 @@
 // another reduced-motion seat. Run by check-impact.mjs (`run`), or alone: node check-seats.mjs  -> "impact seats: N checks, F failed".
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isFlash, FRAMES } from "./plan.mjs";
 
 /* the calls, on the SHARED clock (ms): sent at `t`, the blow at `blow`. The rapid series is take C 16-19 of the review (log-C.json): five
    one-point hits 0.48 s apart, same kinds, strengths, series places; then a series so fast that the blows' windows overlap (a stronger
@@ -84,7 +85,10 @@ const SEATS = {
   pl20: { step: 50, origin: 12345, delay: 12, gm: false },
   gm144: { step: 1000 / 144, origin: 500, delay: 4, gm: true },
   red60: { step: 1000 / 60, origin: 3000, delay: 0, gm: true, motion: "reduced" },
-  red30: { step: 1000 / 30, stall: [7, 100], origin: 9000, delay: 25, gm: false, motion: "reduced" }
+  red30: { step: 1000 / 30, stall: [7, 100], origin: 9000, delay: 25, gm: false, motion: "reduced" },
+  /* ENG24 (CALLER5-E3): loaded machines (live: 100-250 ms frames on a throttled GM and player dropped different drawings) */
+  slow100: { step: 100, stall: [4, 220], origin: 4321, delay: 18, gm: true },
+  slow160: { step: 160, origin: 6543, delay: 40, gm: false, jitter: true }
 };
 
 /* the seats run side by side (one process each: the fake browser replaces globals) */
@@ -116,6 +120,23 @@ export async function run(ok) {
   same("gm60", "pl20", "GM at 60 fps vs player at 20 fps");
   same("gm60", "gm144", "60 vs 144 fps");
   same("red60", "red30", "two reduced-motion seats");
+  /* ENG24 (CALLER5-E3): a loaded seat (frames of 100-220 ms, 160 ms) runs late by a bounded lag instead of dropping what it passed: every
+     call ends the same way, what it shows is the GM's drawings in the GM's order with only plain drawings left out, every flash drawing
+     and the first drawing of each played call are shown (the two slow seats then agree on all of them), and at 100 ms it shows most */
+  const flashy = (x) => { const t = x.split(":")[0]; return isFlash({ ...FRAMES[t], type: t }); };
+  const sub = (a, b) => { let k = 0; for ( const x of b ) if ( x === a[k] ) k++; return k === a.length; };
+  for ( const sl of ["slow100", "slow160"] ) {
+    const bad = CALLS.map((c, i) => {
+      const g = res.gm60.rec[i], r = res[sl].rec[i];
+      if ( g.why !== r.why ) return `#${i} ${g.why} vs ${r.why}`;
+      if ( !sub(r.shown, g.shown) ) return `#${i} not the GM's drawings in order: ${r.shown}`;
+      const miss = g.shown.filter((x, j) => (flashy(x) || j === 0) && !r.shown.includes(x));
+      return miss.length ? `#${i} missing key drawings ${miss}` : null;
+    }).filter(Boolean);
+    ok(!bad.length, `impact seats: a loaded seat (${sl}) shows the GM's drawings, every flash and opening one, nothing else${bad.length ? "\n   " + bad.join("\n   ") : ""}`);
+  }
+  { const n = (sl) => CALLS.reduce((a, c, i) => a + res[sl].rec[i].shown.length, 0), all = n("gm60");
+    ok(n("slow100") >= all * 0.7, `impact seats: a seat at 10 fps with stalls shows most drawings (${n("slow100")} of ${all})`); }
   /* every played drawing of the full seats was shown (no drawing skipped at 20 fps or in a stall) */
   const full = CALLS.map((c, i) => res.gm60.rec[i]).filter((r) => r.why === "done");
   ok(full.length >= 8, `impact seats: the calls mostly play (${full.length} of ${CALLS.length} done)`);

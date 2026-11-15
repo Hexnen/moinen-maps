@@ -7,7 +7,7 @@
 // Run from check-impact.mjs (`run`), or alone: node scripts/letters/impact/check-figures.mjs -> "impact figures: N checks, F failed".
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK } from "./plan.mjs";
-import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, starOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb } from "./draw.mjs";
+import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, starOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb, artJobs, warmBase } from "./draw.mjs";
 
 const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
 const MAGS = [0.2, 0.45, 0.7, 1.1, 1.5, 1.9];   // one per step
@@ -244,6 +244,22 @@ export async function run(ok) {
     made = 0; paintFrame(mkCtx(null), env({ figs: figs2, sil: figs2[0].sil }), { type: "fig", seed: 3, fig: "p" }); const first = made;
     made = 0; paintFrame(mkCtx(null), env({ figs: figs2, sil: figs2[0].sil }), { type: "fig", seed: 4, fig: "i" }); paintFrame(mkCtx(null), env({ figs: figs2, sil: figs2[0].sil }), { type: "fig", seed: 5, fig: "p" });
     ok(first > 0 && made <= 2, `figures: the figures' art is reused across impacts (${first} canvases, then ${made})`);
+    /* ENG24 (CALLER5-E3/E4): the arts a plan needs are listed ahead (artJobs) and, once those jobs ran, painting its drawings works no art
+       out (live: a held twin of a 27 815-colour token cost 33 ms in the frame that showed it); the walk itself draws and makes nothing */
+    for ( const o of [{ figLayers: true }, { local: { r: 300 } }] ) {
+      const src3 = fake(120, 120), figs3 = [{ role: "target", cx: 900, cy: 450, sil: { src: src3, sx: 0, sy: 0, sw: 120, sh: 120, w: 100, h: 100, rot: 0 } }, { role: "from", cx: 500, cy: 420, sil: { src: fake(100, 100), sx: 0, sy: 0, sw: 100, sh: 100, w: 90, h: 90, rot: 0 } }];
+      const e = env({ figs: figs3, sil: figs3[0].sil, ...o }), plan = planImpact({ kind: "crit", magnitude: 1.9, seed: "jobs" });
+      warmBase(e);
+      made = 0; const jobs = artJobs(e, plan), walkMade = made;
+      /* (the walk makes the figures' flat outlines, a drawImage and a fill each, shared: nothing else; the gentle panel draws rims only) */
+      ok(jobs.length >= (o.local ? 0 : 3) && walkMade <= 2 * figs3.length && e._jobs === undefined, `figures: artJobs lists the plan's arts without drawing (${jobs.length} jobs, ${walkMade} canvases) ${JSON.stringify(o)}`);
+      for ( const j of jobs ) j();
+      ok(artJobs(e, plan).length === 0, `figures: after its jobs a plan needs no more art ${JSON.stringify(o)}`);
+      made = 0; let layers = 0;
+      for ( const f of plan.frames ) { if ( e.figLayers ) layers += paintFigLayers(e, f, 1).length; else paintFrame(mkCtx(null), e, f); }
+      const cutArt = plan.frames.filter((f) => f.fig && f.fig !== "r" && f.fig !== "p").length * 2;
+      ok(made - layers <= cutArt, `figures: painting after the jobs makes only its layers and cut-outs of arts already worked out (${made - layers} > ${cutArt}) ${JSON.stringify(o)}`);
+    }
   }
 
   /* 4. the player on a fake browser: which figures take part on a seat (its own process: it replaces globals) */

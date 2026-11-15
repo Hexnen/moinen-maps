@@ -48,6 +48,8 @@ export async function run(ok) {
     const seqs = K.steps.map((t) => t.map((s) => `${s.type}${s.ticks}${s.stop ? "s" : ""}${s.punch}`).join(","));
     ok(new Set(seqs).size === 6, `impact: kind ${id} has two steps with the same drawings`);
     /* a scratch does nothing to the scene (hit, heavy and the area kinds): no flash drawing in steps 0 and 1 */
+    /* ENG24 (CALLER5-E2 = IMPCALL2-E1): the low rungs are a show too: steps 0 / 1 / 2 last at least 6 / 8 / 10 ticks (the word under a word aside) */
+    if ( id !== "word" ) ok(len[0] >= 6 && len[1] >= 8 && len[2] >= 10, `impact: kind ${id} steps 0-2 are shorter than 6 / 8 / 10 ticks (${len})`);
     if ( ["hit", "heavy", "blast", "slash", "landing", "shock", "word"].includes(id) ) for ( const i of [0, 1] ) ok(!K.steps[i].some((s) => isFlash({ ...FRAMES[s.type], type: s.type })), `impact: kind ${id} step ${i} changes the scene`);
   }
   /* the ladder the owner names (a scratch, a solid hit, a heavy hit, a knock-down, a critical): every rung a different set, and longer or
@@ -490,6 +492,15 @@ async function life(ok) {
     P.motion = "auto"; h = I.play({ kind: "crit", magnitude: 2, seed: 16, reduced: false });
     ok(h.mode === "static", "impact life: reduced: false does not overrule the OS reduced-motion switch"); h.stop();
     globalThis.matchMedia = mm; P.motion = "full"; }
+  /* ENG24 (CALLER5-E1): every plan carries the table's length (the full plan's, before this seat's safety): a still seat waits as long */
+  { const sp = { kind: "crit", magnitude: 1.9, seed: 77, subject: { x: 300, y: 300 } }, full = planImpact(sp).ms;
+    const p1 = I.plan(sp); ok(p1.tableMs === full && p1.ms === full, `impact life: I.plan gives tableMs (${p1.tableMs} / ${full})`);
+    P.motion = "reduced";
+    const p2 = I.plan(sp); ok(p2.mode === "static" && p2.tableMs === full && p2.ms < full, `impact life: a still seat's plan keeps the table's length (${p2.ms} / ${p2.tableMs})`);
+    const a2 = I.prepare(sp); ok(a2.plan.tableMs === full, "impact life: prepare's plan carries tableMs");
+    for ( const g of a2.plan.frames ) { if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; } for ( const L0 of g.figEls ?? [] ) { L0.el.width = 0; L0.el.height = 0; } g.figEls = null; }
+    const h2 = I.play(sp); ok(h2.plan?.tableMs === full, "impact life: play's plan carries tableMs"); h2.stop();
+    P.motion = "full"; }
 
   /* FIN-ENGINE: a series planned ahead (every blow called at once with its own startAt, apart in time) plays EVERY blow; one at a time
      still holds for windows that overlap (seen live: the ladder's first four blows were "replaced" by the critical before they began) */
@@ -582,6 +593,20 @@ async function life(ok) {
   /* scene change */
   h = I.play({ kind: "hit", magnitude: 1.9, seed: 12 }); await E.tick(30); I.stopAll();
   ok(!h.alive && kids() === 0 && started, "impact life: stopAll");
+  /* ENG24: the impact that starts next (here 1 s after its call) has its art and its first drawings ready before it starts (painted
+     between frames from the call on, not in its own frames) */
+  { await E.tick(1500); const hn = I.play({ kind: "crit", magnitude: 2, seed: 61, startAt: performance.now() + 1000, subject: { x: 400, y: 300 } });
+    await E.tick(400, 16);
+    const ready = hn.plan.frames.filter((f) => f.cv).length;
+    ok(hn.alive && hn.idx < 0 && ready >= 5 && !hn.jobs?.length, `impact life: the next impact's art jobs ran and its drawings are painted well before its start (${ready} drawings, ${hn.jobs?.length} of ${hn.jobN} jobs left)`);
+    hn.stop(); }
+  /* ENG24 (CALLER5-E4): once per page, while idle after canvasReady, every frame type and figure treatment is painted once off screen and
+     each backdrop filter shown on a 1 px box, then removed: the first impact of a session is not cold; nothing is left on the page */
+  { const n0 = document.body.children.length;
+    Hooks.callAll("canvasReady"); await E.tick(4000, 50);
+    ok(I.stats.rehearsed === true && document.body.children.length === n0, `impact life: the idle rehearsal ran and left nothing (${I.stats.rehearsed}, ${document.body.children.length - n0} nodes)`);
+    const p0 = I.stats.painted; Hooks.callAll("canvasReady"); await E.tick(1000, 50);
+    ok(I.stats.painted === p0, "impact life: the rehearsal runs once per page"); }
 }
 
 if ( process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href ) {

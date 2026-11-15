@@ -56,6 +56,9 @@ a roll being resolved, a projectile in flight); `I.plan(spec)` = the plan this c
 1.9.23 IMPACT5: `I.seatMode()` = what THIS seat shows (`"full" | "local" | "static" | "off"`, its own photosensitive and motion settings
 applied; `I.mode()` stays the table's setting), `I.warm(tokens?)` = work the tokens' art out ahead (none: the visible tokens, while idle),
 `handle.trace` = the drawings this seat showed with their instants.
+1.9.24 ENG24: every plan (`I.plan`, `handle.plan`, `prepare(...).plan`) carries `plan.tableMs` = the table's length of this impact (the
+full plan's `ms` before this seat's safety): a reduced-motion seat (one still of at most 4 ticks) waits `tableMs`, not its own `ms`, to
+stay in step with the table. `handle.trace` entries also carry `lag` (ms this seat ran behind the drawing's own instant).
 `plan.peakMs` (1.9.1): ms from the impact's start to its strongest drawing.
 
 Sizes (1.9.1): the star, the gentle panel and the cracks are sized from the subject as it is ON SCREEN (its picture's radius), with a
@@ -202,6 +205,30 @@ one (the 2.5 % area cap); splashes, rings and residue without the figures covere
   the visible tokens are worked out while the browser is idle after `canvasReady` (`I.warm()`), the player paints two drawings ahead,
   and a flash or hit-stop drawing shown in a frame that then ran long (> 50 ms) stays one more display frame (`stats.held`). Each
   handle keeps `h.trace`: `[{ i, type, fig, at (ms after the start), frame (ms of the display frame that presented it) }]`.
+- **1.9.24 ENG24: a loaded or cold seat shows the same drawings** (CALLER5-E3/E4). Live on 1.9.23 (lane 5, GM throttled 4x, player 3x,
+  cold pages): a critical on a 27 815-colour token showed 3-4 of 19 drawings on the GM and 7-9 on the player, different ones; the impact's
+  frame callback ran up to 197 ms. Three causes, three fixes:
+  1. The held twins (`n d h`), the posterised art, the slices' projections and the subject's inked figure were worked out in the frame
+     that first needed them (10-35 ms each on a 256 px picture, 3-5 x that loaded). Now only the figures' base is done at the call
+     (`warmBase`); `artJobs(env, plan)` walks the plan's drawings without drawing (the same seeded draws) and lists every other art as a
+     job; the player works them off one per task between frames (MessageChannel), before they are due. A job not done in time is simply
+     worked out where it is needed, as before: the picture is the same.
+  2. A 2D canvas only records; the browser rasters it in the frame that first shows it (1-6 ms the view, 10-28 ms a figure layer).
+     `paint()` now reads one pixel of each canvas it paints, so the raster happens where it is painted; after the jobs the player paints
+     up to 5 drawings ahead between frames (one per 8 ms over every impact; for an impact that plays, starts within 250 ms, or is the next
+     to start within 1.5 s: from the call on).
+  3. The catch-up: a drawing this seat passed and never showed comes next (one per display frame) while it ended less than `LAG_MS`
+     (10 ticks) ago; past that only key drawings (a flash, a hit-stop, the peak) are caught, within 2 x `LAG_MS`; plain ones between are
+     skipped. The stall hold (one more frame for a key drawing) is not applied on a seat already running late. The watchdog gives a late
+     seat whose frame loop is alive 2 x `LAG_MS` more, once. Checked by `check-seats.mjs` seats `slow100` (10 fps with 220 ms stalls)
+     and `slow160` (6 fps): same endings as the GM, the GM's drawings in order, every flash and every opening drawing.
+  4. The first impact of a page was cold (its frames about twice as long): once per page, while idle after `canvasReady`, every frame type
+     is painted once on a 160 x 90 canvas and each backdrop filter is shown for one frame on a 1 px box (`rehearse`).
+  Live after (lane 5, 2026-11-15, cold pages, recording at 60 fps, GM + player 1600x900): an ordinary roll 6 of 6, three criticals
+  (two starring Mauler B) 19 of 19 on BOTH seats, the first roll's longest frame 26 ms (was 66). Under CPU throttle (GM 4x, player 3x)
+  every flash drawing now shows on both seats (was 1 of 2 on each critical) and 5-13 of 19 drawings (was 3-9); one critical's drawings
+  cost about 19 ms each on an unthrottled machine (the figure layers: ~42 scaled copies), so a 4x-throttled seat cannot paint 19 in a
+  second and still leaves plain drawings out, differently per seat (bounded by `LAG_MS`).
 The gentle variant and reduced motion get none of this (no `cu`, no `kb`, rims only), exactly as before.
 Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps film clock): six impacts (hit, heavy, crit, crit
 without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
@@ -237,7 +264,11 @@ negative -> posterised -> hue -> negative -> duotone (popping 1.55 then 1.25), t
 the figure back in its own colours, a splat, rims fading. A seed swaps the hue and duotone rungs and, from step 3, rotates the release
 drawings, so two blows of the same strength differ.
 
-What each step does now (every kind follows it with its own drawings):
+What each step does now (every kind follows it with its own drawings). 1.9.24 ENG24 (CALLER5-E2, the owner: a show for its full length,
+also on the low rungs): steps 0 / 1 / 2 last 6 / 8 / 10 ticks (250 / 333 / 417 ms; were 2-4 / 4-6 / 5-7): a lead-in tick of speed lines
+with the figures rimmed, the blow as before, then the figures held in their luminance-held twins (`n d h`), rings, halftone, a splash and
+the settle. No flash drawing and no bright palette jump was added (the guard's count and the build of the strength are unchanged). Step 3
+stays 10-11 ticks (a rapid series, blows 0.48 s apart, must still play); `word` is unchanged.
 - steps 0-1 (graze, scratch): the scene untouched; the star at the figure's rim, the figure lit at its edge, at step 1 flipped to its
   negative for one tick, then held with its rim. 1.9.19 showed a star only.
 - step 2 (solid): the panel goes black and white with the figure IN ITS OWN COLOURS on it, then the figure's negative, then posterised

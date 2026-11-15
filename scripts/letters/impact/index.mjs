@@ -8,8 +8,8 @@
    ink (stars, lines, silhouettes, halftone, splashes) is painted ahead of time on 2D canvases, one per drawing, and a drawing change
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
-import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost, isFlash } from "./plan.mjs";
-import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs } from "./draw.mjs";
+import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost, isFlash, peakOf } from "./plan.mjs";
+import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs, warmBase, artJobs, PAINTERS } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
 const MAX_PIX = 2.2e6;        // backing pixels of one drawing (a 4K screen is painted at about 1080p: ink is flat, nobody sees it in 40 ms)
@@ -433,6 +433,7 @@ export function createImpact(L, tools = null) {
     ctx.setTransform?.(c.width / e.W, 0, 0, c.height / e.H, 0, 0);
     if ( f.type === "rest" ) ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     try { paintFrame(ctx, e, f); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
+    rasterNow(ctx);
     Object.assign(c.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "none" });
     f.cv = c;
     const clip = backClip(frameEnv(e, f), f);   // IMPACT5: a panel round the cut-in, the same polygon the drawing's ink outlines
@@ -443,10 +444,15 @@ export function createImpact(L, tools = null) {
     try {
       f.figEls = paintFigLayers(e, f, q).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); h.wrap?.appendChild(el); return { el, g: L0.g }; });
     } catch ( err ) { f.figEls = []; console.warn("LETR | impact figures failed", err); }
+    for ( const L0 of f.figEls ) rasterNow(L0.el.getContext?.("2d", { willReadFrequently: true }));
     const ms = now() - t0;
     stats.painted++; stats.paintMs += ms; if ( ms > stats.paintMax ) stats.paintMax = ms;
     h.paintMs += ms;
   }
+  /* ENG24 (CALLER5-E3): a 2D canvas only RECORDS what is drawn on it; the browser rasters it in the frame that first shows it (live: 1-6 ms
+     the view, 10-28 ms a figure layer of some 40 scaled copies). Reading one pixel rasters it now, where the drawing is painted (ahead,
+     between frames), not in the frame that shows it */
+  function rasterNow(ctx) { try { ctx?.getImageData?.(0, 0, 1, 1); } catch {} }
   function show(h, i) {
     const t0 = now(), f = h.plan.frames[i], old = h.plan.frames[h.idx];
     paint(h, i);
@@ -468,7 +474,7 @@ export function createImpact(L, tools = null) {
     if ( h.spec.keep ) { h.keepKey = null; applyKeep(h); }
     const ms = now() - t0; if ( ms > stats.showMax ) stats.showMax = ms;
     /* IMPACT5 (IMPCALL-1): what this seat showed and when (ms after the start), and how long the display frame that presented it took */
-    if ( h.trace ) h.trace.push({ i, type: f.type, fig: f.fig ?? null, at: h.t0 != null ? +(now() - h.t0).toFixed(1) : null, frame: null });
+    if ( h.trace ) h.trace.push({ i, type: f.type, fig: f.fig ?? null, at: h.t0 != null ? +(now() - h.t0).toFixed(1) : null, frame: null, lag: +(h.lag ?? 0).toFixed(1) });
     h.shownT = t0;
     if ( !h.isReady ) { h.isReady = true; h._ready(true); }
   }
@@ -500,6 +506,14 @@ export function createImpact(L, tools = null) {
      but a drawing passed by less than CATCH_MS that this page never showed comes first, for one display frame; only a seat stalled for
      longer (a hidden tab, a long freeze) skips. Nothing is added (same drawings, same flash count), a drawing only stands a frame late. */
   const CATCH_MS = LIMITS.maxFrameTicks * TICK;
+  /* ENG24 (CALLER5-E3): a seat whose frames run long (a loaded machine: 100-250 ms) passed several drawings per frame; CATCH_MS let it
+     catch up only one drawing that ended less than 4 ticks ago, so it dropped the rest, and each seat dropped DIFFERENT ones. Now a passed
+     drawing this page never showed comes next (one per display frame) while it ended less than LAG_MS ago: the seat runs late by at most
+     LAG_MS and shows every drawing. Past that only the KEY drawings are still caught (a flash, a hit-stop, the peak: what the blow is),
+     while they ended less than 2 x LAG_MS ago; plain drawings in between are skipped. Same drawings and flash count; the impact may end up
+     to 2 x LAG_MS late on a slow seat (the watchdog waits for it) */
+  const LAG_MS = 10 * TICK;
+  const keyOf = (h, j) => { const f = h.plan.frames[j]; return !!f && (isFlash(f) || !!f.stop || j === (h.peakI ??= peakOf(h.plan).index)); };
   /* -> the drawing to show at `el` ms after the start, -1 = over. A blow cut by a stronger one (h.cutAt) keeps only the drawings that
      began at least a tick before the cut, each ending at the cut at the latest: every seat keeps the same ones whatever its frame rate */
   function nextDrawing(h, el) {
@@ -511,7 +525,10 @@ export function createImpact(L, tools = null) {
     for ( let j = 0; j < span.length; j++ ) if ( el >= span[j][0] && el < span[j][1] ) { due = j; break; }
     if ( due < 0 && el < (span[0]?.[0] ?? 0) ) due = 0;
     const upTo = due < 0 ? span.length : due;
-    for ( let j = h.idx + 1; j < upTo; j++ ) if ( span[j][1] > el - CATCH_MS ) return j;   // passed, never shown here, not long ago: now
+    for ( let j = h.idx + 1; j < upTo; j++ ) {   // passed, never shown here: now, while not too long ago
+      if ( span[j][1] > el - Math.max(CATCH_MS, LAG_MS) || (span[j][1] > el - 2 * LAG_MS && keyOf(h, j)) ) { h.lag = Math.max(0, el - span[j][0]); return j; }
+    }
+    h.lag = 0;
     return due;
   }
   let aheadTs = null, aheadUsed = 0, aheadN = 0;
@@ -535,7 +552,8 @@ export function createImpact(L, tools = null) {
       /* IMPACT5 (item 2): a key drawing (a flash, a hit-stop) shown in a frame that then ran long (a stall: the browser may have put the
          picture up late or not at all) stays for one more display frame before the next one replaces it; only after such a stall */
       const cur = h.plan.frames[h.idx];
-      if ( i !== h.idx && cur && gap > LONG_MS && h.heldOnce !== h.idx && h.shownT != null && t - h.shownT <= gap + 2 && (isFlash(cur) || cur.stop) ) { h.heldOnce = h.idx; stats.held = (stats.held ?? 0) + 1; }
+      /* ENG24: not on a seat already running late (every frame of a loaded machine is long: holding each key drawing doubled its lag) */
+      if ( i !== h.idx && cur && gap > LONG_MS && !((h.lag ?? 0) > CATCH_MS) && h.heldOnce !== h.idx && h.shownT != null && t - h.shownT <= gap + 2 && (isFlash(cur) || cur.stop) ) { h.heldOnce = h.idx; stats.held = (stats.held ?? 0) + 1; }
       else if ( i !== h.idx ) show(h, i);
       let a = 0; for ( let k = 0; k < i; k++ ) a += h.plan.frames[k].ticks * TICK;
       const p = punchAt(h.plan, i, Math.floor((el - a) / TICK));
@@ -568,6 +586,7 @@ export function createImpact(L, tools = null) {
     if ( modeFor(P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle }) === "off" ) return ended(null, "off");
     const t = now();
     const plan = planImpact(spec);
+    plan.tableMs = plan.ms;
     /* FIN-ENGINE: blowAt = the instant of the blow itself (e.g. L.contactAt of the word it belongs to): the impact starts its lead-in earlier */
     let startAt = Number.isFinite(spec.startAt) ? spec.startAt : Number.isFinite(spec.blowAt) ? spec.blowAt - plan.peakMs : null;
     if ( startAt != null && startAt > t + 60000 ) { console.warn("LETR | impact startAt is far in the future: it must be this page's performance.now(); ignored"); startAt = null; }
@@ -595,7 +614,10 @@ export function createImpact(L, tools = null) {
     h._done = done; h._ready = rdy; win.h = h;
     h.env = envOf(spec, plan, sub);
     /* IMPACT5 (item 2): the figures' art is worked out NOW, at the call (usually ahead of the blow), never in a frame of the impact */
-    try { h.warmMs = warmFigs(h.env); } catch { h.warmMs = 0; }
+    /* ENG24 (CALLER5-E3/E4): only the figures' base at the call; every other art the drawings need is a job worked off one per task
+       between frames (never in a frame of the impact), then the drawings are painted ahead the same way */
+    try { h.warmMs = warmBase(h.env); h.jobs = artJobs(h.env, plan); } catch { h.warmMs = 0; h.jobs = []; }
+    h.jobN = h.jobs.length;
     h.trace = [];
     /* drawings painted by prepare() are kept when the view and the frame type are still the same */
     if ( armed?.env && armed.env.W === h.env.W && armed.env.H === h.env.H && Math.hypot(armed.env.cx - h.env.cx, armed.env.cy - h.env.cy) < 2 && armed.plan.mode === plan.mode ) {
@@ -613,15 +635,45 @@ export function createImpact(L, tools = null) {
     (spec.parent instanceof HTMLElement ? spec.parent : rootFor(spec.over, spec.z)).appendChild(h.wrap);
     lives.add(h); stats.played++;
     /* the watchdog: whatever happens to the frame loop (a hidden tab, an error), the impact is gone and the scene is free again */
-    h.dog = setTimeout(() => finish(h, "done"), Math.max(0, (startAt ?? t) - t) + plan.ms + 300);
+    /* ENG24: a seat that runs late (LAG_MS) and whose frame loop is alive gets up to 2 x LAG_MS more, once */
+    const dog = () => { if ( !h.dogX && h.lag > 0 && h.lastT != null && now() - h.lastT < 250 ) { h.dogX = true; h.dog = setTimeout(dog, 2 * LAG_MS); } else finish(h, "done"); };
+    h.dog = setTimeout(dog, Math.max(0, (startAt ?? t) - t) + plan.ms + 300);
     h.raf = requestAnimationFrame((x) => loop(h, x));
+    feed(h);
     return h;
+  }
+  /* ENG24: between frames, one piece of work per task: the art jobs first, then the next drawings painted ahead (at most FEED_N ahead of the
+     one on screen: each is a full-view canvas). A drawing still unpainted when it is due is painted in its frame, as before */
+  const FEED_N = 5, FEED_SOON = 250, FEED_EARLY = 1500, FEED_GAP = 8;
+  let feedT = -Infinity;
+  const task = (() => {
+    const MC = globalThis.MessageChannel;
+    if ( typeof MC !== "function" || globalThis.__letrRealST ) return (fn) => setTimeout(fn, 0);
+    const ch = new MC(), q = [];
+    ch.port1.onmessage = () => { const fn = q.shift(); if ( fn ) fn(); };
+    return (fn) => { q.push(fn); ch.port2.postMessage(0); };
+  })();
+  function feed(h) {
+    if ( !h.alive ) return;
+    const job = h.jobs?.shift();
+    if ( job ) { const t0 = now(); try { job(); } catch {} h.jobMs = (h.jobMs ?? 0) + now() - t0; task(() => feed(h)); return; }
+    /* drawings are painted ahead only for an impact that plays or starts within FEED_SOON (a series called at once waits in the frame
+       loop's shared budget, FIN-ENGINE), and one painting per FEED_GAP ms over every impact (a task between frames delays the next frame) */
+    const t = now(), fr = h.plan.frames, top = Math.min(fr.length, Math.max(0, h.idx) + 1 + FEED_N);
+    /* (live 1.9.24, a loaded seat: waiting for FEED_SOON left the drawings to the impact's own frames; the impact that starts NEXT, within
+       FEED_EARLY, is painted ahead from the call on) */
+    const next = h.t0 == null || t >= h.t0 - FEED_SOON || (h.t0 - t < FEED_EARLY && [...lives].every((x) => x === h || !x.alive || (x.t0 ?? -Infinity) > h.t0));
+    if ( !next ) { setTimeout(() => feed(h), Math.min(200, Math.max(1, h.t0 - FEED_SOON - t + 1))); return; }
+    if ( t - feedT < FEED_GAP ) { setTimeout(() => feed(h), FEED_GAP); return; }
+    for ( let j = Math.max(0, h.idx + 1); j < top; j++ ) if ( fr[j].cv === undefined ) { feedT = now(); paint(h, j); feedT = now(); task(() => feed(h)); return; }
+    if ( top < fr.length ) setTimeout(() => feed(h), TICK);   // the window moves with the drawing on screen
   }
   /* paint an impact ahead of the blow (the subject's silhouette and every drawing, for the view as it is now); play it with
      prepared.play({ startAt }) or I.play(prepared, { startAt }) */
   function prepare(spec0 = {}) {
     const spec = { ...(spec0 && typeof spec0 === "object" ? spec0 : {}) };
     const P = prefs(), plan = planImpact(spec), sub = subjectOf(spec);
+    plan.tableMs = plan.ms;
     safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: now(), t0: now(), preview: true });
     const a = { _armed: true, spec, plan, sub, env: null, play: (o = {}) => play(a, o) };
     if ( !sub.hidden && plan.frames.length ) { a.env = envOf(spec, plan, sub); const h = { plan, env: a.env, wrap: null, paintMs: 0 }; for ( let i = 0; i < plan.frames.length; i++ ) paint(h, i); a.paintMs = h.paintMs; }
@@ -630,6 +682,7 @@ export function createImpact(L, tools = null) {
   /* the plan this client would show (no flash budget used) */
   function planFor(spec = {}) {
     const plan = planImpact(spec);
+    plan.tableMs = plan.ms;   // ENG24 (CALLER5-E1): the table's length (the full plan, before this seat's safety): a still seat waits as long
     return safety(plan, prefs(), { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: now(), t0: now(), preview: true });
   }
   /* one frame type held to look at (gallery, design): at most LIMITS.galleryTicks */
@@ -652,7 +705,44 @@ export function createImpact(L, tools = null) {
     };
     if ( idleQ.length ) (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 50)))(step, { timeout: 2000 });
   }
-  try { globalThis.Hooks?.on?.("canvasReady", () => warmIdle()); } catch {}
+  /* ENG24 (CALLER5-E4): the first impact of a session was cold (its frames ran about twice as long as later ones: the painters' code not yet
+     compiled, the backdrop filters not yet built). Once per page, while the browser is idle: every frame type painted once on a tiny canvas,
+     then every backdrop filter shown for one frame on a 1 px box. Nothing a user can see */
+  let rehearsed = false;
+  function rehearse() {
+    if ( rehearsed || typeof document === "undefined" ) return;
+    rehearsed = true;
+    const idle = (fn) => (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 50)))(fn, { timeout: 3000 });
+    const made = [], mk1 = (w, h) => { const c = mk(w, h); made.push(c); return c; };   // every canvas of the rehearsal, freed at its end
+    const env = { W: 160, H: 90, cx: 80, cy: 45, R: 10, dir: 0.6, mag: 2, step: 3, kind: "hit", tone: TONES.hero, sil: null, redOk: false, figLayers: false, figs: [],
+      rimTone: "a", local: null, chromaBack: true, makeCanvas: mk1, ctx2d: ctxOf };
+    /* a throwaway 24 px figure, so the figures' code (cut-out, held twins, posterised, layers) runs once too */
+    let figs = [];
+    try { const src = mk1(24, 24), x = ctxOf(src); x.fillStyle = "#c84"; x.beginPath(); x.arc(12, 12, 9, 0, Math.PI * 2); x.fill(); x.fillStyle = "#38c"; x.fillRect(8, 6, 8, 6);
+      figs = [{ role: "target", cx: 80, cy: 45, sil: { src, sx: 0, sy: 0, sw: 24, sh: 24, w: 20, h: 20, rot: 0 } }]; } catch {}
+    const types = [...PAINTERS].map((type) => [type, null]).concat(["i", "p", "k", "n", "d", "h", "o"].map((fig) => ["fig", fig])), backs = Object.values(BACK).filter((v) => v && !v.startsWith("url("));
+    const touch = () => {
+      const v = backs.shift(); if ( !v || !document.body ) return;
+      const d = document.createElement("div");
+      Object.assign(d.style, { position: "fixed", left: "0", top: "0", width: "1px", height: "1px", pointerEvents: "none", backdropFilter: v, webkitBackdropFilter: v });
+      document.body.appendChild(d);
+      requestAnimationFrame(() => requestAnimationFrame(() => { d.remove(); idle(touch); }));
+    };
+    const step = (dl) => {
+      while ( types.length && (!dl || dl.timeRemaining() > 8) ) {
+        const [type, fig] = types.shift();
+        try {
+          const c = mk1(160, 90), x = ctxOf(c), f = { type, ticks: 1, seed: 7, punch: 0, ...(fig ? { fig, z: 1.25 } : {}) }, e = fig ? { ...env, sil: figs[0]?.sil ?? null, figs } : env;
+          paintFrame(x, e, f); x.getImageData(0, 0, 1, 1); c.width = 0;
+          if ( fig ) for ( const L0 of paintFigLayers({ ...e, figLayers: true }, f, 1) ) { L0.canvas.getContext("2d").getImageData(0, 0, 1, 1); L0.canvas.width = 0; }
+        } catch {}
+      }
+      if ( types.length ) idle(step); else { for ( const c of made.splice(0) ) { c.width = 0; c.height = 0; } stats.rehearsed = true; idle(touch); }
+    };
+    idle(step);
+  }
+  try { globalThis.Hooks?.on?.("canvasReady", () => { warmIdle(); rehearse(); }); } catch {}
+  try { if ( globalThis.canvas?.ready && globalThis.Hooks ) rehearse(); } catch {}   // an engine loaded after the scene was drawn
   function stopAll() { for ( const h of [...lives] ) finish(h, "stopped"); setStop(false); }
   try { globalThis.Hooks?.on?.("canvasTearDown", stopAll); } catch {}
 

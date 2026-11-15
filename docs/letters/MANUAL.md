@@ -1606,6 +1606,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
 - 2026-11-15: ENGPINK (1.9.22, `tactics-zones-engpink`): section 13 "No pink" (the band, the replaced colours, the computed shades),
   section 14 ruling row, section 15 palette row; `check-pink.mjs` (check.mjs 8g and 16).
+- 2026-11-15: ENG24 (1.9.24, `tactics-zones-eng24`): section 21a (`plan.tableMs`, the loaded / cold seat, steps 0-2 length); impact
+  README "Nothing the first use costs", "What each step does"; `check-seats.mjs` slow seats, `check-figures.mjs` art jobs,
+  `check-impact.mjs` tableMs and step lengths.
 - 2026-11-15: IMPACT5 (1.9.23, `tactics-zones-impact5`): section 21a (the cut-in, the open area rule for ordinary seats, the same picture
   on every seat, figures on every drawing, rim by contrast, no pink from turned colours, warm-up and the stall rule, `I.seatMode`,
   `I.warm`, `handle.trace`); impact README "The cut-in", "Safety"; `check-figures.mjs` (area rule, cut-in, pink).
@@ -1727,6 +1730,8 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
 - `flashes` off, `motion: gentle`, the client setting `moinen-letters.impact = local` or a caller's `gentle: true`: the gentle variant
   (no full frame, no inverted scene, no hit-stop, everything inside a panel of at most 20 % of the viewport; its panels still counted).
 - reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
+  (1.9.24 ENG24) Every plan carries `plan.tableMs`, the table's length (the full plan before this seat's safety): a caller that waits
+  for the impact waits `tableMs` on every seat, never the still's own `ms`. `[V node]`
   `enabled` off or `impact = off`: nothing.
 - an impact is at most 24 ticks (1 s; 1.9.21, was 12), one drawing 4 ticks, hit-stop 8 ticks (1.9.21, was 4); a watchdog timer removes
   it even when the frame loop died.
@@ -1748,6 +1753,12 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
 one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.9.1 (film clock off):
 a five-blow ladder of impacts called at once, max frame 18.5 ms (painting ahead is shared out per frame); the same ladder's five
 WORDS give one 62 ms frame when planned together (open, section 18). Numbers: the impact README "Cost".
+
+(1.9.24 ENG24) A loaded or cold seat shows the same drawings: the arts a plan needs are listed at the call (`artJobs`) and worked out
+between frames, drawings are painted and rastered ahead, a seat that passed drawings shows them late (under 10 ticks behind; then only
+the flashes, hit-stops and the peak, under 20) and the first impact of a page is warmed by an idle rehearsal. Live on 1.9.23 a throttled
+GM and player showed 3-9 of 19 drawings of a critical, different ones; see the impact README "Nothing the first use costs" for the
+numbers after. Steps 0 / 1 / 2 last 6 / 8 / 10 ticks (the owner: a show for its full length, also on the low rungs). `[V node]`
 
 **For callers (lessons).**
 - A map preset: `plan.t0` of `presets.fire` is the instant of the hit; convert with `performance.now() + (t0 - sharedNow())`.

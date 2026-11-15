@@ -150,7 +150,11 @@ const S = (type, ticks = 1, flags = "", fig = "") => {
   if ( flags.includes("Z") ) s.z = 1.55; else if ( flags.includes("z") ) s.z = 1.25;
   return s;
 };
-/* IMPACT4 (1.9.21) ladders: steps 0-2 as short as before (the scene untouched in 0-1; a token's palette flips and the figure pops), steps 3-5
+/* ENG24 (1.9.24, CALLER5-E2 = IMPCALL2-E1, the owner: an impact is a show for its full length, also on the low rungs): steps 0 / 1 / 2 last
+   6 / 8 / 10 ticks (were 2-4 / 4-6 / 5-7): speed lines lead in, the blow, then the figures held in their twins, rings, halftone and the
+   settle; no flash drawing and no bright palette jump added (the guard's count and the build of the strength stay as they were). Step 3
+   stays at 10-11 ticks (a rapid series, blows 0.48 s apart, must still play: see the open question in the report).
+   IMPACT4 (1.9.21) ladders: steps 0-2 as short as before (the scene untouched in 0-1; a token's palette flips and the figure pops), steps 3-5
    cut like a hand-animated impact of 13 / 16-18 / 21-24 ticks: anticipation (speed lines, the figures inked, their hue flipped), the contact
    (the black frame with the struck figure ENLARGED in its own colour negative; the scene's negative with the figures popped in their own
    colours: the two flash drawings), the hold (hit-stop up to 8 ticks) with the figures shaking and their palette jumping on ones (negative,
@@ -159,58 +163,58 @@ const S = (type, ticks = 1, flags = "", fig = "") => {
    drawings, so the guard never thins a lone impact. */
 export const KINDS = {
   hit: { tone: "hero", pl: "Cios", en: "Hit", steps: [
-    [S("pop", 1, "qz", "n"), S("fade", 1, "", "r")],
-    [S("pop", 1, "qz", "i"), S("fig", 1, "", "n"), S("splat"), S("fade", 1, "", "r")],
-    [S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "bz", "p"), S("fig", 1, "", "h"), S("dots", 1, "", "r"), S("fade")],
+    [S("lines", 1, "", "r"), S("pop", 1, "qz", "n"), S("fig", 1, "", "h"), S("ring", 1, "", "d"), S("splat", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "qz", "i"), S("fig", 1, "", "n"), S("splat", 1, "", "h"), S("fig", 1, "", "o"), S("ring", 1, "", "d"), S("dots", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "bz", "p"), S("fig", 1, "", "h"), S("ring", 1, "", "n"), S("dots", 1, "", "d"), S("splat", 1, "", "r"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "p"), S("fig", 1, "", "h"), S("dots", 1, "", "n"), S("ring", 1, "", "d"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("smear", 1, "", "n"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "p"), S("fig", 1, "spz", "h"), S("chroma", 1, "b", "i"), S("cracks", 2, "", "d"), S("dots", 2, "", "p"), S("ring", 2, "", "n"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("lines", 1, "", "n"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("fig", 1, "sbz", "i"), S("fig", 1, "s", "d"), S("chroma", 1, "p", "i"), S("cracks", 2, "b", "p"), S("dots", 2, "", "h"), S("ring", 2, "", "n"), S("fig", 2, "", "o"), S("splat", 1, "", "d"), S("fade", 2, "", "r"), S("fade", 2, "", "r")] ] },
   heavy: { tone: "fire", pl: "Ciężki cios", en: "Heavy blow", steps: [
-    [S("pop", 1, "qz", "n"), S("splat"), S("fade", 1, "", "r")],
-    [S("pop", 1, "pz", "i"), S("fig", 1, "", "n"), S("splat"), S("ring"), S("fade")],
-    [S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("shatter", 1, "bz", "p"), S("fig", 1, "", "h"), S("ring", 1, "", "r"), S("fade")],
+    [S("lines", 1, "", "r"), S("pop", 1, "qz", "n"), S("fig", 1, "", "d"), S("splat", 1, "", "h"), S("ring", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "pz", "i"), S("fig", 1, "", "n"), S("splat", 1, "", "h"), S("ring", 1, "", "d"), S("cracks", 1, "", "r"), S("dots", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("shatter", 1, "bz", "p"), S("fig", 1, "", "h"), S("ring", 1, "", "r"), S("cracks", 1, "", "d"), S("dots", 1, "", "n"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sb", "p"), S("cracks", 2, "", "h"), S("ring", 1, "", "d"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("shadow", 2, "s"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "p"), S("fig", 1, "sp", "n"), S("cracks", 1, "b", "i"), S("ring", 2, "", "d"), S("cracks", 2, "", "h"), S("dots", 1, "", "p"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("smear", 1, "", "n"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("fig", 1, "sbz", "i"), S("fig", 1, "s", "d"), S("cracks", 1, "p", "i"), S("ring", 2, "", "p"), S("cracks", 2, "b", "h"), S("dots", 2, "", "n"), S("ring", 2, "", "r"), S("splat", 1, "", "d"), S("fade", 2, "", "r"), S("fade", 2)] ] },
   crit: { tone: "hero", pl: "Trafienie krytyczne", en: "Critical", steps: [
-    [S("ink", 1, "pz", "o"), S("fig", 1, "z", "i"), S("dots", 1, "", "n"), S("fade")],
-    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "", "h"), S("dots", 1, "", "p"), S("fade")],
-    [S("lines", 1, "", "r"), S("slam", 1, "pZ", "o"), S("fig", 2, "bz", "i"), S("fig", 1, "", "h"), S("dots", 1, "", "p"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pz", "o"), S("fig", 1, "z", "i"), S("fig", 1, "", "h"), S("dots", 1, "", "n"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "", "h"), S("dots", 1, "", "p"), S("ring", 1, "", "n"), S("splat", 1, "", "d"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("slam", 1, "pZ", "o"), S("fig", 2, "bz", "i"), S("fig", 1, "", "h"), S("dots", 1, "", "p"), S("ring", 1, "", "n"), S("splat", 1, "", "d"), S("fig", 1, "", "o"), S("fade", 1, "", "r")],
     [S("lines", 1, "", "k"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sb", "h"), S("chroma", 1, "b", "p"), S("dots", 1, "", "n"), S("ring", 1, "", "d"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("lines", 1, "", "n"), S("shadow", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("chroma", 1, "p", "i"), S("dots", 2, "", "p"), S("ring", 2, "", "d"), S("fig", 1, "", "o"), S("splat", 1, "", "n"), S("fade", 2, "", "r"), S("fade")],
     [S("lines", 1, "", "k"), S("lines", 1, "", "n"), S("window", 2, "s", "o"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spZ", "h"), S("fig", 1, "sbz", "i"), S("fig", 1, "s", "d"), S("chroma", 1, "p", "i"), S("fig", 1, "qz", "o"), S("dots", 1, "", "p"), S("cracks", 1, "b", "h"), S("ring", 2, "", "n"), S("dots", 1, "", "d"), S("splat", 1, "", "i"), S("fig", 2, "", "o"), S("fade", 2, "", "r"), S("fade", 2)] ] },
   blast: { tone: "fire", pl: "Wybuch", en: "Blast", steps: [
-    [S("pop", 1, "qz", "n"), S("ring"), S("fade")],
-    [S("pop", 1, "p", "i"), S("ring", 1, "", "n"), S("dots"), S("fade")],
-    [S("ink", 1, "pZ", "o"), S("ring", 1, "", "i"), S("shatter", 1, "b"), S("fig", 1, "", "h"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "qz", "n"), S("ring", 1, "", "h"), S("dots", 1, "", "d"), S("ring", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "p", "i"), S("ring", 1, "", "n"), S("dots", 1, "", "h"), S("ring", 1, "", "d"), S("cracks", 1, "", "r"), S("splat", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("ring", 1, "", "i"), S("shatter", 1, "b"), S("fig", 1, "", "h"), S("ring", 1, "", "n"), S("dots", 1, "", "d"), S("cracks", 1, "", "r"), S("fade", 2, "", "r")],
     [S("glare"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sb", "p"), S("cracks", 2, "b", "h"), S("ring", 2, "", "d"), S("fade", 2, "", "r"), S("fade")],
     [S("window"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "p"), S("cracks", 1, "b", "h"), S("ring", 2, "", "r"), S("chroma", 1, "", "n"), S("dots", 2, "", "d"), S("ring", 2), S("fade", 2)],
     [S("lines", 1, "", "k"), S("window", 2, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("cracks", 1, "", "i"), S("ring", 2, "", "r"), S("chroma", 1, "", "n"), S("cracks", 2, "b", "d"), S("ring", 2, "", "h"), S("dots", 2, "", "p"), S("splat"), S("fade", 2, "", "r"), S("fade", 2)] ] },
   slash: { tone: "blood", pl: "Cięcie", en: "Slash", steps: [
-    [S("smear", 1, "", "n"), S("splat")],
-    [S("smear", 1, "", "i"), S("rip", 1, "q", "r"), S("splat"), S("fade")],
-    [S("smear", 1, "", "i"), S("rip", 1, "pz", "p"), S("fig", 1, "b", "o"), S("fig", 1, "", "h"), S("splat", 2, "", "r"), S("fade")],
+    [S("lines", 1, "", "r"), S("smear", 1, "", "n"), S("rip", 1, "", "h"), S("splat", 1, "", "d"), S("splat", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("smear", 1, "", "i"), S("rip", 1, "q", "r"), S("fig", 1, "", "n"), S("splat", 1, "", "h"), S("splat", 1, "", "d"), S("dots", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("smear", 1, "", "i"), S("rip", 1, "pz", "p"), S("fig", 1, "b", "o"), S("fig", 1, "", "h"), S("splat", 1, "", "n"), S("rip", 1, "", "d"), S("splat", 2, "", "r"), S("fade", 1, "", "r")],
     [S("smear", 1, "", "k"), S("tear", 2, "spZ", "o"), S("fig", 2, "sz", "i"), S("fig", 1, "", "h"), S("splat", 1, "b", "p"), S("rip", 1, "", "n"), S("splat", 1, "", "d"), S("fade", 2, "", "r")],
     [S("smear", 1, "", "n"), S("lines", 1, "", "k"), S("shadow", 1, "s"), S("tear", 2, "spZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "h"), S("chroma", 1, "b", "p"), S("splat", 2, "", "n"), S("rip", 1, "", "d"), S("splat", 2), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("smear", 1, "", "n"), S("shadow", 2, "s"), S("tear", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("fig", 1, "sbz", "i"), S("chroma", 1, "", "d"), S("splat", 2, "", "r"), S("rip", 1, "", "n"), S("splat", 2, "", "p"), S("fig", 2, "", "o"), S("fade", 2, "", "r"), S("fade", 2)] ] },
   landing: { tone: "dust", pl: "Lądowanie / uderzenie z góry", en: "Landing / strike from above", steps: [
-    [S("pop", 1, "qz", "n"), S("ring")],
-    [S("lines"), S("pop", 1, "p", "i"), S("ring", 1, "", "n"), S("fade")],
-    [S("lines"), S("ink", 1, "pZ", "o"), S("ring", 1, "", "i"), S("cracks", 1, "b", "h"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "qz", "n"), S("ring", 1, "", "h"), S("cracks", 1, "", "d"), S("dots", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("pop", 1, "p", "i"), S("ring", 1, "", "n"), S("cracks", 1, "", "h"), S("dots", 1, "", "d"), S("ring", 1, "", "r"), S("fig", 1, "", "o"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("ring", 1, "", "i"), S("cracks", 1, "b", "h"), S("fig", 1, "", "n"), S("ring", 1, "", "d"), S("dots", 1, "", "r"), S("cracks", 1, "", "r"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "s", "h"), S("ring"), S("cracks", 2, "b", "p"), S("ring", 1, "", "d"), S("dots", 1, "", "n"), S("fade", 2, "", "r")],
     [S("window"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "h"), S("cracks", 2, "b", "p"), S("ring", 1, "", "r"), S("dots", 1, "", "i"), S("ring", 2, "", "n"), S("cracks", 2, "", "d"), S("fade", 2)],
     [S("lines", 1, "", "k"), S("window", 1, "s"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("cracks", 1, "", "n"), S("ring", 2, "", "r"), S("dots", 1, "", "d"), S("cracks", 2, "b", "i"), S("ring", 2, "", "h"), S("dots", 2), S("fade", 2, "", "r"), S("fade", 2)] ] },
   ko: { tone: "blood", pl: "Powalenie", en: "Knock-out", steps: [
-    [S("ink", 1, "pz", "o"), S("pop", 1, "z", "i"), S("splat"), S("fade")],
-    [S("ink", 1, "pZ", "o"), S("pop", 1, "z", "i"), S("fig", 1, "", "h"), S("splat", 2, "", "p"), S("fade")],
-    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "", "h"), S("splat", 2, "b", "p"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pz", "o"), S("pop", 1, "z", "i"), S("fig", 1, "", "h"), S("splat", 1, "", "d"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("pop", 1, "z", "i"), S("fig", 1, "", "h"), S("splat", 2, "", "p"), S("fig", 1, "", "n"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("ink", 1, "pZ", "o"), S("fig", 1, "z", "i"), S("fig", 1, "", "h"), S("splat", 2, "b", "p"), S("fig", 1, "", "d"), S("splat", 1, "", "n"), S("fade", 2, "", "r")],
     [S("shadow", 3, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "s", "h"), S("splat", 2, "b", "p"), S("fig", 1, "", "n"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("shadow", 3, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "h"), S("chroma", 1, "b", "p"), S("splat", 2, "", "i"), S("fig", 2, "", "d"), S("splat", 1, "", "n"), S("fade", 2, "", "r"), S("fade", 2)],
     [S("lines", 1, "", "k"), S("lines", 1, "", "n"), S("shadow", 3, "s"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("fig", 1, "sbz", "i"), S("chroma", 1, "", "d"), S("splat", 2, "", "p"), S("fig", 2, "", "h"), S("splat", 2, "", "n"), S("fig", 2, "", "o"), S("splat", 1), S("fade", 2, "", "r"), S("fade", 2, "", "r")] ] },
   shock: { tone: "volt", pl: "Wyładowanie / energia", en: "Shock / energy", steps: [
-    [S("chroma", 1, "", "n"), S("pop")],
-    [S("chroma"), S("pop", 1, "qz", "i"), S("ring", 1, "", "r"), S("fade")],
-    [S("chroma", 1, "", "i"), S("ink", 1, "qZ", "o"), S("ring", 1, "", "p"), S("fig", 1, "", "h"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("chroma", 1, "", "n"), S("pop", 1, "", "h"), S("ring", 1, "", "d"), S("dots", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("chroma", 1, "", "r"), S("pop", 1, "qz", "i"), S("ring", 1, "", "n"), S("dots", 1, "", "h"), S("fig", 1, "", "d"), S("ring", 1, "", "r"), S("fade", 1, "", "r")],
+    [S("lines", 1, "", "r"), S("chroma", 1, "", "i"), S("ink", 1, "qZ", "o"), S("ring", 1, "", "p"), S("fig", 1, "", "h"), S("chroma", 1, "", "n"), S("ring", 1, "", "d"), S("dots", 1, "", "r"), S("fade", 2, "", "r")],
     [S("chroma", 1, "", "k"), S("slam", 1, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "s", "h"), S("chroma", 1, "b", "p"), S("ring", 1, "", "n"), S("dots", 2, "", "d"), S("fade", 2, "", "r")],
     [S("lines", 1, "", "k"), S("glare"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbz", "h"), S("chroma", 1, "b", "p"), S("ring", 1, "", "r"), S("dots", 2, "", "n"), S("chroma", 1, "", "d"), S("ring", 2), S("fade", 2)],
     [S("lines", 1, "", "k"), S("glare", 1, "s"), S("slam", 2, "pZ", "o"), S("fig", 1, "sZ", "i"), S("fig", 1, "sbZ", "p"), S("fig", 1, "spz", "h"), S("chroma", 2, "", "i"), S("ring", 1, "", "r"), S("fig", 1, "", "n"), S("chroma", 1, "b", "d"), S("dots", 2, "", "h"), S("ring", 2, "", "n"), S("dots"), S("fade", 2, "", "r"), S("fade", 2)] ] },
