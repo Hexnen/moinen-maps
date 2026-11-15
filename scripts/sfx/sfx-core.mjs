@@ -435,8 +435,13 @@ export function burnPlan(group, { grid = 100, catchMs = () => 0, levelNow = (s) 
 /** Would a burning fire's phrase spots `pts` sit on the phrases of the fires already lettered (`taken`: their spots)? `em` = the
     phrases' letter size (scene px): a phrase box is about nine letters wide and three and a half high. (Live: a bomb's scattered
     debris fires each lettered their own sustain and the phrases stacked on each other; the nearby smaller fire is heard in the
-    bigger one's phrases.) */
-export const burnCrowded = (pts, taken, em) => pts.some((q) => taken.some((t) => Math.abs(q.x - t.x) < em * 8.8 && Math.abs(q.y - t.y) < em * 3.4));
+    bigger one's phrases.) A spot already taken may carry its own phrases' size (`t.em`): two fires are crowded by the BIGGER of their
+    phrases (THUNDERFIT: a small fire's phrases were tested at their own small size and stood on a big fire's phrases). */
+export const burnCrowded = (pts, taken, em, k = BURN_BOX) => pts.some((q) => taken.some((t) => { const e = Math.max(em, t.em ?? 0); return Math.abs(q.x - t.x) < e * k.w && Math.abs(q.y - t.y) < e * k.h; }));
+/** the room (in `em`, the phrases' letter size x 1.25) one fire's phrases keep from ANOTHER fire's (generous: a fire is heard in the
+    bigger one's phrases) and the room its own spots need from each other (THUNDERFIT: a phrase is about four to five of its letters wide,
+    rocking a little to either side, and two of them stand one above the other: about 6.5 x 3.3 letters) */
+export const BURN_BOX = { w: 8.8, h: 3.4 }, BURN_OWN = { w: 5.2, h: 2.6 };
 /** Fire strokes that burn together (paths within their radii plus a square): groups (deterministic order). */
 export function burnGroups(fires, grid = 100) {
   const list = fires.slice().sort((a, b) => (a.id < b.id ? -1 : 1)), parent = list.map((_, i) => i);
@@ -593,17 +598,18 @@ export const TOUCH = 0.18;
 export const besideOf = (side = 1) => [[side, -0.15], [side, 0.3], [side, -0.55], [0, 1], [-side, -0.15], [-side, 0.3], [side * 0.55, 1]];
 /** the penalties of a place: interface panel, token, other word, subject covered (beyond its voice's `cover`), outside the view,
     distance from where it sounds (in word sizes) */
-export const PEN = { ui: 8, tok: 4, word: 3, subject: 2.5, off: 2, dist: 0.18 };
+export const PEN = { ui: 8, tok: 4, word: 3, subject: 2.5, off: 2, dist: 0.18, pin: 4 };
 
 /**
  * Places kept readable on this screen: beside what each word letters, off tokens, off this client's interface panels, off other words,
  * inside the view. `ctx` = { view ({x0, y0, x1, y1} scene px), ui ([box] scene px: interface panels over the canvas), tokens ([box]),
- * alive ([box]: words already up) }. Each word needs its box size (bw, bh scene px). -> the words to play with x, y, box set; a
+ * alive ([box]: words already up), pins ([box]: the map's note pins this seat sees - THUNDERFIT: live at step 3 a blast's main word
+ * stood over the pins; a pin counts like a token) }. Each word needs its box size (bw, bh scene px). -> the words to play with x, y, box set; a
  * satellite or pre word that cannot find a free place is dropped; the main word always plays (the least bad place) unless its whole
  * place is off this screen.
  */
 export function place(words, ctx) {
-  const v = ctx.view, ui = ctx.ui ?? [], tokens = ctx.tokens ?? [];
+  const v = ctx.view, ui = ctx.ui ?? [], tokens = ctx.tokens ?? [], pins = ctx.pins ?? [];
   const taken = [...(ctx.alive ?? [])], out = [];
   const rank = (w) => (w.role === "main" ? 0 : w.role === "pre" ? 1 : 2);
   for ( const w0 of words.slice().sort((a, b) => rank(a) - rank(b)) ) {
@@ -625,7 +631,7 @@ export function place(words, ctx) {
     }
     cands.push([w.x, w.y], [w.x, w.y - bh * 0.8], [w.x + bw * 0.6, w.y - bh * 0.5], [w.x - bw * 0.6, w.y - bh * 0.5]);
     // just clear of a panel / token it would cover: above, beside, below it
-    for ( const t of [...ui, ...tokens] ) if ( inter(b0, t) > 0 ) cands.push([w.x, t.y0 - bh / 2 - 6], [t.x1 + bw / 2 + 6, w.y], [t.x0 - bw / 2 - 6, w.y], [w.x, t.y1 + bh / 2 + 6]);
+    for ( const t of [...ui, ...tokens, ...pins] ) if ( inter(b0, t) > 0 ) cands.push([w.x, t.y0 - bh / 2 - 6], [t.x1 + bw / 2 + 6, w.y], [t.x0 - bw / 2 - 6, w.y], [w.x, t.y1 + bh / 2 + 6]);
     let best = null;
     for ( let [x, y] of cands ) {
       // (inside the view where it fits: a word half off the screen edge is not read)
@@ -637,16 +643,17 @@ export function place(words, ctx) {
       const b = boxOf(w, x, y), A = area(b) || 1;
       const pui = ui.reduce((s, t) => s + inter(b, t), 0) / A;
       const tok = tokens.reduce((s, t) => s + inter(b, t), 0) / A;
+      const pin = pins.length ? pins.reduce((s, t) => s + inter(b, t), 0) / A : 0;
       const wrd = taken.reduce((s, t) => s + inter(b, t), 0) / A;
       const sub = S ? Math.max(0, inter(b, S) / Math.max(1, area(S)) - (w.cover ?? 0.25)) : 0;   // (the share of the subject it hides)
       const off = v ? 1 - inter(b, v) / A : 0;
       const dist = Math.hypot(x - w.x, y - w.y) / Math.max(1, bh);
-      const pen = pui * PEN.ui + tok * PEN.tok + wrd * PEN.word + sub * PEN.subject + off * PEN.off + dist * PEN.dist;
-      if ( !best || pen < best.pen ) best = { x, y, b, pen, pui, tok, wrd, off, sub };
+      const pen = pui * PEN.ui + tok * PEN.tok + wrd * PEN.word + sub * PEN.subject + off * PEN.off + dist * PEN.dist + pin * PEN.pin;
+      if ( !best || pen < best.pen ) best = { x, y, b, pen, pui, tok, wrd, off, sub, pin };
     }
     // (what it letters is entirely off this screen: nobody here sees it - a main word off screen takes its cluster with it)
     if ( v && inter(S ?? boxOf(w), v) === 0 && inter(boxOf(w), v) === 0 ) { if ( main ) return []; continue; }
-    if ( !main && (best.pui > 0.02 || best.tok > 0 || best.wrd > 0.05 || best.off > 0.15) ) continue;
+    if ( !main && (best.pui > 0.02 || best.tok > 0 || best.pin > 0 || best.wrd > 0.05 || best.off > 0.15) ) continue;
     w.x = best.x; w.y = best.y; w.box = best.b; w.pen = best;
     taken.push(best.b); out.push(w);
   }

@@ -32,6 +32,7 @@ import * as MC from "../presets/meteor-core.mjs";
 import { fallAt as landingFallAt } from "../presets/landing-fx.mjs";
 import * as EV from "./sfx-events.mjs";
 import * as SZ from "./sfx-size.mjs";
+import * as FIT from "./sfx-fit.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
 
@@ -472,13 +473,13 @@ function pageWord(p, w, t, waited = 0) {
   // (a word at its shooter - a rocket's launch at the tube - whose shooter this client cannot see (a hidden token) is unlocated too, even
   // where the ground is in view: it must not point at the hidden token)
   if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(spec); return; }
-  let placed = C.place([spec], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+  let placed = placeFit([spec], placeCtx());
   // (a debris / catch word covered by the story's bigger words still on screen takes the next landing in view instead of being dropped)
   for ( const s of alts ) {
     if ( placed.length ) break;
     const r2 = w.r ?? G * 0.4;
     const s2 = { ...spec, x: s.x, y: s.y, subject: { x0: s.x - r2, y0: s.y - r2, x1: s.x + r2, y1: s.y + r2 } };
-    placed = C.place([s2], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) });
+    placed = placeFit([s2], placeCtx());
     if ( placed.length ) p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
   }
   // (still covered - a meteor's main word and wave fill the crater's surroundings at a close zoom: live, four debris words dropped) -
@@ -491,11 +492,11 @@ function pageWord(p, w, t, waited = 0) {
   if ( !placed.length ) {
     stats.dropped++;
     // (why: the penalties of its least bad place, for checks)
-    const why = C.place([{ ...spec, role: "main" }], { view: view(), ui: uiBoxes(), tokens: tokenBoxes(view()), alive: [...alive].map((a) => a.box) })[0]?.pen;
-    lastPlaced.push({ text: spec.text, role: spec.role, key: w.key, dropped: true, why: why && { ui: +why.pui.toFixed(2), tok: +why.tok.toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } });
+    const why = C.place([{ ...spec, role: "main" }], placeCtx())[0]?.pen;
+    lastPlaced.push({ text: spec.text, role: spec.role, key: w.key, dropped: true, why: why && { ui: +why.pui.toFixed(2), tok: +why.tok.toFixed(2), pin: +(why.pin ?? 0).toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } });
   }
   if ( w.role === "main" && placed[0] ) p.mainBox = placed[0].box;
-  for ( const q of placed ) { play(q); lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box }); }
+  for ( const q of placed ) { play(q); lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box, ...(q.fitK !== undefined ? { fitK: q.fitK } : {}), clean: FIT.isClean(q.pen) }); }
   if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
 }
 /** Can this client see the scene point (x, y)? The GM always; a player under the fog of war or out of vision does not. */
@@ -541,7 +542,12 @@ function playScreen(spec, fixed = null) {
   } else if ( !Number.isFinite(spec.rank) ) o = SZ.sizeOpts(o, step);
   // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
   const fw = bw * 0.5 + 16, fh = bh * 0.75 + 16;
-  const at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot(bw, bh, spec.seed);
+  let at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot(bw, bh, spec.seed);
+  // (THUNDERFIT: the spot above came from the box of the WORLD word, clamped by the engine, while this word is drawn on the screen at a
+  // share of the view height with no width ceiling: live, the close strike's word ran off both sides and under the panels at today's
+  // size. Its real box now: the word fits the view, then takes today's spot when it is clean there, else the nearest clean one)
+  const fit = screenPlace(spec.text, o, at, fixed);
+  if ( fit ) { at = { x: fit.x, y: fit.y }; if ( fit.k < 1 ) { if ( Number.isFinite(o.size) ) o.size *= fit.k; else o.scale = (Number.isFinite(o.scale) && o.scale > 0 ? o.scale : 1) * fit.k; } }
   o.at = at;
   const g0 = gen, go = () => {
     if ( g0 !== gen || !L || mode() === "off" || stepFor(grp) === 0 ) return;
@@ -550,7 +556,26 @@ function playScreen(spec, fixed = null) {
   };
   const wait = spec.t - performance.now();
   if ( wait > 4 ) later(`ws|${spec.seed}|${spec.t}`, wait, go); else go();
-  lastPlaced.push({ text: spec.text, role: spec.role, voice: spec.voice, screen: at });
+  lastPlaced.push({ text: spec.text, role: spec.role, voice: spec.voice, screen: at, ...(fit ? { k: +fit.k.toFixed(3), box: fit.box, clean: fit.hit <= 0 } : {}) });
+}
+/** THUNDERFIT: where and how big an unlocated word stands on this seat's screen, by its REAL box (the engine's hold box at the size it
+    is drawn at, with room for its entrance): first as big as today but never wider or taller than the view (FIT.viewFit: a share of the
+    view, the same share on every seat with the same view), then today's spot `today` when it is clean there (inside the view, off every
+    panel), else the nearest clean spot to where it should sound (the edge toward the strike: `fixed`), else a little smaller where it
+    fits (sfx-fit screenFit). -> { x, y, k (size share), hit, box } in CSS px, or null when the engine cannot tell its box. */
+function screenPlace(text, o, today, fixed) {
+  const hd = holdOf(text, o); if ( !hd ) return null;
+  let z = null; try { z = L.sizeOf(text, o); } catch { return null; }
+  const b = FIT.wordBox(hd, (z?.size ?? o.size ?? 0) * hd.sk);
+  if ( !(b.bw > 0) ) return null;
+  const sb = document.getElementById("sidebar")?.getBoundingClientRect?.();
+  const W = innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0), H = innerHeight;
+  const kv = FIT.viewFit(b.bw, b.bh, W, H);
+  uiBoxes();
+  const want = fixed ? { x: fixed.fx * innerWidth, y: fixed.fy * innerHeight } : today;
+  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: uiCache.rects ?? [] });
+  const k = kv * r.k, w2 = b.bw * k / 2, h2 = b.bh * k / 2;
+  return { x: r.x, y: r.y, k, hit: r.hit, box: { x0: Math.round(r.x - w2), y0: Math.round(r.y - h2), x1: Math.round(r.x + w2), y1: Math.round(r.y + h2) } };
 }
 
 /** Is the shooter at scene point `from` (radius `fr`) visible to this client? A token there that this client cannot see: no. */
@@ -630,35 +655,51 @@ function reconcileBurn() {
       const inView = p.points.some((q) => q.x > v.x0 - G && q.x < v.x1 + G && q.y > v.y0 - G && q.y < v.y1 + G);
       const isLive = p.live && inView && live < caps.live;
       // (a smaller fire whose phrases would sit on a bigger one's: heard in the bigger one's phrases, not lettered on top of them)
-      const pts = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (L?.prefs?.scale ?? 1);
+      const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (L?.prefs?.scale ?? 1);
+      // (THUNDERFIT: the spots of ONE fire crowd each other too when its phrases are big for the way its path runs on this screen - a far
+      // zoom, a bigger size step: live their phrases stood on each other; the first spot stays, a spot on an earlier one is heard in it)
+      const idx = burnSpots(all, em), pts = idx.map((i) => all[i]);
       if ( C.burnCrowded(pts, spots, em) ) continue;
-      spots.push(...pts);
+      spots.push(...pts.map((q) => ({ x: q.x, y: q.y, em })));
       if ( isLive ) live++;
-      want.set(p.key, { plan: p, live: isLive });
+      want.set(p.key, { plan: p, live: isLive, idx });
     }
   }
   for ( const [k, b] of burns ) {
     const w = want.get(k);
-    if ( w && w.live === b.live ) { b.plan = w.plan; b.off = burnOffsets(w.plan, w.live); continue; }
+    if ( w && w.live === b.live && w.idx.join() === b.idx.join() ) { b.plan = w.plan; b.off = burnOffsets(w.plan, w.live, b.idx); continue; }
     // gone out / removed: its words play their exits (the fire's last breath before the hiss); switched mode: at once
     for ( const s of b.subs ) { try { s.stop({ quick: !!w }); } catch {} }
     burns.delete(k);
   }
-  for ( const [k, w] of want ) if ( !burns.has(k) ) { const b = { plan: w.plan, live: w.live, off: burnOffsets(w.plan, w.live), subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live); }
+  for ( const [k, w] of want ) if ( !burns.has(k) ) { const b = { plan: w.plan, live: w.live, idx: w.idx, off: burnOffsets(w.plan, w.live, w.idx), subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.idx); }
   stats.burns = burns.size;
   if ( burns.size || (stepFor("fire") > 0 && [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire")) ) scheduleBurn(1000);
 }
 /** Where each spot's words must move to stay off this client's interface panels (their phrases hover around the spot, in two seats
     one above the other, a little to either side: a box of about nine of their letters wide (an echo trails beside it) and three and a half high, mostly above
     it). Measured once a second with the burn. */
-function burnOffsets(p, live) {
+function burnOffsets(p, live, idx = null) {
   try {
     // (off the panels, and off the event words still up: a debris word that landed where the fire then catches)
     const v = view(), ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
+    const keep = new Set(idx ?? p.points.map((_, i) => i));
     return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
-      // (a spot off this screen stays where it is: its words are not pulled into view)
-      return inV ? C.clearOf({ x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45) : { dx: 0, dy: 0 }; });
+      // (a spot off this screen stays where it is: its words are not pulled into view; a spot not lettered stays too)
+      if ( !inV || !keep.has(i) ) return { dx: 0, dy: 0 };
+      const box = { x0: q.x - em * 4.4, y0: q.y - em * 2.5, x1: q.x + em * 4.4, y1: q.y + em * 0.9 }, d = C.clearOf(box, ui, v, Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45);
+      // (THUNDERFIT: a spot moved off a panel must not land on the fire's next spot: its phrases' box, where it now stands, is in the way
+      // of the spots after it)
+      if ( d.dx || d.dy ) ui.push({ x0: box.x0 + d.dx, y0: box.y0 + d.dy, x1: box.x1 + d.dx, y1: box.y1 + d.dy });
+      return d; });
   } catch { return []; }
+}
+/** THUNDERFIT: the spots of one burning fire that are lettered (indices into its plan's points `pts`): the first always, each next one
+    only when its phrases (letter size `em`, scene px) do not stand on a spot already kept (sfx-core burnCrowded) */
+function burnSpots(pts, em) {
+  const kept = [];
+  pts.forEach((q, i) => { if ( !kept.length || !C.burnCrowded([q], kept.map((k) => pts[k]), em, C.BURN_OWN) ) kept.push(i); });
+  return kept;
 }
 /** The cap height (scene px) of a burning fire's words: a share of the screen height at this zoom (live: 3.5..6 %, by the fire's
     level; ambient: 3 %), never more than the engine's own size for it - its phrases sit over the flames for as long as they burn,
@@ -669,10 +710,11 @@ function burnSize(p, live) {
   // (SFXSIZE: at the fire group's size step; the phrase spacing and the panel shifts use this size too)
   return SZ.sizeAt(Math.max(4, px / zoom), stepFor("fire"));
 }
-function startBurn(p, live) {
+function startBurn(p, live, idx = null) {
   const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), G = grid();
   const kind = C.kindOf("fire", known);
-  return p.points.map((q, i) => {
+  // (each spot keeps its own index - its seed and its place on the path - whichever spots are lettered)
+  return (idx ?? p.points.map((_, i) => i)).map((i) => {
     try {
       return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key), q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
           return o ? { x: q.x + o.dx, y: q.y + o.dy } : q; },
@@ -705,6 +747,53 @@ function tokenBoxes(v) {
   }
   return out;
 }
+/** THUNDERFIT: the map's note pins this seat sees (scene px): the pin drawn over a note (pin.mjs: its tip at the note, its head about two
+    thirds of its height above) or the note's own icon. Live at step 3 a blast's main word stood over the pins; a pin counts like a token
+    for the placement. A pin this seat does not see (a hidden note, the user's pin filter) is no obstacle here. */
+function pinBoxes(v) {
+  const out = [];
+  for ( const n of canvas.notes?.placeables ?? [] ) {
+    try {
+      if ( !n.visible || n.destroyed ) continue;
+      const pin = n._mmPin, x = n.document?.x ?? n.x, y = n.document?.y ?? n.y;
+      let b;
+      if ( pin && !pin.destroyed ) { if ( (pin.pres ?? 1) < 0.5 ) continue; const S = pin.S || 40; b = { x0: x - 0.45 * S, y0: y - 1.05 * S, x1: x + 0.45 * S, y1: y + 0.08 * S }; }
+      else { const r = n.bounds; if ( !r ) continue; b = { x0: r.left ?? r.x, y0: r.top ?? r.y, x1: r.right ?? r.x + r.width, y1: r.bottom ?? r.y + r.height }; }
+      if ( b.x1 < v.x0 || b.x0 > v.x1 || b.y1 < v.y0 || b.y0 > v.y1 ) continue;
+      out.push(b);
+    } catch { /* a note being redrawn */ }
+  }
+  return out;
+}
+/** the placement's view of this seat now: the view, its panels, tokens, pins and the words up */
+const placeCtx = () => { const v = view(); return { view: v, ui: uiBoxes(), tokens: tokenBoxes(v), pins: pinBoxes(v), alive: [...alive].map((a) => a.box) }; };
+/**
+ * THUNDERFIT: the placement of words of which some stand at a BIGGER step than today's (sfx-core place, then the ladder): at their
+ * stepped size first; when that leaves a word dropped or the main word not clean (off the view, under a panel, on a token or a pin, on
+ * another word, over its subject beyond its allowance) the bigger words try smaller sizes down to today's (FIT.LADDER) and the first
+ * size where every word stands clean is taken, else the one that keeps most words with the main word cleanest, the bigger first. Live
+ * 2026-11-15: at step 3 a blast's main word covered its own marker and the pins and its side words were dropped for want of room. At
+ * today's step (and at a smaller one) this is sfx-core place itself.
+ */
+function placeFit(specs, ctx) {
+  const placed = C.place(specs, ctx);
+  const grows = (w) => !!w.text && !w.stream && !w.path && stepFor(grpOf(w)) > SZ.SIZE_DEFAULT;
+  if ( !specs.some(grows) ) return placed;
+  const n = specs.filter((w) => w.text || w.stream).length, hasMain = specs.some((w) => w.role === "main");
+  const score = (r, i) => { const m = r.find((q) => q.role === "main");
+    return (!hasMain || FIT.isClean(m?.pen) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && FIT.isClean(q.pen)).length - i * 0.5; };
+  const full = (r) => (!hasMain || FIT.isClean(r.find((q) => q.role === "main")?.pen)) && r.length >= n;
+  if ( full(placed) ) return placed;
+  let best = { r: placed, s: score(placed, 0) };
+  for ( let i = 1; i < FIT.LADDER.length; i++ ) {
+    const f = FIT.LADDER[i];
+    const s2 = specs.map((w) => { if ( !grows(w) ) return w; const q = { ...w, fitK: f }; measure(q); return q; });
+    const r = C.place(s2, ctx), sc = score(r, i);
+    if ( sc > best.s ) best = { r, s: sc };
+    if ( full(r) ) return r;
+  }
+  return best.r;
+}
 /** The interface panels over the canvas on this client (Foundry's and any module's), in scene px. */
 function uiBoxes() {
   const now = performance.now();
@@ -735,7 +824,7 @@ function flush() {
   if ( !L ) { pending.push(...due); engine(); return; }      // (engine() flushes again once it is loaded, this scene only)
   const t0 = performance.now();
   const pm = perfMode(), caps = C.CAPS[pm] ?? C.CAPS.high, G = grid(), big = mode() === "big";
-  const v = view(), tokens = tokenBoxes(v), ui = uiBoxes();
+  const v = view(), tokens = tokenBoxes(v), ui = uiBoxes(), pins = pinBoxes(v);
   const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
@@ -756,13 +845,13 @@ function flush() {
     const room = caps.alive - alive.size;
     // (the words of this flush's earlier clusters count as on screen: they start a beat later, so `alive` does not hold them yet - live,
     // a Detonate's second word was drawn over its first)
-    const placed = C.capWords(C.place(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, alive: [...[...alive].map((a) => a.box), ...thisFlush] }), room);
+    const placed = C.capWords(placeFit(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, pins, alive: [...[...alive].map((a) => a.box), ...thisFlush] }), room);
     for ( const w of placed ) if ( w.box ) {
       const b = w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
       thisFlush.push(b); soon.push({ box: b, until: (w.t ?? now) + 60 });
     }
     stats.dropped += specs.length - placed.length;
-    for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
+    for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
     const main = placed.find((w) => w.role === "main");
     if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
@@ -790,7 +879,7 @@ function optsOf(w, raw = false) {
   // (a word at another step than today's: stepped from the size the engine draws it at today and drawn at that size - fit "world", no
   // second clamp - because the engine's clamp would hold a word at its ceiling whatever its natural size; sizeOpts only when the engine
   // cannot tell the size)
-  if ( step !== SZ.SIZE_DEFAULT && step !== 0 && w.text ) { const b = steppedWorld(w.text, o, step); if ( b ) return b; }
+  if ( step !== SZ.SIZE_DEFAULT && step !== 0 && w.text ) { const b = steppedWorld(w.text, o, step, w.fitK); if ( b ) return b; }
   return SZ.sizeOpts(o, step);
 }
 /** SFXSIZE: the engine's own ceiling (cap height on screen, CSS px) for the loudest word of this text with these options on this
@@ -803,13 +892,15 @@ function loudCap(text, o) {
 }
 /** SFXSIZE: a world word's options at a step other than today's (null: the engine cannot tell its size, or the word is sized another
     way - exact or pixel lettering) */
-function steppedWorld(text, o, step) {
+function steppedWorld(text, o, step, fitK = 1) {
   try {
     if ( o.fit === "exact" || o.pixel || !L?.sizeModel ) return null;
     const z = L?.sizeOf?.(text, o);
     if ( !(z?.px > 0) ) return null;
     const sk = z.sizeK ?? 1, zoom = canvas.stage?.scale?.x || 1;
-    const px = SZ.steppedPx(z.px, step, step > SZ.SIZE_DEFAULT ? { cap: loudCap(text, o) } : { floor: SZ.floorPx(innerHeight, sk, L.sizeModel) });
+    let px = SZ.steppedPx(z.px, step, step > SZ.SIZE_DEFAULT ? { cap: loudCap(text, o) } : { floor: SZ.floorPx(innerHeight, sk, L.sizeModel) });
+    // (THUNDERFIT: a bigger word that found no clean place takes a share of its extra size: placeFit's ladder, down to today's)
+    if ( step > SZ.SIZE_DEFAULT && Number.isFinite(fitK) && fitK < 1 ) px = z.px + (px - z.px) * Math.max(0, fitK);
     return { ...o, fit: "world", size: px / (sk * zoom * (Number.isFinite(o.scale) && o.scale > 0 ? o.scale : 1)) };
   } catch { return null; }
 }
@@ -833,17 +924,32 @@ function baseOpts(w) {
   if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
   return o;
 }
+/** THUNDERFIT: the engine's hold box of a word with these options: { w, h } in units of its drawn cap height, and its mood factor sizeK.
+    L.planFor (the engine's tools: the plan this seat would draw, the table's style and filters on), else the engine's own planner;
+    null when neither answers (the placement then falls back to an estimate from the text's length: FIT.estHold). */
+function holdOf(text, o) {
+  try {
+    const pf = L?.planFor?.(text, o), hb = pf?.plan?._holdBox;
+    if ( hb?.w > 0 ) return { w: hb.w, h: hb.h, sk: pf.plan.sizeK ?? 1 };
+  } catch { /* the planner below */ }
+  try {
+    if ( !L?._plan || !L?._settle ) return null;
+    const plan = L._plan(String(text), o); L._settle(plan);
+    return plan._holdBox?.w > 0 ? { w: plan._holdBox.w, h: plan._holdBox.h, sk: plan.sizeK ?? 1 } : null;
+  } catch { return null; }
+}
 /** The word's box (scene px) as the engine will draw its hold picture now (its size model + its layout): placement keeps it free. */
 function measure(w) {
   if ( !w.text ) return;
   try {
     const o = optsOf(w);
     const z = L.sizeOf(w.text, o);
-    const pf = L.planFor?.(w.text, o), hb = pf?.plan?._holdBox, sk = pf?.plan?.sizeK ?? z?.sizeK ?? 1;
-    const u = (z?.size ?? G0()) * (L.prefs?.scale ?? 1) * sk;
+    const hd = holdOf(w.text, o), hb = hd ?? FIT.estHold(w.chars ?? [...w.text].length), sk = hd?.sk ?? z?.sizeK ?? 1;
+    // (the engine's size already holds the table's size setting - its tools' `_k`: counted once; before, it was multiplied in twice)
+    const u = (z?.size ?? G0()) * sk;
     w.size = u;
-    w.bw = (hb?.w ?? 0.8 * w.chars + 0.6) * u * 1.08 + u * 0.3;
-    w.bh = (hb?.h ?? 1.35) * u * 1.12 + u * 0.25;
+    const b = FIT.wordBox(hb, u);
+    w.bw = b.bw; w.bh = b.bh;
     if ( w.drift && !reducedMotion() ) { w.rise = grid() * DRIFT[1]; w.riseX = grid() * DRIFT[0]; }
   } catch { /* the estimate stands */ }
 }
