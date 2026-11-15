@@ -175,7 +175,8 @@ group("RIDEVIEW", () => {
   ok(/\.sort\(\(a, b\) => d\(a\) - d\(b\)\)\[0\];/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "the shooter is the nearest token at the muzzle");
   // (THUNDERFIT: `let` - the spot is then refitted by the word's real box, screenPlace; dev/sfx-fit.test.mjs checks that it stays whole)
   // (MAPSFXSEAT: laid out in the reference window, then the seat rule keeps it whole on this seat's screen)
-  ok(/const today = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* W, fw\)/.test(src("sfx/sfx-seat.mjs")) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))) && /const ss = SEAT\.seatScreen\(ref, /.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "an edge word is held whole on the screen");
+  // (MAPSFXSEAT2: that rule is the seat layout - whole in this window, off its panels, its pins and the unlocated words still up)
+  ok(/const today = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* W, fw\)/.test(src("sfx/sfx-seat.mjs")) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))) && /const f = SEAT\.seatLayout\(\[item\], \{ view: \{ x0: 0, y0: 0, x1: W, y1: H \}/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "an edge word is held whole on the screen");
   // (MAPSFXSEAT: every cluster's words go into the table's ledger as they are planned; the next cluster is placed off the ledger's boxes)
   ok(/alive: d\.ledger\.boxes\(t0, t1, skip\)/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))) && /for \( const w of placed \) if \( w\.box \) d\.ledger\.add\(/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "clusters of one flush avoid each other's words");
   ok(/if \( w\.voice === "cavein" \) b = \{ \.\.\.b, y1: b\.y1 \+ \(b\.y1 - b\.y0\) \* 0\.5 \};/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "a cave-in word covers where it sinks to");
