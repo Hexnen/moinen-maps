@@ -301,6 +301,18 @@ the impact. Both seats got the same drawings at the same instant (60 fps frame s
 attacker: the player's drawing radial, by design). Cost of the figures: one 256 px software copy per token picture, cached and shared;
 at most 3 x 26 + 4 extra draw calls per drawing (check-figures).
 
+Re-measured 2026-11-15 (1.9.21 IMPACT4, lane 5, GM + Test Gracz 1 on one chrome-headless-shell, 1600x900, The Warehouse at zoom 0.6,
+both modules; the maps and plus-ultra suites running on the same machine). Free-running pages (film clock OFF, real frame times):
+every animation frame inside every directly called impact (the hit ladder 0..5 on the full-square Soldier and on the round Omni-Man,
+a critical on each, one second long at step 5) was at most 16.8 ms on both seats. The four plus-ultra criticals (screen / overlay
+layer, with and without a target): 133-450 ms frames that END 3-16 ms BEFORE the impact call (the splash's own work; the call then
+joins 190-390 ms late on the shared clock, so the first drawings of those criticals are skipped: a caller matter), and two 33 ms frames
+right after the call once. On the film clock (60 fps, both seats): 27 impacts incl. a plus-ultra knock-down, a crowd, a direct critical
+with four `also` figures, a hidden attacker and a map blast: identical drawings on both seats; the figures turned on the Soldier
+(orange, black, magenta, olive, green) and followed the knock-down's fall. A photosensitive seat (Foundry's photosensitive mode)
+drew every impact `local` while the GM drew `full`. Held colours: a token picture's held twins cost 1-10 ms per 256 px picture the first
+time (a linear->sRGB table and a colour memo; cached per picture and shared); figure layers add one small canvas per figure per drawing.
+
 ## Integration recipes
 
 - **Dice-roll splash (critical).** `I.play({ kind: "crit", magnitude: 1.7, subject: splashPanelElement, over: "ui", seed: message.id,
@@ -339,4 +351,5 @@ and with `motion: reduced`.
   simulated seats fed the same calls must draw the same pictures; `check-figures.mjs` (run from it, 1.9.20) = the figure ladders, the
   guard on every new effect at every step and mode, the area cap, red, seats, hidden tokens, the settings, draw cost.
 - Offline with the figures (1.9.20): `--art fig|round|square|light` (the struck token's art), `--tok <px>` (its size), `--figfrom 1`
-  (the attacker takes part as a figure).
+  (the attacker takes part as a figure). 1.9.21: `--artdir <dir> --artfile <name> [--fromfile <name>] --tok2 <px>` real token pictures
+  (served locally), `--move <px>` shoves the struck token along the blow during the impact (its figure must follow).
