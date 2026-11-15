@@ -277,5 +277,15 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   ok(r.status === 0, `sustain engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
+/* 15. ENGVIEW: one table picture from the public API: a lasting sound on the event's clock in every style (late seat), an explicit view
+   for the size model (sizeOf / measure / play / stream / sustain: equal on seats with other windows and zooms), L.streamUnit, the
+   standing footprint and entrance ink reach against the ink each picture lays down, the impact's ladders, ceilK named as unread (own
+   process; `--engine <older letters>` shows them failing) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-engview.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 1200000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `engview engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
 console.log(`letters: ${n} checks, ${failed} failed`);
 process.exit(failed ? 1 : 0);

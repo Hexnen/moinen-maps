@@ -498,10 +498,11 @@ export function trackReach(tr, W = 3, H = 1) {
 /* SUSTAINGAP: the box (units, around the placing point) a track word's ink covers over its entrance and hold, turned by the word's own
    rotation (rad) and by every pose's turn: a wide word tilted a few degrees reaches a good part of a cap height further up and down
    at its ends. W x H = its ink box at rest, cx / cy = that box's centre off the point. Sampled every 20 ms (at most 160 samples). */
-export function trackSpan(tr, W, H, ent, hold, rot = 0, cx = 0, cy = 0) {
+export function trackSpan(tr, W, H, ent, hold, rot = 0, cx = 0, cy = 0, from = 0) {
   let l = 0, r = 0, u = 0, d = 0;
-  const end = Math.max(0, ent) + Math.max(0, hold), step = Math.max(20, end / 160);
-  for ( let t = 0; t <= end + 1e-6; t += step ) {
+  /* (ENGVIEW: `from` = the first instant sampled; L.measure's `stand` samples the hold alone, from the end of the entrance) */
+  const end = Math.max(0, ent) + Math.max(0, hold), step = Math.max(20, (end - from) / 160);
+  for ( let t = from; t <= end + 1e-6; t += step ) {
     const p = trackPose(tr, t, ent, hold, null, { W, H }), a = rot + p.r, c = Math.cos(a), sn = Math.sin(a);
     const hw = W / 2 * p.s * p.sx, hh = H / 2 * p.s * p.sy;
     /* (the pose's offset is turned by the word's rotation, as the engine places it) */

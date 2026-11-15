@@ -30,10 +30,15 @@ export function makeSustainLegacy(E, ambientUp) {
     const R = rng(hash(`${seed}:sustain`));
     const reduced = !!(o.reduced ?? (() => { try { return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } })());
     let level = clamp01(typeof o.level === "number" ? o.level : ambient ? 0.2 : 0.6);
-    const lv = () => { if ( typeof o.level === "function" ) { try { return clamp01(o.level(E.now() - t0)); } catch { return level; } } return level; };
+    /* ENGVIEW (1.9.18): `startAt` (this page's performance.now() of the event's start) puts a live run on the event's clock, as the
+       invincible run does since 1.9.15: every phrase's choices are drawn from the seed at its own instant (clockedPhrase below), so a seat
+       that joins late skips the phrases already over and joins the current one mid-life. Without `startAt` the run is the 1.9.14 one. */
+    const T_ = Number.isFinite(o.startAt) && !ambient && o.startAt <= E.now() + 60000 ? o.startAt : undefined;
+    const clocked = T_ !== undefined;
+    const lv = (T = E.now()) => { if ( typeof o.level === "function" ) { try { return clamp01(o.level(T - t0)); } catch { return level; } } return level; };
     const handles = [], timers = new Set(), history = [];
     let cur = null, alive = true, k = 0, hand = null, last = null, lastKind = null, done, phrases = 0;
-    const t0 = E.now();
+    const t0 = clocked ? T_ : E.now();
     const inv = E.styleOf?.(o) === "invincible";
     const finished = new Promise((r) => (done = r));
     const later = (fn, ms) => { const id = setTimeout(() => { timers.delete(id); if ( alive ) fn(); }, Math.max(0, ms)); timers.add(id); };
@@ -44,7 +49,7 @@ export function makeSustainLegacy(E, ambientUp) {
       return h;
     };
     /* the unit of spacing: a grid square (world) or 4 % of the screen height */
-    const U = () => (space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.5 : (globalThis.innerHeight ?? 800) * 0.04) * (Number.isFinite(o.spread) ? o.spread : 1);
+    const U = () => (space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.5 : (Number.isFinite(o.view?.vh) && o.view.vh >= 200 ? o.view.vh : globalThis.innerHeight ?? 800) * 0.04) * (Number.isFinite(o.spread) ? o.spread : 1);
     const src = () => { const p = E.pointOf(space, o.at); if ( p ) last = p; return p; };
     const near = (dx, dy) => () => { const p = src() ?? last; return p ? { x: p.x + dx, y: p.y + dy } : null; };
     /* the drift of shed fragments: rising for fire, hiss, steam, hum (default), along `dir` (degrees) when given */
@@ -60,14 +65,14 @@ export function makeSustainLegacy(E, ambientUp) {
     };
     const seg = (q) => (q?.text ? { text: q.text, mood: q.mood, kmood: q.play?.mood, accent: q.accent, ms: q.ms, loud: q.loud } : null);
     /* the text of phrase i: the caller's function, WORD's flow, a vocabulary word, or the caller's text breathing */
-    const textAt = (i, L, extra) => {
-      if ( typeof o.words === "function" ) { try { const w = o.words(i, E.now() - t0, L); if ( w ) return typeof w === "string" ? { text: w } : w; } catch {} }
+    const textAt = (i, L, extra, T = E.now()) => {
+      if ( typeof o.words === "function" ) { try { const w = o.words(i, T - t0, L); if ( w ) return typeof w === "string" ? { text: w } : w; } catch {} }
       const F = flowOf();
       if ( F ) { try { const w = seg(i === 0 ? F.onset : F.at(i - 1)); if ( w ) return w; } catch {} }
       const V = E.vocab();
       if ( o.kind != null && V ) {
         try {
-          if ( typeof V.sustain === "function" ) { const w = V.sustain(o.kind, { seed, lang: o.lang, level: L, k: i, t: E.now() - t0 }); if ( w?.text ) return w; }
+          if ( typeof V.sustain === "function" ) { const w = V.sustain(o.kind, { seed, lang: o.lang, level: L, k: i, t: T - t0 }); if ( w?.text ) return w; }
           const w = V.word(o.kind, { seed: `${seed}:${i % 3}`, lang: o.lang, loud: L });
           return { text: extra && V.stretch ? V.stretch(w.text, extra) : w.text, kmood: w.mood };
         } catch {}
@@ -78,13 +83,15 @@ export function makeSustainLegacy(E, ambientUp) {
     const common = () => ({
       space, layer: o.layer, zIndex: o.zIndex, token: o.token, vision: o.vision, elevation: o.elevation, colors: o.colors, pixel: o.pixel,
       fit: o.fit, size: o.size, span: o.span, area: o.area, reduced: o.reduced, keepInView: o.keepInView, pushable: o.pushable, glow: o.glow,
-      on: ambient ? 3 : o.on, fps: ambient ? undefined : o.fps, hand: hand ?? o.hand ?? undefined, mood: o.mood
+      on: ambient ? 3 : o.on, fps: ambient ? undefined : o.fps, hand: hand ?? o.hand ?? undefined, mood: o.mood,
+      /* ENGVIEW: a caller's view and ceiling share reach every phrase (nothing changes for a call without them) */
+      ...(o.view ? { view: o.view } : {}), ...(o.ceil != null ? { ceil: o.ceil } : {})
     });
     /* orbit / path: each phrase rides it, joining where the sound is now on the ring (as a stream's syllables do) */
-    const travel = () => {
+    const travel = (T = E.now()) => {
       if ( o.orbit ) {
         const ob = o.orbit, period = Math.max(300, ob.period ?? 2600), dir = ob.dir < 0 ? -1 : 1;
-        return { orbit: { ...ob, center: ob.center ?? o.at, phase: (Number.isFinite(ob.phase) ? ob.phase : -90) + (dir * 360 * (E.now() - t0)) / period } };
+        return { orbit: { ...ob, center: ob.center ?? o.at, phase: (Number.isFinite(ob.phase) ? ob.phase : -90) + (dir * 360 * (T - t0)) / period } };
       }
       if ( o.path ) return { path: o.path };
       return null;
@@ -158,6 +165,67 @@ export function makeSustainLegacy(E, ambientUp) {
       const gap = ambient ? R.f(o.gap?.[0] ?? 4500, o.gap?.[1] ?? 11000) : (segMs ?? life * R.f(0.55, 0.8) / (0.75 + 0.5 * L)) * (reduced ? 1.6 : 1);
       later(phrase, gap);
     }
+    /* ENGVIEW: the clocked run (startAt). Every seeded choice of phrase i is drawn at its instant T, in one fixed order, so a seat that
+       skips phrases (joining late) draws the same choices for the ones it shows; the seat's spacing is the phrase's own size (`size`, else
+       1.6 units), never the size of a word this seat happened to have up. */
+    function decideC(i, T) {
+      const L = lv(T);
+      const fstyle = inv ? (flowOf() || null)?.style ?? null : null;
+      const allowed = inv && fstyle && TREAT_BY_FLOW[fstyle] ? TREAT_BY_FLOW[fstyle] : null;
+      const pool0 = allowed ?? LIVE;
+      const okT = (t) => !(t === "accent" && L < 0.45) && !(reduced && (t === "shed" || t === "echo" || t === "split"));
+      let pool = pool0.filter((t) => t !== lastKind && okT(t));
+      if ( !pool.length && allowed ) pool = pool0.filter(okT);
+      const kind = i === 0 ? (allowed?.length === 1 && !reduced ? allowed[0] : "breath") : (o.treatments ? R.pick(o.treatments.filter((t) => t !== lastKind)) ?? "breath" : (R.pick(pool) ?? "breath"));
+      lastKind = kind;
+      const w = textAt(i, L, kind === "stretch" ? 1 + Math.round(2 * L) : 0, T);
+      const side = i % 2 ? 1 : -1, u = U(), em = Number.isFinite(o.size) && o.size > 0 ? o.size : 1.6 * u;
+      const dyR = R.f(0, 0.12), dxR = R.f(0.1, 0.6);
+      const segMs = Number.isFinite(w.ms) && w.ms > 0 ? Math.max(500, Math.min(4000, w.ms)) : null;
+      const life = segMs ? Math.round(segMs * 1.35) : Math.round((1300 + 1100 * (1 - L)) * R.f(0.85, 1.15));
+      const rot = side * R.f(1, 6);
+      const pick = { in: R.pick(["pop", "rise", "grow"]), hold: R.pick(["boil", "wobble", "throb"]), out: R.pick(["dissolve", "rise"]), out2: R.pick(["dissolve", "shrink"]), out3: R.pick(["burst", "pop"]) };
+      const nShed = kind === "shed" ? 1 + Math.round(2 * L) : 0;
+      const sheds = Array.from({ length: 3 }, () => ({ a: drift + R.f(-0.45, 0.45), d: u * R.f(2.2, 3.4) })).slice(0, nShed);
+      const gap = (segMs ?? life * R.f(0.55, 0.8) / (0.75 + 0.5 * L)) * (reduced ? 1.6 : 1);
+      return { i, T, L, kind, w, side, u, dx: side * dxR * u, dy: (i % 2 ? -1.05 : 0.1) * em - dyR * u, life, rot, pick, sheds, gap };
+    }
+    function playC(d) {
+      const { i, L, kind, w, life, pick } = d;
+      const tr = travel(d.T), dx = tr ? 0 : d.dx, dy = tr ? 0 : d.dy;
+      const base = { ...common(), ...(tr ?? { at: near(dx, dy) }), seed: `${seed}:${i}`, mood: w.mood ?? o.mood ?? w.kmood, hold: life, rotation: d.rot, accent: w.accent, startAt: d.T };
+      if ( inv ) base.kind = o.kind;
+      const P = (txt, q) => E.play(txt, inv && kind !== "accent" ? { ...q, in: i === 0 && o.in ? o.in : undefined, holdKind: o.holdKind, out: undefined } : q);
+      let h = null;
+      switch ( kind ) {
+        case "breath": h = P(w.text, { ...base, magnitude: magOf(L), in: i === 0 ? (o.in ?? "grow") : pick.in, holdKind: o.holdKind ?? pick.hold, out: pick.out, tempo: 1, hollow: o.hollow }); break;
+        case "stretch": h = P(w.text, { ...base, magnitude: magOf(L, 1.1), in: "grow", holdKind: "throb", out: pick.out2, tempo: 0.9, hollow: o.hollow }); break;
+        case "split": h = P(w.text, { ...base, magnitude: magOf(L), parts: "syllables", beat: Math.round(130 + 120 * (1 - L)), holdKind: "boil", out: "dissolve" }); break;
+        case "accent": h = E.play(w.text, { ...base, magnitude: magOf(L, 1.45), in: "slam", holdKind: "shake", out: pick.out3, hold: Math.round(life * 0.7) }); break;
+        case "echo": h = P(w.text, { ...base, magnitude: magOf(L), in: "pop", holdKind: "boil", out: "dissolve", echo: { n: 2, dir: (drift * 180) / Math.PI, every: 160 } }); break;
+        case "shed": {
+          h = P(w.text, { ...base, magnitude: magOf(L, 0.85), in: "pop", holdKind: "boil", out: "dissolve", tempo: 1, hollow: o.hollow });
+          const syl = E.syllablesOf(w.text);
+          d.sheds.forEach((q, j) => later(() => {
+            const t = String(syl[Math.min(syl.length - 1, j % syl.length)] ?? w.text).replace(/[-!?.]+$/g, "") || String(w.text);
+            track(E.play(t, { ...common(), seed: `${seed}:shed${i}:${j}`, path: { from: near(dx, dy), to: near(dx + Math.cos(q.a) * q.d, dy + Math.sin(q.a) * q.d), duration: 900, ease: "out", orient: "none" },
+              magnitude: magOf(L, 0.45), scale: 0.7, in: "pop", holdKind: "boil", out: "dissolve", hold: 600, startAt: d.T + life * (0.2 + 0.22 * j) }));
+          }, d.T + life * (0.2 + 0.22 * j) - E.now()));
+          break;
+        }
+      }
+      history.push({ kind, text: w.text }); if ( history.length > 32 ) history.shift();
+      if ( cur?.alive && cur !== h ) cur.stop();
+      cur = h;
+      if ( h ) { track(h); if ( !hand && h.plan ) hand = h.plan.hand; }
+    }
+    function phraseC(T) {
+      if ( !src() && !last ) { stop(); return; }
+      const d = decideC(k, T);
+      k++; phrases++;
+      playC(d);
+      later(() => phraseC(T + d.gap), T + d.gap - E.now());
+    }
     function shed(text, dx, dy, j, L) {
       const u = U(), a = drift + R.f(-0.45, 0.45), d = u * R.f(2.2, 3.4);
       const t = String(text).replace(/[-!?.]+$/g, "") || String(text);
@@ -196,8 +264,22 @@ export function makeSustainLegacy(E, ambientUp) {
     };
     E.streams.add(s);
     const startIn = Number.isFinite(o.delay) && o.delay > 0 ? o.delay : 0;
+    if ( clocked ) {
+      /* ENGVIEW: on the event's clock: the phrases whose time is over are decided (the same seeded choices) but not drawn */
+      let T = t0 + startIn, replay = null;
+      const nowT = E.now();
+      for ( let guard = 0; guard < 10000; guard++ ) {
+        const d = decideC(k, T);
+        if ( T + d.gap + 450 >= nowT ) { replay = d; break; }   // still up (or to come): drawn, joining its own timeline
+        k++; T += d.gap;
+      }
+      if ( replay ) {
+        const d = replay;
+        later(() => { if ( !alive ) return; k++; phrases++; playC(d); later(() => phraseC(d.T + d.gap), d.T + d.gap - E.now()); }, d.T - E.now());
+      }
+    }
     /* ambient sources start spread out (many pipes on one map do not all hiss at once) */
-    later(phrase, ambient ? startIn + R.f(0, o.gap?.[1] ?? 6000) : startIn);
+    else later(phrase, ambient ? startIn + R.f(0, o.gap?.[1] ?? 6000) : startIn);
     try { if ( o.until && typeof o.until.then === "function" ) o.until.then(() => stop(), () => stop()); } catch {}
     return s;
   };

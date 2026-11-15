@@ -43,6 +43,20 @@ export function inkPad(H, S = 0) {
   const sx = H.shadow ? Math.cos(H.shadow.ang) * H.shadow.d : 0, sy = H.shadow ? Math.sin(H.shadow.ang) * H.shadow.d : 0;
   return { l: outer - Math.min(0, dx, dx + sx), r: outer + Math.max(0, dx, dx + sx), u: outer - Math.min(0, dy, dy + sy), d: outer + Math.max(0, dy, dy + sy) };
 }
+/* ENGVIEW (L.measure `stand`): how far a picture's drawn EXTRAS reach past its letters' box, in cap units ({ l, r, u, d } >= 0): its
+   effects (sparks, dust, puffs, a swirl, speed lines) and a backdrop, the same terms as extents() below with the letters' box taken as the
+   settled hold box round the word's centre (no glyph geometry: cheap). The keyline, rim and duplicate block are inkPad's. */
+export function extrasPad(plan, p, smear = false) {
+  const hb = plan._holdBox ?? { w: 3, h: 1 };   // (a picture's geometry is centred on the settled centre: the box round 0)
+  const b = { x0: -hb.w / 2, x1: hb.w / 2, y0: -hb.h / 2, y1: hb.h / 2 };
+  const e = extents(plan, [{ cs: [[b.x0, b.y0, b.x1, b.y0, b.x1, b.y1, b.x0, b.y1]] }], { ...p, fx: p.fx ?? [], smear: smear ? p.smear : null }, p.impact ? null : backdropOf(plan, p), 0);
+  const H = plan.hand, outer = H.inflate + H.inkW + H.out2W + 0.05;
+  const dx = Math.cos(H.depthAng) * H.depth, dy = Math.sin(H.depthAng) * H.depth;
+  const sx = H.shadow ? Math.cos(H.shadow.ang) * H.shadow.d : 0, sy = H.shadow ? Math.sin(H.shadow.ang) * H.shadow.d : 0;
+  /* (minus what inkPad already holds: the outline and the duplicate block / shadow) */
+  return { l: Math.max(0, b.x0 - e.x0 - outer + Math.min(0, dx, dx + sx)), r: Math.max(0, e.x1 - b.x1 - outer - Math.max(0, dx, dx + sx)),
+    u: Math.max(0, b.y0 - e.y0 - outer + Math.min(0, dy, dy + sy)), d: Math.max(0, e.y1 - b.y1 - outer - Math.max(0, dy, dy + sy)) };
+}
 /* the extents (word units) a picture needs around its letters */
 function extents(plan, geo, p, back, S = 0) {
   const H = plan.hand, b = bbox(geo.flatMap((l) => l.cs));

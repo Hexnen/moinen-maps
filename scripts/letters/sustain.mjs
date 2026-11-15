@@ -75,7 +75,8 @@ export function makeSustain(E) {
       return h;
     };
     /* the unit of spacing: a grid square (world) or 4 % of the screen height */
-    const U = () => (space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.5 : (globalThis.innerHeight ?? 800) * 0.04) * (Number.isFinite(o.spread) ? o.spread : 1);
+    /* (ENGVIEW: a caller's view names the screen height a screen run is spaced by, as its words are sized by it) */
+    const U = () => (space === "world" ? (globalThis.canvas?.grid?.size ?? 100) * 0.5 : (Number.isFinite(o.view?.vh) && o.view.vh >= 200 ? o.view.vh : globalThis.innerHeight ?? 800) * 0.04) * (Number.isFinite(o.spread) ? o.spread : 1);
     const src = () => { const p = E.pointOf(space, o.at); if ( p ) last = p; return p; };
     /* the drift of shed fragments: rising for fire, hiss, steam, hum (default), along `dir` (degrees) when given */
     const drift = (Number.isFinite(o.dir) ? o.dir : -90) * Math.PI / 180;
@@ -176,7 +177,9 @@ export function makeSustain(E) {
     const common = () => ({
       space, layer: o.layer, zIndex: o.zIndex, token: o.token, vision: o.vision, elevation: o.elevation, colors: o.colors, pixel: o.pixel,
       fit: o.fit, size: o.size, span: o.span, area: o.area, reduced: o.reduced, keepInView: ambient ? o.keepInView : false, pushable: o.pushable, glow: o.glow,
-      maxWidth: o.maxWidth, on: ambient ? 3 : o.on, fps: ambient ? undefined : o.fps, hand: hand ?? o.hand ?? undefined, mood: o.mood
+      maxWidth: o.maxWidth, on: ambient ? 3 : o.on, fps: ambient ? undefined : o.fps, hand: hand ?? o.hand ?? undefined, mood: o.mood,
+      /* ENGVIEW: a caller's view (sizes for the table's view, not this seat's window) and share of the size ceiling reach every phrase */
+      ...(o.view ? { view: o.view } : {}), ...(o.ceil != null ? { ceil: o.ceil } : {})
     });
     /* orbit / path: each phrase rides it, joining where the sound is now on the ring (as a stream's syllables do) */
     const travel = (T) => {

@@ -168,7 +168,8 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
    (under 0.85 never a full-field frame, from 1.35 the whole set): 0.35 a scratch, 0.6 a solid hit, 0.85 strong, 1.35 heavy, 1.7 the most */
 export const STEP_AT = [0.35, 0.6, 0.85, 1.35, 1.7];
 export const stepOf = (m) => { let i = 0; while ( i < STEP_AT.length && m >= STEP_AT[i] ) i++; return i; };
-/* the old four tiers (plan.tier, for callers that read it) */
+/* the old four tiers (plan.tier, for callers that read it); ENGVIEW: their bounds as a table too (L.impact.tiers) */
+export const TIER_AT = [0.35, 0.85, 1.35];
 export const tierOf = (m) => (m < 0.35 ? 0 : m < 0.85 ? 1 : m < 1.35 ? 2 : 3);
 
 /* an event in a caller's own terms -> { kind, magnitude } (callers may also name both themselves)
