@@ -1,10 +1,10 @@
 /* LETR tools: the engine's windows (loaded on first use, never in node).
    - Designer (GM): type a word, pick mood or own sound, look, motion, place; scrub the timeline picture by picture; new seed; save as a
      named style (world) or as a macro; play it here or show it to everyone.
-   - Settings (everyone): the engine-wide client settings of prefs.mjs.
+   - Settings (everyone): the table's settings of prefs.mjs (ENGTABLE: the GM edits and saves for every seat, a player reads them).
    - Letter this now (GM, Shift+L): a small box at the cursor; Enter shows the word to everyone at the selected tokens or the cursor. */
-import { setPrefs, cursorPoint } from "./tools.mjs";
-import { SETTINGS, DEFAULTS, STYLE_NAME, scopeOf } from "./prefs.mjs";
+import { setTable, cursorPoint } from "./tools.mjs";
+import { TABLE, TABLE_KEYS, TABLE_DEFAULTS, STYLE_NAME, cleanTable, seatPrefs, seatNotes } from "./prefs.mjs";
 import { MOODS, MOOD_IDS, FONTS, COLORS, TICK } from "./design.mjs";
 
 const { ApplicationV2, DialogV2 } = foundry.applications.api;
@@ -263,7 +263,7 @@ class Designer extends ApplicationV2 {
     const ms = Math.round(p.timeline.ent.reduce((a, q) => a + q.ticks * TICK, 0) + Math.max(p.holdMs, p.timeline.hold.reduce((a, q) => a + q.ticks * TICK, 0)));
     this.$("meta").innerHTML = `<span><b>${esc(moodLabel(p.mood))}</b> · ${esc(p.timeline.kinds.in)} → ${esc(p.timeline.kinds.hold)} → ${esc(p.timeline.kinds.out)} · ${esc(T("Designer.Timeline", { ms, n: this.pics.length }))}</span>
       <span><b>${esc(T("Designer.Hand"))}</b> <code>${esc(p.hand.id)}</code></span>${tech.length ? `<span><b>${esc(T("Designer.Tech"))}</b> ${esc(tech.join(", "))}</span>` : ""}`;
-    const red = this.letr.prefs.motion === "reduced" || (this.letr.prefs.motion !== "full" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const red = this.letr.prefs.motion === "reduced" || !!this.letr.seat?.osReduced;   // ENGTABLE: the table's Reduced or this seat's system
     const note = this.$("note"); note.hidden = !red; note.textContent = red ? T("Designer.Reduced") : "";
   }
   picture(i) {
@@ -413,64 +413,102 @@ export function openDesigner(state, o = {}) {
   return designer;
 }
 
-/* ======================================================================= settings */
+/* ======================================================================= settings
+   ENGTABLE (1.9.16): the TABLE's lettering settings. The GM sees the controls and saves them for every seat ("Save for the table");
+   a player opens the same window read-only: the GM's choices as text, updated live when the GM saves. Both see what THEIR screen's own
+   accessibility signals change (system reduced motion, Foundry photosensitive mode) and that the photosensitivity guard is always on.
+   Groups follow what a GM decides: the words themselves, how they move, flashes and impact frames, screen readers and limits. */
+const GROUPS = [
+  ["Look", ["enabled", "face", "palette", "scale"]],
+  ["Motion", ["movement", "motion"]],
+  ["Flash", ["flashes", "impact", "photosafe"]],
+  ["More", ["announce", "limitScreen", "limitWorld"]]
+];
 class Settings extends ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: "moinen-letters-settings", tag: "form", classes: ["letr-app", "letr-settings"],
     window: { title: "LETR.Settings.Title", icon: "fa-solid fa-burst", contentClasses: ["standard-form"] },
-    position: { width: 520, height: "auto" },
+    position: { width: 540, height: "auto" },
     form: { handler: Settings.#save, submitOnChange: false, closeOnSubmit: true },
     actions: { reset: Settings.#reset, try: Settings.#try }
   };
-  constructor(state) { super(); this.letr = state; this.v = { ...state.prefs }; }
+  constructor(state) { super(); this.letr = state; this.v = { ...state.table }; this.dirty = false; }
+  get gm() { return !!game.user?.isGM; }
   async _renderHTML() {
     ensureStyles(this.letr);
-    const v = this.v, f = foundry.applications.fields;
-    const group = (k) => {
-      const d = SETTINGS[k];
+    const v = this.v, gm = this.gm, f = foundry.applications.fields, seat = this.letr.seat ?? {};
+    const shown = (k) => {
+      const d = TABLE[k];
+      if ( d.type === "bool" ) return T(v[k] ? "Settings.On" : "Settings.OffValue");
+      if ( d.type === "pick" ) return T(`Settings.${k}.${v[k]}`);
+      return k === "scale" ? `${Math.round(v[k] * 100)} %` : String(v[k]);
+    };
+    const row = (k) => {
+      /* the guard is not a setting: one line that says so, for everyone */
+      if ( k === "photosafe" ) {
+        const out = document.createElement("output");
+        out.className = "letr-s-ro letr-s-pin"; out.innerHTML = `<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> ${esc(T("Settings.photosafe.Always"))}`;
+        return f.createFormGroup({ label: T("Settings.photosafe.Name"), hint: T("Settings.photosafe.Hint"), input: out }).outerHTML;
+      }
+      const d = TABLE[k];
       let input;
-      if ( d.type === "bool" ) input = f.createCheckboxInput({ name: k, value: v[k] });
+      if ( !gm ) { input = document.createElement("output"); input.className = "letr-s-ro"; input.textContent = shown(k); }
+      else if ( d.type === "bool" ) input = f.createCheckboxInput({ name: k, value: v[k] });
       else if ( d.type === "pick" ) input = f.createSelectInput({ name: k, value: v[k], options: d.choices.map((c) => ({ value: c, label: T(`Settings.${k}.${c}`) })) });
       else { input = document.createElement("range-picker"); input.name = k; input.setAttribute("min", d.min); input.setAttribute("max", d.max); input.setAttribute("step", d.step); input.setAttribute("value", v[k]); }
       return f.createFormGroup({ label: T(`Settings.${k}.Name`), hint: T(`Settings.${k}.Hint`), input }).outerHTML;
     };
-    /* MODE: a table setting (scope world) is the GM's; a player sees what the GM chose as text, not a control they cannot use */
-    const table = (k) => {
-      if ( game.user?.isGM ) return group(k);
-      const out = document.createElement("output");
-      out.className = "letr-s-ro"; out.textContent = T(`Settings.${k}.${v[k]}`);
-      return f.createFormGroup({ label: T(`Settings.${k}.Name`), hint: `${T(`Settings.${k}.ByGM`)} ${T(`Settings.${k}.Hint`)}`, input: out }).outerHTML;
-    };
-    const tableKeys = Object.keys(SETTINGS).filter((k) => scopeOf(k) === "world");
+    /* this screen: its own signals and what they change here (only the lines that apply say "On") */
+    const notes = seatNotes(v, seat);
+    const seatLine = (key, on) => `<li class="${on ? "is-on" : ""}"><i class="fa-solid ${on ? "fa-circle-check" : "fa-circle"}" aria-hidden="true"></i>
+      <span><b>${esc(T(`Settings.Seat.${key}.Name`))}</b> ${esc(T(on ? `Settings.Seat.${key}.On` : "Settings.Seat.Off"))}</span></li>`;
     const root = document.createElement("div");
-    root.className = "letr-s";
+    root.className = `letr-s${gm ? " is-gm" : " is-player"}`;
     root.innerHTML = `
-      <fieldset><legend>${esc(T("Settings.Groups.Show"))}</legend>${["enabled", "scale", "motion"].map(group).join("")}</fieldset>
-      <fieldset class="letr-s-table"><legend>${esc(T("Settings.Groups.Table"))}</legend>${tableKeys.map(table).join("")}</fieldset>
-      <fieldset><legend>${esc(T("Settings.Groups.Access"))}</legend>${["flashes", "photosafe", "impact", "palette", "announce"].map(group).join("")}</fieldset>
-      <fieldset><legend>${esc(T("Settings.Groups.Limits"))}</legend>${["limitScreen", "limitWorld"].map(group).join("")}</fieldset>
+      <p class="letr-s-banner"><i class="fa-solid ${gm ? "fa-users" : "fa-lock"}" aria-hidden="true"></i><span>${esc(T(gm ? "Settings.Banner.gm" : "Settings.Banner.player"))}</span></p>
+      ${GROUPS.map(([g, keys]) => `<fieldset><legend>${esc(T(`Settings.Groups.${g}`))}</legend>${keys.map(row).join("")}</fieldset>`).join("")}
+      <section class="letr-s-seat" aria-label="${esc(T("Settings.Seat.Title"))}"><h4>${esc(T("Settings.Seat.Title"))}</h4>
+        <ul>${seatLine("reduced", notes.reduced)}${seatLine("photo", notes.photo)}</ul></section>
       <footer class="form-footer">
-        <button type="button" data-action="reset"><i class="fa-solid fa-arrow-rotate-left"></i> ${esc(T("Settings.Reset"))}</button>
-        <button type="button" data-action="try"><i class="fa-solid fa-burst"></i> ${esc(T("Settings.Try"))}</button>
-        <button type="submit"><i class="fa-solid fa-floppy-disk"></i> ${esc(T("Settings.Save"))}</button>
+        ${gm ? `<button type="button" data-action="reset" data-tooltip="${esc(T("Settings.ResetHint"))}"><i class="fa-solid fa-arrow-rotate-left"></i> ${esc(T("Settings.Reset"))}</button>` : ""}
+        <button type="button" data-action="try" data-tooltip="${esc(T("Settings.TryHint"))}"><i class="fa-solid fa-burst"></i> ${esc(T("Settings.Try"))}</button>
+        ${gm ? `<button type="submit"><i class="fa-solid fa-floppy-disk"></i> ${esc(T("Settings.Save"))}</button>` : ""}
       </footer>`;
     return root;
   }
   _replaceHTML(result, content) { content.replaceChildren(result); }
+  _onRender() {
+    this.letr.settingsApp = this;
+    /* a GM's edit stops the window following the table until he saves or resets */
+    this.element.addEventListener("input", () => { this.dirty = true; }, { once: true });
+    this.element.addEventListener("change", () => { this.dirty = true; }, { once: true });
+  }
+  _onClose() { if ( this.letr.settingsApp === this ) this.letr.settingsApp = null; }
+  /* the table changed (another GM, plus-ultra's window, a macro) or this screen's own signal: show it */
+  follow() { if ( this.gm && this.dirty ) return; this.v = { ...this.letr.table }; this.render(); }
   values() {
     const fd = new foundry.applications.ux.FormDataExtended(this.element).object;
-    const o = {}; for ( const k of Object.keys(SETTINGS) ) if ( k in fd && (scopeOf(k) !== "world" || game.user?.isGM) ) o[k] = fd[k];
+    const o = {}; for ( const k of TABLE_KEYS ) if ( k in fd ) o[k] = fd[k];
     return o;
   }
-  static async #save() { await setPrefs(this.values()); }
-  /* a player's Defaults leave the table's settings alone (they are the GM's) */
-  static #reset() { const keep = game.user?.isGM ? {} : Object.fromEntries(Object.keys(SETTINGS).filter((k) => scopeOf(k) === "world").map((k) => [k, this.v[k]])); this.v = { ...DEFAULTS, ...keep }; this.render(); }
-  /* a sample with the values in the window (saved first: the sample is what the settings will do) */
+  static async #save() { if ( !this.gm ) return; this.dirty = false; await setTable(this.values()); ui.notifications.info(T("Settings.Saved")); }
+  static #reset() { if ( !this.gm ) return; this.v = { ...TABLE_DEFAULTS }; this.dirty = true; this.render(); }
+  /* a sample on THIS screen only, drawn with the values in the window (a GM tries before saving; a player sees what the table chose) */
   static async #try() {
-    await setPrefs(this.values());
-    const L = this.letr.engine;
-    if ( !this.letr.prefs.enabled ) { ui.notifications.info(T("Settings.Off")); return; }
-    L.burst([{ text: "KRAK!", mood: "crack", at: { x: innerWidth * 0.36, y: innerHeight * 0.4 } }, { text: "BUM!", mood: "boom", at: { x: innerWidth * 0.62, y: innerHeight * 0.46 }, delay: 260 }], { space: "screen" });
+    const L = this.letr.engine, st = this.letr, table = this.gm ? cleanTable({ ...st.table, ...this.values() }) : st.table;
+    const keep = st.prefs, mine = seatPrefs(table, st.seat);
+    if ( !mine.enabled ) { ui.notifications.info(T("Settings.Off")); return; }
+    /* the window's values hold on THIS seat until both sample words are planned (a frame or two), then the table's come back */
+    const back = () => { if ( st.prefs === mine ) st.prefs = keep; L.motionMode?.(st.table.movement); L.invFace?.(st.table.face); };
+    st.prefs = mine; L.motionMode?.(table.movement); L.invFace?.(table.face);
+    let hs = [];
+    try {
+      const t0 = performance.now();
+      hs = L.burst([{ text: "KRAK!", mood: "crack", at: { x: innerWidth * 0.36, y: innerHeight * 0.4 } }, { text: "BUM!", mood: "boom", at: { x: innerWidth * 0.62, y: innerHeight * 0.46 }, startAt: t0 + 260 }], { space: "screen" });
+    } catch ( e ) { back(); throw e; }
+    const until = performance.now() + 1500;
+    const wait = () => { if ( performance.now() > until || hs.every((h) => h.hand || !h.alive) ) back(); else requestAnimationFrame(wait); };
+    requestAnimationFrame(wait);
   }
 }
 let settingsApp = null;

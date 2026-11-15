@@ -3,7 +3,9 @@
    the highest VERSION wins (one registration), exactly like the engine itself.
 
    Where things live (stable whichever module is active):
-   - settings: namespace "moinen-letters" (client settings: this computer; `styles`: world, written by the GM). They are not listed
+   - settings: namespace "moinen-letters", ALL world settings written by a GM (ENGTABLE 1.9.16: `table` = every preference of the table,
+     `movement`, `face`, `styles`, `tableMigrated`); no client setting. A seat's own reduced motion and Foundry photosensitive mode still
+     apply on that seat (prefs.seatPrefs). They are not listed
      in Foundry's settings window themselves (a namespace that is not a package lands in "Unmapped"); a menu button "Lettering
      settings" in the HOST module's tab opens the engine's own settings window. Host = moinen-maps when active, else
      invincible-plus-ultra (same on every client: module activation is per world).
@@ -12,7 +14,7 @@
    - keybinding "Letter this now" (GM, Shift+L, editable) and the designer button in the token controls: under the host module.
    Engine API added here (README "Tools"): L.prefs, L.settings(), L.registerMood/Palette/Font/Style, L.styles, L.saveStyle,
    L.deleteStyle, L.net.{play,burst,stream,stop,sharedNow,local}, L.letterNow, L.designer(), L.openSettings(), L.planFor. */
-import { SETTINGS, DEFAULTS, cleanAll, resolveOpts, filterPlan, scopeOf } from "./prefs.mjs";
+import { SETTINGS, TABLE_OBJECT, TABLE_DEFAULTS, cleanTable, seatPrefs, resolveOpts, filterPlan } from "./prefs.mjs";
 import { STRINGS } from "./strings.mjs";
 import * as A from "./author.mjs";
 import * as N from "./net.mjs";
@@ -23,7 +25,7 @@ import { sameBuild } from "./registry.mjs";
 export const NS = "moinen-letters";
 const LOG = "LETR |";
 export const state = {
-  prefs: { ...DEFAULTS }, styles: A.makeStyles(), fromWorld: new Set(), flashLog: [], host: null, engine: null, base: null,
+  prefs: seatPrefs(TABLE_DEFAULTS, {}), table: { ...TABLE_DEFAULTS }, seat: { osReduced: false, photosensitive: false }, styles: A.makeStyles(), fromWorld: new Set(), flashLog: [], host: null, engine: null, base: null,
   live: null, liveQ: [], liveT: 0, gate: N.rateGate(30), net: new Map(), warned: new Set(),
   /* ENGREG: the table's clock (clock.mjs; Foundry's serverTime until the first answer) and the builds the seats run */
   clock: makeClock({ ping: (cb) => game.socket.emit("time", (t) => cb(t?.serverTime)), fallback: () => globalThis.game?.time?.serverTime }),
@@ -66,8 +68,14 @@ export function install(L, base) {
   L.gridClock?.(gridOffset);
   Object.defineProperty(L, "moods", { configurable: true, enumerable: true, get: () => MOOD_IDS.map((id) => ({ id, label: MOODS[id].label, sound: { ...MOODS[id].sound }, custom: !!MOODS[id].custom })) });
   Object.defineProperty(L, "prefs", { configurable: true, enumerable: true, get: () => ({ ...state.prefs }) });
+  /* ENGTABLE: the table's values as the GM chose them (L.prefs = what THIS seat applies: the table with the seat's own accessibility
+     signals) and those signals themselves */
+  Object.defineProperty(L, "table", { configurable: true, enumerable: true, get: () => ({ ...state.table }) });
+  Object.defineProperty(L, "seat", { configurable: true, enumerable: true, get: () => ({ ...state.seat }) });
   Object.assign(L, {
     settings: () => ({ ...state.prefs }),
+    /* ENGTABLE: the GM changes the table's preferences (every seat follows on its next word); a player's call is refused (false) */
+    setTable,
     registerMood: A.registerMood, registerPalette: A.registerPalette,
     registerFont: (id, def) => A.registerFont(id, def, L._bank),
     registerStyle: (name, style) => state.styles.register(name, style),
@@ -107,27 +115,152 @@ export function planFor(L, text, opts = {}) {
   return { plan, opts: o };
 }
 
-/* ---------- settings ---------- */
-function readPrefs() {
-  const v = {};
-  for ( const k of Object.keys(SETTINGS) ) { try { v[k] = game.settings.get(NS, k); } catch { v[k] = DEFAULTS[k]; } }
-  state.prefs = cleanAll(v);
+/* ---------- settings (ENGTABLE 1.9.16: every preference is the table's) ----------
+   The owner: «wszystko mg wybiera dla stołu. wszystko». One world object `moinen-letters.table` (prefs.TABLE_OBJECT) plus the world
+   settings `movement` and `face`; written only by a GM (setTable; a player's write is stopped on his seat), read by every seat, applied
+   on every onChange to the next word. What a seat applies (state.prefs) = the table with that seat's own accessibility signals
+   (prefs.seatPrefs: its system's reduced motion, Foundry's photosensitive mode); the photosensitivity guard is always on. */
+const TABLE_KEY = "table", MIGRATED_KEY = "tableMigrated", MIGRATION = 1;
+const NOTICE_LS = `${NS}.tableNotice`;   // localStorage: a player was told once that the GM now chooses (players cannot write the world)
+/* invincible-plus-ultra's outside mirror (GMALL, its scripts/table/): its world setting with the table's lettering values. While it is
+   registered the engine keeps the two equal from the GM's seat, so plus-ultra's own window keeps working until plus-ultra drops the
+   mirror (README "Settings"). Delete PU_KEY, bridgeIn and bridgeOut then. */
+const PU_MOD = "invincible-plus-ultra", PU_KEY = `${PU_MOD}.lettersTable`;
+const has = (id) => { try { return !!globalThis.game?.settings?.settings?.has?.(id); } catch { return false; } };
+const getS = (k, d) => { try { return game.settings.get(NS, k); } catch { return d; } };
+const photosensitive = () => { try { return has("core.photosensitiveMode") && !!game.settings.get("core", "photosensitiveMode"); } catch { return false; } };
+export const seatNow = () => ({ osReduced: osReduced(), photosensitive: photosensitive() });
+const sameV = (a, b) => a === b || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
+const sameT = (a, b, keys = TABLE_OBJECT) => keys.every((k) => sameV(a?.[k], b?.[k]));
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && k in o).map((k) => [k, o[k]]));
+
+/* the table as stored in the world (the object + movement + face), cleaned */
+function readTable() {
+  const obj = getS(TABLE_KEY, null);
+  return cleanTable({ ...(obj && typeof obj === "object" ? obj : {}), movement: getS("movement"), face: getS("face") });
+}
+export function readPrefs() {
+  state.table = readTable();
+  state.seat = seatNow();
+  state.prefs = seatPrefs(state.table, state.seat);
   applyLimits();
+  bridgeOut();
+  try { globalThis.Hooks?.callAll?.("moinenLettersTable", { ...state.table }, { ...state.seat }); } catch {}
+  refreshWindow();
 }
-export async function setPrefs(values) {
-  for ( const [k, v] of Object.entries(cleanAll({ ...state.prefs, ...values })) ) {
-    if ( scopeOf(k) === "world" && !game.user?.isGM ) continue;   // MODE: the table's settings are the GM's
-    if ( game.settings.get(NS, k) !== v ) await game.settings.set(NS, k, v);
-  }
+/* the GM writes the table (only what changed: one write for the object, one per older key); a player's call writes nothing, is refused */
+export async function setTable(values = {}) {
+  if ( !isGM() ) { refuseSet(); return false; }
+  const next = cleanTable({ ...state.table, ...(values ?? {}) });
+  const stored = getS(TABLE_KEY, null);
+  if ( !sameT(next, cleanTable(stored && typeof stored === "object" ? stored : {})) ) await game.settings.set(NS, TABLE_KEY, pick(next, TABLE_OBJECT));
+  for ( const k of ["movement", "face"] ) if ( getS(k) !== next[k] ) await game.settings.set(NS, k, next[k]);
   readPrefs();
+  return true;
 }
+/* the windows' older name (1.9.2 .. 1.9.14) */
+export const setPrefs = setTable;
+function refuseSet() {
+  const k = "set:refused"; if ( state.warned.has(k) ) return; state.warned.add(k);
+  console.warn(`${LOG} the lettering settings are the table's: only a GM changes them (refused on this seat, nothing written)`);
+  try { globalThis.ui?.notifications?.info(t("Settings.Refused")); } catch {}
+}
+/* a player's direct write of one of our world settings (a macro, an older module's mirror) is stopped on his seat before it is sent,
+   quietly (Foundry's server refuses it anyway, with an error on his screen) */
+function guardWrite(doc) {
+  const key = doc?.key ?? doc?._source?.key;
+  if ( typeof key !== "string" || !key.startsWith(`${NS}.`) || isGM() ) return;
+  refuseSet();
+  return false;
+}
+
+/* MIGRATION (once per world, by the first GM seat after the update): the GM's own earlier choices become the table's, unless the
+   world already holds a table. Source, in order: invincible-plus-ultra's table (`lettersTable`: the GM's choices for the table made in
+   its window, itself migrated from his old values), else the GM's own old client values (localStorage "moinen-letters.<key>"). An old
+   "full" motion becomes "auto" (full unless a seat asks for less); the old photosensitivity switch is dropped (the guard is always
+   on). Players' old values are not taken: they stay in their browsers, unused; a player whose old values differed is told once. */
+function rawLocal(id) {
+  try { const raw = globalThis.localStorage?.getItem(id); if ( raw == null ) return undefined; try { return JSON.parse(raw); } catch { return raw; } } catch { return undefined; }
+}
+const worldDoc = (id) => { try { return game.settings.storage?.get("world")?.getSetting?.(id, null) ?? null; } catch { return null; } };
+/* this browser's old per-seat values (1.9.14 and before), as stored */
+export function legacyValues() {
+  const o = {};
+  for ( const k of TABLE_OBJECT ) { const v = rawLocal(`${NS}.${k}`); if ( v !== undefined ) o[k] = v; }
+  return o;
+}
+export async function migrate() {
+  const out = { wrote: false, from: null, keys: [] };
+  if ( !isGM() ) return out;
+  let done = 0; try { done = Number(game.settings.get(NS, MIGRATED_KEY)) || 0; } catch { return out; }
+  if ( done >= MIGRATION ) return out;
+  if ( !worldDoc(`${NS}.${TABLE_KEY}`) ) {
+    let src = null, from = null;
+    const pu = has(PU_KEY) && worldDoc(PU_KEY) ? puTable() : null;
+    if ( pu ) { src = pick(pu, TABLE_OBJECT); from = "plus-ultra"; }
+    else { src = legacyValues(); from = "gm"; }
+    const next = cleanTable({ ...TABLE_DEFAULTS, ...src });
+    const keys = TABLE_OBJECT.filter((k) => !sameV(next[k], TABLE_DEFAULTS[k]));
+    if ( keys.length ) {
+      await game.settings.set(NS, TABLE_KEY, pick(next, TABLE_OBJECT));
+      Object.assign(out, { wrote: true, from, keys });
+      console.info(`${LOG} the ${from === "gm" ? "GM's own" : "plus-ultra table's"} lettering choices became the table's: ${keys.join(", ")}`);
+    }
+  }
+  await game.settings.set(NS, MIGRATED_KEY, MIGRATION);
+  readPrefs();
+  return out;
+}
+/* a player's seat: told once (per browser) when his own old values differ from the table (plus-ultra's mirror tells him itself) */
+export function noticeOnce() {
+  try {
+    if ( isGM() || has(PU_KEY) ) return false;
+    const ls = globalThis.localStorage; if ( !ls || ls.getItem(NOTICE_LS) !== null ) return false;
+    const mine = legacyValues();
+    const differ = Object.keys(mine).some((k) => !sameV(cleanTable({ ...state.table, [k]: mine[k] })[k], state.table[k]));
+    ls.setItem(NOTICE_LS, String(Date.now()));
+    if ( differ ) globalThis.ui?.notifications?.info(t("Settings.Moved"));
+    return differ;
+  } catch { return false; }
+}
+
+/* BRIDGE to invincible-plus-ultra's mirror (GM's seat only; both are world settings): plus-ultra's window writes `lettersTable` -> the
+   table follows; the table changes (this window, L.setTable, another GM) -> `lettersTable` follows, so plus-ultra's window shows it.
+   Each side writes only what differs, so the two meet in one round. Off until the GM's ready (after the migration). */
+const isReady = () => !!globalThis.game?.ready;
+function puTable() { try { const v = game.settings.get(PU_MOD, "lettersTable"); return v && typeof v === "object" ? v : null; } catch { return null; } }
+function bridgeOut() {
+  if ( !state.bridged || !isReady() || !isGM() || !has(PU_KEY) ) return;
+  const pu = puTable() ?? {};
+  if ( sameT(cleanTable({ ...state.table, ...pick(pu, TABLE_OBJECT) }), state.table) ) return;
+  game.settings.set(PU_MOD, "lettersTable", { ...pu, ...pick(state.table, TABLE_OBJECT) }).catch((e) => console.warn(`${LOG} bridge`, e));
+}
+function bridgeIn(doc) {
+  if ( (doc?.key ?? doc?._source?.key) !== PU_KEY || !state.bridged || !isReady() || !isGM() ) return;
+  const pu = puTable(); if ( !pu ) return;
+  const next = cleanTable({ ...state.table, ...pick(pu, TABLE_OBJECT) });
+  if ( !sameT(next, state.table) ) setTable(pick(next, TABLE_OBJECT)).catch((e) => console.warn(`${LOG} bridge`, e));
+}
+/* the settings window open on this seat follows the table (a player's at once; a GM's while he has not started editing) */
+function refreshWindow() { try { if ( state.settingsApp?.rendered ) state.settingsApp.follow?.(); } catch {} }
+
 function registerSettings() {
   const type = { bool: Boolean, num: Number, pick: String };
-  for ( const [k, d] of Object.entries(SETTINGS) ) {
-    game.settings.register(NS, k, { name: `LETR.Settings.${k}.Name`, hint: `LETR.Settings.${k}.Hint`, scope: scopeOf(k), config: false,
+  game.settings.register(NS, TABLE_KEY, { scope: "world", config: false, type: Object, default: pick(TABLE_DEFAULTS, TABLE_OBJECT), onChange: () => readPrefs() });
+  for ( const k of ["movement", "face"] ) {
+    const d = SETTINGS[k];
+    game.settings.register(NS, k, { name: `LETR.Settings.${k}.Name`, hint: `LETR.Settings.${k}.Hint`, scope: "world", config: false,
       type: type[d.type], default: d.default, onChange: () => readPrefs() });
   }
+  game.settings.register(NS, MIGRATED_KEY, { scope: "world", config: false, type: Number, default: 0 });
   game.settings.register(NS, "styles", { scope: "world", config: false, type: Object, default: {}, onChange: () => syncStyles() });
+  /* a reset deletes a world setting's document: Foundry calls no onChange then */
+  Hooks.on("deleteSetting", (doc) => { const k = doc?.key ?? ""; if ( k.startsWith(`${NS}.`) ) readPrefs(); });
+  Hooks.on("preCreateSetting", guardWrite);
+  Hooks.on("preUpdateSetting", guardWrite);
+  for ( const h of ["createSetting", "updateSetting", "deleteSetting"] ) Hooks.on(h, bridgeIn);
+  Hooks.on("clientSettingChanged", (key) => { if ( key === "core.photosensitiveMode" ) readPrefs(); });
+  try { globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.addEventListener?.("change", () => readPrefs()); } catch {}
   const { ApplicationV2 } = foundry.applications.api;
   class LettersMenu extends ApplicationV2 { render() { openSettings(); return this; } }
   game.settings.registerMenu(state.host, "letters", { name: "LETR.Settings.Menu.Name", label: "LETR.Settings.Menu.Label",
@@ -385,6 +518,12 @@ export function init(REG) {
     state.clock.start();                  // ENGREG: the table's clock (a burst of "time" pings, then one every 10 s)
     setTimeout(() => sendHello(false), 500);
     syncStyles();
+    /* ENGTABLE: the GM's seat migrates once and starts the bridge (the table wins over plus-ultra's copy from here on); a player is told once */
+    (async () => {
+      try { if ( isGM() ) await migrate(); } catch ( e ) { console.warn(`${LOG} migration`, e); }
+      state.bridged = true; readPrefs();
+      noticeOnce();
+    })();
     document.addEventListener("pointermove", (e) => { state.mouse = { x: e.clientX, y: e.clientY }; }, { passive: true });
   });
 }

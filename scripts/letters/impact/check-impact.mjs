@@ -130,9 +130,9 @@ export async function run(ok) {
     /* preview spends nothing */
     const lg = []; safety(mk(), P0, { flashLog: lg, now: 0, t0: 0, preview: true });
     ok(lg.length === 0, "impact: a preview plan spends flash budget");
-    /* guard off: untouched */
+    /* ENGTABLE (1.9.16): the guard is always on; a `photosafe: false` changes nothing (before: it left the plan untouched). Stricter */
     const e = safety(mk(), { ...P0, photosafe: false }, { flashLog: [], now: 0, t0: 0 });
-    ok(fullN(e) === fullN(raw), `impact: ${kind} m=${m} photosafe off still drops frames`);
+    ok(flashN(e) <= LIMITS.fullPerImpact && fullN(e) <= LIMITS.fullPerImpact, `impact: ${kind} m=${m} photosafe false still guards (${flashN(e)} flash drawings)`);
     /* the gentle variant: no full frame, no hit-stop, no inverted scene */
     for ( const [pr, gen] of [[{ ...P0, flashes: false }], [{ ...P0, motion: "gentle" }], [{ ...P0, impact: "local" }], [P0, true]] ) {
       const glog = [];
@@ -348,7 +348,7 @@ export async function run(ok) {
     const { STRINGS } = await import("../strings.mjs");
     const ui = fs.readFileSync(new URL("../ui.mjs", import.meta.url), "utf8");
     ok(SETTINGS.impact?.type === "pick" && SETTINGS.impact.choices.join() === "full,local,off" && DEFAULTS.impact === "full", "impact: the setting impact = full | local | off, default full");
-    ok(/\["flashes", "photosafe", "impact",/.test(ui), "impact: the impact row sits in the settings window's Access group");
+    ok(/\["flashes", "impact", "photosafe"\]/.test(ui), "impact: the impact row sits in the settings window's flashes group, next to the always-on guard");
     for ( const lang of ["en", "pl"] ) for ( const k of ["Name", "Hint", "full", "local", "off"] ) ok(typeof STRINGS[lang][`LETR.Settings.impact.${k}`] === "string", `impact: setting words ${lang} ${k}`);
   }
 

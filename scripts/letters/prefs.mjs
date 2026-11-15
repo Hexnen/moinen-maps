@@ -2,7 +2,8 @@
    word. Pure: no DOM, no Foundry. tools.mjs registers the settings and feeds their values in; the engine runs the filters
    (engine.mjs `ext`): `resolveOpts` on the call's options, `filterPlan` on the finished plan.
 
-   Settings (namespace "moinen-letters", README "Settings"):
+   Settings (namespace "moinen-letters", README "Settings"). Since ENGTABLE (1.9.16) every one of them is the TABLE's, chosen by the GM
+   (TABLE below); "this client" in the lines here reads "every seat" (a seat's own reduced motion / photosensitive mode aside):
      enabled      master switch: off = no lettering at all on this client (play returns a handle that is already over)
      scale        size multiplier (0.5-2.5) applied AFTER the legibility clamp, so it also grows words held at the floor
      motion       auto (the OS reduced-motion switch) | full (the caller decides) | gentle (smaller moves, no smear frames) | reduced
@@ -27,6 +28,59 @@
 import { MOTION_MODES, DEFAULT_MOTION } from "./motion.mjs";
 import { INV_FACES, DEFAULT_FACE } from "./design.mjs";
 
+/* ---------- ENGTABLE (1.9.16): every preference is the TABLE's ----------
+   The owner, 2026-11-15: «wszystko mg wybiera dla stołu. wszystko». Every preference above is chosen by the GM for the whole table:
+   world scope, written only by a GM, read by every seat, applied live (onChange) to the next word. Stored as ONE world setting
+   `moinen-letters.table` (an object of the keys in TABLE_OBJECT) plus the two older world settings `movement` and `face` (MODE, FONTSEL:
+   same keys as before, so their stored values stay). The engine registers NO client setting any more.
+   What a seat may still differ in is not a preference of ours but that seat's own accessibility signal, honoured on that seat only
+   (seatPrefs): its system's reduced motion (motion "auto" = full unless the seat asks for less; the table can never force full motion
+   on it) and Foundry's photosensitive mode (no flash frames on that seat). The photosensitivity guard is not a setting at all: always
+   on, on every seat (filterPlan and impact/plan.mjs ignore any `photosafe: false`).
+   The table's motion offers auto ("Full"), gentle, reduced; an older stored "full" reads as "auto". */
+export const TABLE = {
+  enabled:     { type: "bool", default: true },
+  scale:       { type: "num", default: 1, min: 0.5, max: 2.5, step: 0.05 },
+  motion:      { type: "pick", default: "auto", choices: ["auto", "gentle", "reduced"] },
+  flashes:     { type: "bool", default: true },
+  impact:      { type: "pick", default: "full", choices: ["full", "local", "off"] },
+  palette:     { type: "pick", default: "mood", choices: ["mood", "contrast", "cvd"] },
+  announce:    { type: "bool", default: true },
+  limitScreen: { type: "num", default: 16, min: 1, max: 32, step: 1 },
+  limitWorld:  { type: "num", default: 48, min: 4, max: 96, step: 1 },
+  movement:    { type: "pick", default: DEFAULT_MOTION, choices: MOTION_MODES.slice() },
+  face:        { type: "pick", default: DEFAULT_FACE, choices: INV_FACES.slice() }
+};
+export const TABLE_KEYS = Object.keys(TABLE);
+/* the keys kept in the one world object `moinen-letters.table` (movement and face keep their own world settings) */
+export const TABLE_OBJECT = TABLE_KEYS.filter((k) => k !== "movement" && k !== "face");
+export const TABLE_DEFAULTS = Object.fromEntries(TABLE_KEYS.map((k) => [k, TABLE[k].default]));
+/* the table's value of one key, cleaned (an older or hand-edited value never breaks a seat; an old "full" motion is "auto") */
+export function cleanTableValue(k, v) {
+  const d = TABLE[k];
+  if ( !d ) return undefined;
+  if ( k === "motion" && v === "full" ) return "auto";
+  if ( d.type === "bool" ) return typeof v === "boolean" ? v : d.default;
+  if ( d.type === "pick" ) return d.choices.includes(v) ? v : d.default;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(d.min, Math.min(d.max, n)) : d.default;
+}
+export const cleanTable = (o = {}) => Object.fromEntries(TABLE_KEYS.map((k) => [k, cleanTableValue(k, (o ?? {})[k])]));
+/* what THIS seat applies: the table's values with the seat's own accessibility signals (seat = { osReduced, photosensitive }).
+   motion stays the table's word ("auto" lets resolveOpts honour the seat's reduced motion at every word); flashes go off on a seat in
+   Foundry's photosensitive mode; the guard is pinned on. Every other value is the table's, the same on every seat. */
+export function seatPrefs(table, seat = {}) {
+  const t = cleanTable(table);
+  return { ...t, flashes: t.flashes && !seat.photosensitive, photosafe: true };
+}
+/* how the seat's own signals change what it shows (for the settings window's "this screen" lines) */
+export const seatNotes = (table, seat = {}) => ({ reduced: !!seat.osReduced && cleanTable(table).motion !== "reduced", photo: !!seat.photosensitive });
+
+/* ---------- LEGACY (1.9.14 and before): the per-seat client settings ----------
+   NOT registered and NOT read for any word since ENGTABLE. Kept only as a description: the migration reads a GM's old client values
+   (localStorage "moinen-letters.<key>") through it, and invincible-plus-ultra's outside mirror (its scripts/table/defs.mjs imports
+   SETTINGS / DEFAULTS / clean / scopeOf from its vendored copy) still builds its rows from this shape. Remove it once plus-ultra has
+   dropped that mirror (README "Settings"). */
 export const SETTINGS = {
   enabled:     { type: "bool", default: true },
   scale:       { type: "num", default: 1, min: 0.5, max: 2.5, step: 0.05 },
@@ -186,7 +240,8 @@ export function filterPlan(plan, opts, ctx) {
   const tl = plan.timeline, all = [...tl.ent, ...tl.hold, ...tl.exit];
   const plates = all.filter((p) => !p.impact).map((p) => p.misreg).filter((m) => m > 0);
   const steady = plates.length ? Math.min(...plates) : 0;
-  if ( P.photosafe ) for ( const p of all ) if ( !p.impact ) p.misreg = steady;   // no plates jumping between drawings
+  /* ENGTABLE: the photosensitivity guard is always on (P.photosafe is never read: no setting, no caller and no stored value turns it off) */
+  for ( const p of all ) if ( !p.impact ) p.misreg = steady;   // no plates jumping between drawings
   const fl = flashTimes(plan, ctx.TICK ?? 1000 / 24);
   if ( fl.length ) {
     const big = (ctx.capPx ?? 0) > (ctx.vh ?? Infinity) * PHOTO.bigVh;
@@ -194,7 +249,7 @@ export function filterPlan(plan, opts, ctx) {
     for ( const f of fl ) {
       const p = all[f.i];
       if ( !P.flashes ) { unflash(p, steady); continue; }
-      if ( !P.photosafe || ctx.preview ) { if ( P.photosafe && big ) unflash(p, steady); continue; }
+      if ( ctx.preview ) { if ( big ) unflash(p, steady); continue; }
       const at = (ctx.t0 ?? 0) + f.t;
       /* KEEPBOX (ADVX 6): an impact frame's second belongs to the impact: a word's own flash accent inside it gives way (the impact IS the
          flash). Before, a seat's private words (the GM's enemy numbers, a word only this seat draws big) took flash slots the other seat

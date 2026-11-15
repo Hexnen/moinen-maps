@@ -32,14 +32,19 @@ export function createImpact(L, tools = null) {
      flash accent inside an impact's second gives way (prefs.filterPlan), so a seat's private words never change what the impacts draw. */
   const wins = [];
   if ( tools?.state ) tools.state.impactWins = wins;
-  let seq = 0, localMode = "full", stopHeld = false, chromaOk = null;
+  let seq = 0, localMode = null, stopHeld = false, chromaOk = null;
 
-  /* ---------- preferences ---------- */
-  function ensureSetting() {
-    try { const S = globalThis.game?.settings; if ( S?.settings && !S.settings.has(`${NS}.${KEY}`) ) S.register(NS, KEY, { scope: "client", config: false, type: String, default: "full" }); return !!S?.settings; } catch { return false; }
+  /* ---------- preferences ----------
+     ENGTABLE (1.9.16): full / local / off is the TABLE's (L.prefs.impact, the world setting `moinen-letters.table` chosen by the GM);
+     the engine registers no client setting. setMode(v) is the GM's write to the table (a player's is refused: it returns the table's
+     mode); without the tools (node) it sets this page's own value. */
+  const tableMode = () => { const v = L?.prefs?.impact; return MODES.includes(v) ? v : null; };
+  const mode = () => (tools?.setTable ? tableMode() : null) ?? (MODES.includes(localMode) ? localMode : tableMode() ?? "full");
+  async function setMode(v) {
+    if ( !MODES.includes(v) ) return mode();
+    if ( tools?.setTable && globalThis.game?.settings ) { await tools.setTable({ impact: v }); return mode(); }
+    localMode = v; return v;
   }
-  const mode = () => { let v = localMode; try { if ( ensureSetting() ) v = game.settings.get(NS, KEY); } catch {} return MODES.includes(v) ? v : "full"; };
-  async function setMode(v) { if ( !MODES.includes(v) ) return mode(); localMode = v; try { if ( ensureSetting() ) await game.settings.set(NS, KEY, v); } catch {} return v; }
   const prefs = () => ({ enabled: true, motion: "auto", flashes: true, photosafe: true, ...(L?.prefs ?? {}), impact: mode() });
   const osReduced = () => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
   const flashLog = () => tools?.state?.flashLog ?? (createImpact._log ??= []);
@@ -106,7 +111,7 @@ export function createImpact(L, tools = null) {
         if ( p && Number.isFinite(p.x) && Math.hypot(sub.cx - p.x, sub.cy - p.y) > 1 ) dir = Math.atan2(sub.cy - p.y, sub.cx - p.x);
       } catch {}
     }
-    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: prefs().photosafe === false,
+    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false,   /* ENGTABLE: the guard is always on (red stays rationed) */
       /* the gentle panel: round the subject, sized from it (FIN-ENGINE FXIT-E2: a far-zoom token gets a panel of a few token widths) */
       local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, R > 0 ? Math.min(Math.min(W, H) * 0.2, Math.max(R * 6, Math.min(W, H) * 0.06)) : Math.min(W, H) * 0.2)) },
       chromaBack: chromaOk !== false,

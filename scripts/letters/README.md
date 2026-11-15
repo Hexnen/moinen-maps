@@ -555,20 +555,28 @@ when the point must not give away where something happened.
 ## Tools: settings, authoring, networking, accessibility, windows (contract v6, tools.mjs)
 One set for every caller, registered once by the newest copy at `init` (whichever module(s) are active).
 
-Settings, client (this computer), namespace `moinen-letters` (stable whichever module is active; the button "Lettering settings" in
-the host module's settings tab opens the engine's own window; host = moinen-maps when active, else invincible-plus-ultra):
+Settings, all the TABLE's (1.9.16 ENGTABLE: world scope, only the GM writes them, every seat follows on its next word without a
+reload; namespace `moinen-letters`; the button "Lettering settings" in the host module's settings tab opens the engine's own window,
+host = moinen-maps when active, else invincible-plus-ultra; a player opens it read-only). One world Object `table` holds the first
+eight keys; `movement` and `face` keep their own world keys. `L.table` (the table), `L.seat` (this screen's signals), `L.prefs` (what
+this seat draws with), `L.setTable(partial)` (GM; a player's call writes nothing and is told once):
 | key | values | what it does to every word |
 |---|---|---|
 | `enabled` | on / off | off: `play` returns a handle that is already over (`alive` false, `off` true, `finished` -> "evicted"); streams draw nothing |
 | `scale` | 0.5-2.5 | multiplies the size AFTER the legibility clamp (so words held at the floor grow too) |
-| `motion` | auto / full / gentle / reduced | the strongest reduction wins: the caller's `reduced: true`, this setting, the OS (auto, gentle); full = the caller decides; gentle = moves damped to 45 %, no smear frames |
-| `flashes` | on / off | the one-tick black/white impact frame (off: an ordinary drawing of the same length) |
-| `photosafe` | on (default) / off | at most 2 flash frames per second on this client, none on a word taller than 20 % of the viewport, colour plates (misregistration) held still across drawings |
+| `motion` | auto ("Full") / gentle / reduced | the strongest reduction wins: the caller's `reduced: true`, the table, this seat's OS; gentle = moves damped to 45 %, no smear frames (a stored `full` reads as `auto`) |
+| `flashes` | on / off | the one-tick black/white flash frame (off: an ordinary drawing of the same length); a seat in Foundry's photosensitive mode never gets it |
+| `impact` | full / local / off | impact frames (`L.impact`); a photosensitive seat gets local |
 | `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink and extrusion, black outer line, no texture (a caller's own `colors` stay, ink turns black); cvd: every colour family remapped to the Okabe-Ito set, no green, no red-green pair (a caller's own `colors` stay) |
 | `announce` | on / off | each word (or `alt`) is read by screen readers through one polite live region (`#moinen-letters-say`); the layers stay aria-hidden |
 | `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
-| `movement` (WORLD, the GM's) | smooth / stepped | the invincible style's motion type on every seat (1.9.2 MODE); a player sees it as text |
-| `face` (WORLD, the GM's) | league / anton | the invincible style's face on every seat (1.9.7 FONTSEL, League Gothic by default); a player sees it as text |
+| `movement` | smooth / stepped | the invincible style's motion type on every seat (1.9.2 MODE) |
+| `face` | league / anton | the invincible style's face on every seat (1.9.7 FONTSEL, League Gothic by default) |
+
+The photosensitivity guard is NOT a setting (1.9.16): always on, `photosafe: false` changes nothing (at most 2 flash frames per
+second, none on a word taller than 20 % of the viewport, colour plates held still). Migration once per world (`tableMigrated`):
+plus-ultra's `lettersTable` if present, else the GM's old client values, else defaults; players' old values stay unused in their
+browsers. While plus-ultra keeps its GMALL mirror, the GM's seat keeps `table` and `invincible-plus-ultra.lettersTable` equal.
 World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
 
 Authoring (any client, this session; `L.saveStyle` also stores a style in the world):
