@@ -209,6 +209,9 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
   if ( !view ) { for ( const it of items ?? [] ) out.set(it.key, { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }); return out; }
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
   const vw = Math.max(1, v.x1 - v.x0), vh = Math.max(1, v.y1 - v.y0);
+  // (MAPRIDE cost: the panels as the screen shows them - a row of macro slots or tool buttons a few px apart is one strip, no word stands
+  // in its gaps - far fewer rectangles to test on a crowded view)
+  panels = mergeRects(panels.filter((o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1), PANEL_GAP / Math.max(1e-4, zoom));
   const placed = [];
   const meet = (a, b) => !a || !b || (a[0] < b[1] && b[0] < a[1]);
   const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
@@ -244,7 +247,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
     const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
-    const hardG = grid([...pins, ...tokens].filter(near), view), softG = grid([...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), view);
+    const softList = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), hardG = grid([...pins, ...tokens].filter(near), view), softG = grid(softList, view);
     // (its own subject: covered no more than its kind allows, or than the table picture itself covers it - the table's placement weighs
     // that share, it does not forbid it: a big blast's word stands over the top of its crater on the table)
     const hw0 = sub ? (sub.x1 - sub.x0) / 2 : 0, hh0 = sub ? (sub.y1 - sub.y0) / 2 : 0;
@@ -275,9 +278,15 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       return k;
     };
     let best = null, fallback = null;
-    const trySize = (cap) => {
+    const hardList = [...pins, ...tokens].filter(near);
+    const trySize = (cap, prune = false) => {
       const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
       const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
+      // (MAPRIDE cost: a size whose ink has no spot in the view off every pin and token - proven exactly by hardFree - has no clean spot:
+      // its search is skipped where only a clean spot counts)
+      const A = { x0: Math.min(d0.dx, v.x0 - b0.x0), x1: Math.max(d0.dx, v.x1 - b0.x1), y0: Math.min(d0.dy, v.y0 - b0.y0), y1: Math.max(d0.dy, v.y1 - b0.y1) };
+      const F = forbOf(inkOf(b0), A, hardList, softList);
+      if ( prune && !freeIn(F, A) ) return;
       const clampD = (d) => { const q = mv(b0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
       // candidate shifts, searched nearest first (best first: a candidate's score is never under its `base`, so the search stops at the
       // first candidate whose base is not better than the best clean one): none / into the view; away from the thing and along it on its
@@ -301,10 +310,16 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         const tx = sc.x + ox * (hw + bw / 2 - touch * bh + g * bh), ty = sc.y + oy * (hh + bh / 2 - touch * bh + g * bh);
         add({ dx: tx - (b0.x0 + b0.x1) / 2, dy: ty - (b0.y0 + b0.y1) / 2 });
       }
+      // (MAPRIDE cost: the nearest move off every pin and token and out from under any one panel / word, along SEAT_RAYS directions -
+      // found exactly in move space, so a crowded view's clean spot is among the first tried, not after the escapes of every nearer one)
+      if ( prune ) for ( const d of freeRays(F, A, d0, SEAT_RAYS) ) add(d);
       let evals = 0;
       while ( queue.length && evals < MAX_EVALS ) {
         const c = heapPop(queue);
         if ( best && best.cap === cap && c.base >= best.score - 1e-9 ) break;
+        // (where only a clean spot counts, a move that is forbidden - on a pin / token, or under one panel / word beyond the edge - cannot
+        // be one: skipped; the free moves near it were seeded above)
+        if ( prune && F.some((r) => r.x0 < c.d.dx && c.d.dx < r.x1 && r.y0 < c.d.dy && c.d.dy < r.y1) ) continue;
         evals++;
         const { d, q, fl } = c, k = inkOf(q);
         let hh2 = 0, soft = 0;
@@ -323,7 +338,12 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         // "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it, MAPSFXSEAT2-6)
         // (the larger size wins, then the lower score: the sizes under `min` are not tried in order, see below)
         const over = (o) => !o || cap > o.cap + 1e-9 || (Math.abs(cap - o.cap) <= 1e-9 && score < o.score - 1e-9);
-        if ( clean ) { if ( over(best) ) best = { cap, f, d, q, score, fl, soft }; continue; }
+        if ( clean ) {
+          if ( over(best) ) best = { cap, f, d, q, score, fl, soft };
+          // (clean with an edge under a panel / word: the spot just past it too - a seeded move may land inside the edge it may take)
+          if ( prune && soft > 1e-6 ) for ( const o of metSoft ) { add({ dx: d.dx + o.x0 - k.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - k.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - k.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - k.y0 + 1 }); }
+          continue;
+        }
         else if ( cap >= fmin - 1e-9 ) {
           // (nothing clean at any size: the least covered at a size not under `fmin` - off pins and tokens first, then on its own side, then
           // the least covered and the least cut by the view edge)
@@ -343,11 +363,11 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const gallop = (list) => {
       let hit = -1;
       for ( let j = 0; list.length; j = Math.min(j + 4, list.length - 1) ) {
-        trySize(list[j]);
+        trySize(list[j], true);
         if ( best ) { hit = j; break; }
         if ( j === list.length - 1 ) break;
       }
-      if ( hit > 0 ) for ( let j = Math.max(1, hit - 3); j < hit; j++ ) { const was = best; trySize(list[j]); if ( best !== was ) break; }
+      if ( hit > 0 ) for ( let j = Math.max(1, hit - 3); j < hit; j++ ) { const was = best; trySize(list[j], true); if ( best !== was ) break; }
     };
     const search = (list) => {
       gallop(list.filter((c) => c >= min - 1e-9));
@@ -409,10 +429,16 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
  * -> { out: { cap, k, f, dx: 0, dy: 0, box (the way's whole box), way ([{x, y, ms}]: the way this seat draws), rules, rule, clean }, samples
  *    ([{ box (ink), life }]: what the words laid out after it keep off) }
  */
-export const RIDE_S = [1, 0.85, 0.7, 0.55, 0.4];
+export const RIDE_S = [1, 0.7, 0.4];
 export const RIDE_TURN = 22.5;
 /** the directions a rider's way may move in to stand clean (the nearest free move along each) */
-export const RIDE_RAYS = 24;
+export const RIDE_RAYS = 16;
+/** the farthest a rider's way moves to stand clean, in its box heights (farther: a smaller size first) */
+export const RIDE_MOVE = 8;
+/** the changes of a rider's way (cheapest first) whose moves are searched at one size (bounds the cost on a crowded view) */
+export const RIDE_PAIRS = 30;
+/** samples per stretch kept off pins and tokens as one box in the move search (the check itself still sweeps sample to sample) */
+export const RIDE_SPAN = 3;
 export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [], meet = () => true }) {
   const P = it.path, t0 = it.life?.[0] ?? 0, tEnd = Number.isFinite(it.stop) ? it.stop : it.life?.[1] ?? t0 + (P.at(-1).ms ?? 0) + 600;
   const bw0 = it.w?.bw > 0 ? it.w.bw : u * 4, bh0 = it.w?.bh > 0 ? it.w.bh : u * 1.6;
@@ -436,7 +462,7 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
   const upAt = base.map((_, i) => placed.filter((q) => meet(q.life, lifeAt(i))).map((q) => q.box));
   // (the changes of its way, cheapest first: the table's own way; a small shortening; a turn (a shock wave only); then a move)
   const pairs = [];
-  const turns = it.turn ? [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8] : [0];
+  const turns = it.turn ? [0, 1, -1, 2, -2, 4, -4, 6, -6, 8] : [0];
   for ( const ti of turns ) for ( const s of RIDE_S ) pairs.push({ ti, s, cost: Math.abs(ti) * 1 + (1 - s) * 6 });
   pairs.sort((a, b) => a.cost - b.cost);
   const into = (lo, hi, a0, z) => (hi - lo > z - a0 ? (a0 + z) / 2 - (lo + hi) / 2 : lo < a0 ? a0 - lo : hi > z ? z - hi : 0);
@@ -465,7 +491,7 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
   // (the least move of one change that makes it clean, found exactly in the space of moves: every sample's ink against every obstacle
   // forbids one rectangle of moves (a panel / an earlier word less the edge it may take); the view allows one; the nearest free move along
   // RIDE_RAYS directions is swept past the forbidden rectangles in one pass each, then checked as drawn - no blind trial and error)
-  const tryPair = (cap, c, limit) => {
+  const tryPair = (cap, c, limit, move) => {
     const f = cap / u, bw = bw0 * f, bh = bh0 * f, a = (c.ti * RIDE_TURN * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
     if ( bw > vw || bh > vh ) return null;
     const pts0 = base.map((q) => { const dx = (q.x - A.x) * c.s, dy = (q.y - A.y) * c.s; return { x: A.x + dx * ca - dy * sa, y: A.y + dx * sa + dy * ca, ms: q.ms }; });
@@ -474,43 +500,36 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     const D = { x0: v.x0 - x0, x1: v.x1 - x1, y0: v.y0 - y0, y1: v.y1 - y1 };     // (the moves the view allows)
     if ( D.x0 > D.x1 + 1e-6 || D.y0 > D.y1 + 1e-6 ) return null;
     const costOf = (d) => { const m = Math.hypot(d.dx, d.dy); return c.cost + (m / Math.max(1, bh)) * 1.5 + (m > 1 ? 2 : 0); };
-    if ( costOf({ dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }) >= limit ) return null;
+    const d0 = { dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }, c0 = costOf(d0);
+    if ( c0 >= limit ) return null;
+    // (the least move first - the table's way, or held into the view: clean, nothing cheaper exists for this change)
+    if ( !move ) { const pts = pts0.map((q) => ({ ...q, x: q.x + d0.dx, y: q.y + d0.dy })), r = evalWay(pts, bw, bh); return r.clean ? { pts, d: d0, cost: c0, worst: r.worst, bw, bh, f, c } : { miss: r.met.length / pts.length }; }
+    // (the farthest move worth its cost against `limit` and RIDE_MOVE heights: only the obstacles within it count)
+    const Rm = Math.min(RIDE_MOVE * bh, Number.isFinite(limit) ? ((limit - c.cost - 2) / 1.5) * bh : Infinity);
+    if ( !(Rm > 0) ) return null;
+    const M = { x0: Math.max(D.x0, -Rm), x1: Math.min(D.x1, Rm), y0: Math.max(D.y0, -Rm), y1: Math.min(D.y1, Rm) };
+    if ( M.x0 > M.x1 || M.y0 > M.y1 ) return null;
     const hx = (bw * kx) / 2, hy = (bh * ky) / 2, ex = SOFT_OK * 0.8 * 2 * hx, ey = SOFT_OK * 0.8 * 2 * hy;
     const forb = [];
-    const add = (q, o, e, n2 = q) => { const r = { x0: o.x0 + e[0] - (Math.max(q.x, n2.x) + hx), x1: o.x1 - e[0] - (Math.min(q.x, n2.x) - hx), y0: o.y0 + e[1] - (Math.max(q.y, n2.y) + hy), y1: o.y1 - e[1] - (Math.min(q.y, n2.y) - hy) };
-      if ( r.x1 > r.x0 && r.y1 > r.y0 && r.x1 > D.x0 && r.x0 < D.x1 && r.y1 > D.y0 && r.y0 < D.y1 ) forb.push(r); };
-    const reach = { x0: v.x0 - bw, y0: v.y0 - bh, x1: v.x1 + bw, y1: v.y1 + bh };
-    const H = hard.filter(nearOf), S = panels.filter(nearOf);
+    // (`s`: the centres the ink passes over - one sample, or a stretch of them - as a box)
+    const add = (s, o, e) => { const r = { x0: o.x0 + e[0] - (s.x1 + hx), x1: o.x1 - e[0] - (s.x0 - hx), y0: o.y0 + e[1] - (s.y1 + hy), y1: o.y1 - e[1] - (s.y0 - hy) };
+      if ( r.x1 > r.x0 && r.y1 > r.y0 && r.x1 > M.x0 && r.x0 < M.x1 && r.y1 > M.y0 && r.y0 < M.y1 ) forb.push(r); };
+    const span = (i, j) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for ( let k = i; k <= j; k++ ) { const q = pts0[k]; x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); } return { x0, y0, x1, y1 }; };
+    // (the obstacles any sample can meet within the moves allowed)
+    let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
+    for ( const q of pts0 ) { wx0 = Math.min(wx0, q.x); wy0 = Math.min(wy0, q.y); wx1 = Math.max(wx1, q.x); wy1 = Math.max(wy1, q.y); }
+    const reach = { x0: wx0 - hx + M.x0, y0: wy0 - hy + M.y0, x1: wx1 + hx + M.x1, y1: wy1 + hy + M.y1 };
+    const inR = (o) => o.x1 > reach.x0 && o.x0 < reach.x1 && o.y1 > reach.y0 && o.y0 < reach.y1;
+    const H = hardG.near(reach).filter(inR), S = panG.near(reach).filter(inR);
+    // (pins and tokens against stretches of RIDE_SPAN samples - the ink sweeps the box of the stretch, a little wider than its way: fewer
+    // rectangles, never a pin crossed; panels and words up per sample, with the edge they may take)
+    for ( let i = 0; i < pts0.length - 1; i += RIDE_SPAN ) { const s = span(i, Math.min(pts0.length - 1, i + RIDE_SPAN)); for ( const o of H ) add(s, o, [0, 0]); }
     for ( let i = 0; i < pts0.length; i++ ) {
-      const q = pts0[i];
-      for ( const o of H ) add(q, o, [0, 0], pts0[i + 1] ?? q);
-      for ( const o of S ) add(q, o, [ex, ey]);
-      for ( const o of upAt[i] ) if ( o.x1 > reach.x0 && o.x0 < reach.x1 && o.y1 > reach.y0 && o.y0 < reach.y1 ) add(q, o, [ex, ey]);
+      const s = span(i, i);
+      for ( const o of S ) add(s, o, [ex, ey]);
+      for ( const o of upAt[i] ) if ( inR(o) ) add(s, o, [ex, ey]);
     }
-    const cands = [{ dx: Math.max(D.x0, Math.min(D.x1, 0)), dy: Math.max(D.y0, Math.min(D.y1, 0)) }];
-    for ( let r = 0; r < RIDE_RAYS; r++ ) {
-      const an = (2 * Math.PI * r) / RIDE_RAYS, ux = Math.cos(an), uy = Math.sin(an);
-      // (the ray inside the allowed moves: [t0, t1])
-      let t0 = 0, t1 = Infinity;
-      for ( const [lo, hi, w] of [[D.x0, D.x1, ux], [D.y0, D.y1, uy]] ) {
-        if ( Math.abs(w) < 1e-9 ) { if ( lo > 1e-6 || hi < -1e-6 ) { t0 = Infinity; } continue; }
-        const ta = lo / w, tb = hi / w; t0 = Math.max(t0, Math.min(ta, tb)); t1 = Math.min(t1, Math.max(ta, tb));
-      }
-      if ( !(t0 <= t1) ) continue;
-      const iv = [];
-      for ( const o of forb ) {
-        let a0 = -Infinity, a1 = Infinity;
-        for ( const [lo, hi, w] of [[o.x0, o.x1, ux], [o.y0, o.y1, uy]] ) {
-          if ( Math.abs(w) < 1e-9 ) { if ( lo >= 0 || hi <= 0 ) { a0 = Infinity; } continue; }
-          const ta = lo / w, tb = hi / w; a0 = Math.max(a0, Math.min(ta, tb)); a1 = Math.min(a1, Math.max(ta, tb));
-        }
-        if ( a0 < a1 && a1 > t0 ) iv.push([a0, a1]);
-      }
-      iv.sort((p, q) => p[0] - q[0]);
-      let t = t0;
-      for ( const [a0, a1] of iv ) { if ( a0 >= t ) break; if ( a1 > t ) t = a1 + 0.5; }
-      if ( t <= t1 ) cands.push({ dx: ux * t, dy: uy * t });
-    }
+    const cands = freeRays(forb, M, { dx: 0, dy: 0 }, RIDE_RAYS);
     const list = cands.map((d) => ({ d, cost: costOf(d) })).filter((q) => q.cost < limit).sort((p, q) => p.cost - q.cost);
     for ( const { d, cost } of list ) {
       const pts = pts0.map((q) => ({ ...q, x: q.x + d.dx, y: q.y + d.dy })), r = evalWay(pts, bw, bh);
@@ -518,21 +537,34 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     }
     return null;
   };
+  // (memo: a size asked twice by the search below)
+  const memo = new Map();
   let best = null;
   const cap0 = sizes[0];
   const at = (cap) => {
-    let win = null;
-    for ( const c of pairs ) { if ( win && c.cost >= win.cost ) break; const r = tryPair(cap, c, win?.cost ?? Infinity); if ( r && (!win || r.cost < win.cost) ) win = r; }
-    return win ? { ...win, cap } : null;
+    if ( memo.has(cap) ) return memo.get(cap);
+    // (every change unmoved first - cheap; then the moves of RIDE_PAIRS changes: those that met least unmoved, cheapest among equals)
+    let win = null, moved = 0;
+    const miss = new Map();
+    for ( const c of pairs ) { if ( win && c.cost >= win.cost ) break; const r = tryPair(cap, c, win?.cost ?? Infinity, false); if ( r?.miss !== undefined ) miss.set(c, r.miss); else if ( r ) win = r; }
+    const order = pairs.slice().sort((p, q) => (p.cost + 4 * (miss.get(p) ?? 1)) - (q.cost + 4 * (miss.get(q) ?? 1)));
+    for ( const c of order ) {
+      if ( moved >= RIDE_PAIRS ) break;
+      if ( win && c.cost + 2 >= win.cost ) continue;     // (a move costs at least 2)
+      moved++;
+      const r = tryPair(cap, c, win?.cost ?? Infinity, true); if ( r && (!win || r.cost < win.cost) ) win = r;
+    }
+    const out = win ? { ...win, cap } : null;
+    memo.set(cap, out);
+    return out;
   };
-  // (its sizes from the largest: none clean at the smallest - none at any, asked once; else by a stride of three, then the larger ones
-  // between the first hit and the miss before it)
-  const last = sizes.length - 1, low = at(sizes[last]);
-  if ( low ) {
-    let hit = last;
-    for ( let j = 0; j < last; j += 3 ) { const r = at(sizes[j]); if ( r ) { best = r; hit = j; break; } }
-    if ( !best ) { best = low; hit = last; for ( let j = Math.max(0, last - 2); j < last; j++ ) { const r = at(sizes[j]); if ( r ) { best = r; break; } } }
-    else for ( let j = Math.max(0, hit - 2); j < hit; j++ ) { const r = at(sizes[j]); if ( r ) { best = r; break; } }
+  // (its sizes from the largest: clean there - done; none clean at the smallest - none at any; else halving between the last miss and
+  // the first hit)
+  const last = sizes.length - 1;
+  best = at(sizes[0]);
+  if ( !best && last > 0 && (best = at(sizes[last])) ) {
+    let lo = 0, hi = last;
+    while ( hi - lo > 1 ) { const mid = (lo + hi) >> 1, r = at(sizes[mid]); if ( r ) { hi = mid; best = r; } else lo = mid; }
   }
   const rules = ["ride"];
   if ( !best ) {
@@ -560,6 +592,114 @@ export function rideLayout(it, { u, sizes, v, hard = [], panels = [], placed = [
     smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size
     between the challenges panel, the scene bar, the hotbar and the bomb's pin) */
 export const SOFT_OK = 0.06;
+/**
+ * Is there a move d inside `A` ({ x0, x1, y0, y1 }: the moves allowed) that puts the box `k` on none of `obs` (touching allowed)? Exact:
+ * every obstacle forbids one open rectangle of moves; the allowed rectangle is swept in x-slabs and each slab's forbidden y-intervals
+ * joined. MAPRIDE (cost of the seat layout on a crowded view), pure.
+ */
+export function hardFree(k, A, obs, soft = [], share = SOFT_OK) {
+  if ( A.x0 > A.x1 + 1e-9 || A.y0 > A.y1 + 1e-9 ) return false;
+  return freeIn(forbOf(k, A, obs, soft, share), A);
+}
+/** the nearest free move from `d0` along each of `n` directions inside `A` past the forbidden moves `F` (forbOf): [{ dx, dy }] */
+export function freeRays(F, A, d0, n = 16) {
+  const out = [];
+  const slab = (o, ux, uy, open) => {
+    let a0 = -Infinity, a1 = Infinity;
+    const x0 = o.x0 - d0.dx, x1 = o.x1 - d0.dx, y0 = o.y0 - d0.dy, y1 = o.y1 - d0.dy;
+    if ( Math.abs(ux) < 1e-9 ) { if ( open ? x0 >= 0 || x1 <= 0 : x0 > 1e-6 || x1 < -1e-6 ) return null; }
+    else { const ta = x0 / ux, tb = x1 / ux; a0 = Math.min(ta, tb); a1 = Math.max(ta, tb); }
+    if ( Math.abs(uy) < 1e-9 ) { if ( open ? y0 >= 0 || y1 <= 0 : y0 > 1e-6 || y1 < -1e-6 ) return null; }
+    else { const ta = y0 / uy, tb = y1 / uy; a0 = Math.max(a0, Math.min(ta, tb)); a1 = Math.min(a1, Math.max(ta, tb)); }
+    return a0 < a1 || (!open && a0 <= a1) ? [a0, a1] : null;
+  };
+  // (each ray: the forbidden intervals of t once, into a flat array; then t pushed past any that holds it until none does)
+  const m = F.length, iv = new Float64Array(2 * m);
+  for ( let r = 0; r < n; r++ ) {
+    const an = (2 * Math.PI * r) / n, ux = Math.cos(an), uy = Math.sin(an), ray = slab(A, ux, uy, false);
+    if ( !ray ) continue;
+    const t0 = Math.max(0, ray[0]), t1 = ray[1];
+    if ( t0 > t1 ) continue;
+    let k = 0;
+    const ix = Math.abs(ux) < 1e-9 ? 0 : 1 / ux, iy = Math.abs(uy) < 1e-9 ? 0 : 1 / uy;
+    for ( let i = 0; i < m; i++ ) {
+      const o = F[i];
+      let a0 = -Infinity, a1 = Infinity;
+      const x0 = o.x0 - d0.dx, x1 = o.x1 - d0.dx, y0 = o.y0 - d0.dy, y1 = o.y1 - d0.dy;
+      if ( ix === 0 ) { if ( x0 >= 0 || x1 <= 0 ) continue; } else { const ta = x0 * ix, tb = x1 * ix; if ( ta < tb ) { a0 = ta; a1 = tb; } else { a0 = tb; a1 = ta; } }
+      if ( iy === 0 ) { if ( y0 >= 0 || y1 <= 0 ) continue; } else { const ta = y0 * iy, tb = y1 * iy; if ( ta < tb ) { if ( ta > a0 ) a0 = ta; if ( tb < a1 ) a1 = tb; } else { if ( tb > a0 ) a0 = tb; if ( ta < a1 ) a1 = ta; } }
+      if ( a0 < a1 && a1 > t0 && a0 < t1 ) { iv[k++] = a0; iv[k++] = a1; }
+    }
+    let t = t0;
+    for ( let moved = true; moved && t <= t1; ) { moved = false; for ( let i = 0; i < k; i += 2 ) if ( iv[i] < t && t < iv[i + 1] ) { t = iv[i + 1] + 0.5; moved = true; } }
+    if ( t <= t1 ) out.push({ dx: d0.dx + ux * t, dy: d0.dy + uy * t });
+  }
+  return out;
+}
+/** the moves (open rectangles) that put box `k` on one of `obs`, or under one of `soft` alone by more than `share` of it (hardFree) */
+export function forbOf(k, A, obs, soft = [], share = SOFT_OK) {
+  const F = [];
+  const push = (r) => { if ( r.x1 > r.x0 && r.y1 > r.y0 && r.x1 > A.x0 && r.x0 < A.x1 + 1e-9 && r.y1 > A.y0 && r.y0 < A.y1 + 1e-9 ) F.push(r); };
+  for ( const o of obs ) push({ x0: o.x0 - k.x1, x1: o.x1 - k.x0, y0: o.y0 - k.y1, y1: o.y1 - k.y0 });
+  // (`soft`: rectangles the box may lie under by at most `share` of its area: the moves where ONE of them alone covers more - its
+  // overlap at least tx across and ty down with tx * ty > share - are forbidden too: a necessary condition only)
+  const kw = k.x1 - k.x0, kh = k.y1 - k.y0;
+  for ( const o of soft ) {
+    const ow = o.x1 - o.x0, oh = o.y1 - o.y0;
+    for ( const [fx, fy] of [[0.25, 0.25], [1, share * 1.02], [share * 1.02, 1]] ) {
+      const tx = fx * kw, ty = fy * kh;
+      if ( tx * ty <= share * kw * kh || Math.min(ow, kw) < tx - 1e-9 || Math.min(oh, kh) < ty - 1e-9 ) continue;
+      push({ x0: o.x0 - k.x1 + tx, x1: o.x1 - k.x0 - tx, y0: o.y0 - k.y1 + ty, y1: o.y1 - k.y0 - ty });
+    }
+  }
+  return F;
+}
+/** is any move of `A` outside every forbidden open rectangle of `F`? (x-slab sweep, exact) */
+export function freeIn(F, A) {
+  if ( A.x0 > A.x1 + 1e-9 || A.y0 > A.y1 + 1e-9 ) return false;
+  if ( !F.length ) return true;
+  // (the x to test: the allowed edges, every forbidden edge inside, and the middles between them)
+  const ed = [A.x0, A.x1];
+  for ( const r of F ) { if ( r.x0 > A.x0 && r.x0 < A.x1 ) ed.push(r.x0); if ( r.x1 > A.x0 && r.x1 < A.x1 ) ed.push(r.x1); }
+  ed.sort((a, b) => a - b);
+  const xs = [];
+  for ( let i = 0; i < ed.length; i++ ) { xs.push(ed[i]); if ( i + 1 < ed.length && ed[i + 1] > ed[i] ) xs.push((ed[i] + ed[i + 1]) / 2); }
+  for ( const x of xs ) {
+    const iv = [];
+    for ( const r of F ) if ( r.x0 < x && x < r.x1 ) iv.push(r);
+    if ( !iv.length ) return true;
+    iv.sort((a, b) => a.y0 - b.y0);
+    // (y covered from A.y0 to A.y1 by open intervals that overlap one another: else a free y)
+    let cur = A.y0;
+    for ( const r of iv ) {
+      if ( r.y0 >= cur ) break;
+      if ( r.y1 > cur ) cur = r.y1;
+      if ( cur > A.y1 ) break;
+    }
+    if ( !(cur > A.y1) ) return true;
+  }
+  return false;
+}
+/** the directions the seat layout seeds its search with the nearest free move along (MAPRIDE cost) */
+export const SEAT_RAYS = 16;
+/** panels closer than this (screen px) are one strip when they fill most of their union (MAPRIDE cost) */
+export const PANEL_GAP = 12;
+/** rectangles closer than `gap` merged where their union is at most 1.3x their areas (pure, deterministic: same input, same output) */
+export function mergeRects(list, gap) {
+  const r = list.map((o) => ({ x0: o.x0, y0: o.y0, x1: o.x1, y1: o.y1 }));
+  const ar = (o) => Math.max(0, o.x1 - o.x0) * Math.max(0, o.y1 - o.y0);
+  for ( let again = true; again; ) {
+    again = false;
+    for ( let i = 0; i < r.length; i++ ) for ( let j = i + 1; j < r.length; j++ ) {
+      const a = r[i], b = r[j];
+      if ( a.x0 - gap > b.x1 || b.x0 - gap > a.x1 || a.y0 - gap > b.y1 || b.y0 - gap > a.y1 ) continue;
+      const un = { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+      if ( ar(un) > (ar(a) + ar(b)) * 1.3 && !(a.x0 <= b.x0 && a.y0 <= b.y0 && a.x1 >= b.x1 && a.y1 >= b.y1) && !(b.x0 <= a.x0 && b.y0 <= a.y0 && b.x1 >= a.x1 && b.y1 >= a.y1) ) continue;
+      r[i] = un; r.splice(j, 1); j = i; again = true;
+    }
+  }
+  return r;
+}
 /** the most candidate spots a word tries at one size (best first: the nearest clean one is found long before; the cap bounds a crowded view) */
 const MAX_EVALS = 160;
 // (the search's queue: a binary heap on `base`, nearest first)
