@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import { createVocab, KINDS, KIND_IDS, BANK, expand, stretchText, formatNumber, formatRange, clean, renderable, langOf, MAX_LEN, MAX_RUN,
   naming, NAMING, DICT, ICONIC, VOICE, ALLOW, SHARED, shareKey, refusal, sayable, DIACRITICS, PREFIXES, bangsFor, units, sustainOf, DEFAULT_HOLD, CLASSES, accentOf, ENVS, MOOD_ENV, FLOW, FLOW_STYLES, stretchPlan, MATERIALS, TEXTURES, MOOD_KIND,
-  GROUPS, MATS, materialOf, MAT_CHAR, piecesOf, intensityOf, FIRE_STAGES, VARIANTS, VARY, VARIANT_META, TAILS, CHAINS, ROLES, PLACES, FIRE_BLASTS } from "./words.mjs";
+  GROUPS, MATS, materialOf, MAT_CHAR, piecesOf, intensityOf, FIRE_STAGES, VARIANTS, VARY, VARIANT_META, TAILS, CHAINS, ROLES, PLACES, FIRE_BLASTS, crossRefusal, CROSS } from "./words.mjs";
 import { REVIEWED } from "./words-reviewed.mjs";
 import { FONTS, FALLBACK, MOOD_IDS, makePlan } from "./design.mjs";
 
@@ -469,6 +469,7 @@ export function checkWords(ok, bank) {
   }
   checkKinds1(ok, bank, missing, eng);
   checkWords3(ok);
+  checkEngwords(ok);
 }
 
 /* 21. WORDS3 (2026-11-14): BOOM / BUM only for a blast WITH fire (the owner; thunder: «zmienić»). Every kind outside FIRE_BLASTS, in
@@ -657,4 +658,64 @@ function checkKinds1(ok, bank, missing, eng) {
   /* the engine carries it: L.chain, the word options are not play options */
   ok(/function chain\(spec, opts = \{\}\)/.test(eng) && /flow: vocab\.flow, chain,/.test(eng) && /VOCAB_KEYS = \[[^\]]*"material", "pieces", "intensity", "stage"/.test(eng), "kinds1: L.chain is on the engine and material / pieces / intensity / stage stay vocabulary options");
   ok(Array.isArray(V.hitMaterials) && V.chains.includes("explosion") && V.variants("impact", "pl").rows.metal.l.length >= 2 && V.variants("crack", "en").rows.glass.from === "shatter" && V.variants("hiss") === null, "kinds1: L.vocab.variants / hitMaterials / chains for pickers and sheets");
+}
+
+/* 22. ENGWORDS (2026-11-15): BOTH deny lists over BOTH languages. A table reads both languages: the English deny list never ran over the
+       Polish banks (KA-DUMP! letters the English DUMP on a hero going down) nor the Polish one over the English banks (PTAK = a bird, GROM
+       = a thunderclap). Every word the vocabulary can make, in both languages (banks, variant rows, every tier, stretch, "!", prefix,
+       material, pieces, fire row, flows, series, stream syllables, chains), is read by the other language's refusal (crossRefusal: the
+       literal spelling and the Polish SZ read as SH); what a reviewer read and kept is on CROSS with its reason, and no CROSS entry is
+       stale. The hero going down (thud) is the owner's landing word in both languages (THOOM / DUUM) and builds with loudness. */
+function checkEngwords(ok) {
+  const V = createVocab(), LANGS = ["pl", "en"], key = (w) => clean(w).replace(/[^\p{L}]/gu, "").replace(/(\p{L})\1+/gu, "$1");
+  /* the gap is real (own refusal passes) and closed (cross refusal names the reader's word) */
+  const was = [["pl", "thud", "KA-DUMP!!", "DUMP"], ["pl", "bounce", "BOINNG", "BOING"], ["pl", "chime", "TINNG", "TING"], ["pl", "sigh", "HUUH…", "HUH"], ["pl", "cheer", "UUH", "UH"],
+    ["pl", "splash", "SPLASZ!!", "SPLASH"], ["pl", "punch", "TWAK!", "TWAK"], ["en", "rifle", "PTAK", "PTAK"], ["en", "rumble", "GRROMM", "GROM"], ["en", "gunfire", "BUDDA-BUDDA", "BUDA"], ["en", "impact", "SHTUK", "TUK"]];
+  ok(was.every(([l, k, w]) => !refusal(w, l, { kind: k })) && was.every(([l, k, w, part]) => crossRefusal(w, l, { kind: k })?.part.replace(/-/g, "").includes(part)),
+    `engwords: the old words pass their own language and fail the other one (${was.map(([l, k, w]) => `${l} ${w}: ${crossRefusal(w, l, { kind: k })?.part ?? "-"}`).join(", ")})`);
+  ok(["KA-KROOSH!!", "KLANNG", "KA-BOOM!", "KRROOMM", "THOOM"].every((w) => !crossRefusal(w, "en", { kind: "crash" })) && ["KA-BUUM!", "KRUUM", "BDUUM", "DUUM", "SPLOOSZ"].every((w) => !crossRefusal(w, "pl", { kind: "boom" })),
+    "engwords: the owner's picks pass the other language (KROOSH, KLANG, BOOM, KROOM, THOOM / BUM, KRUUM, BDUUM, DUUM, SPLOOSZ)");
+  ok(LANGS.every((l) => Object.entries(CROSS[l]).every(([k, why]) => k === key(k) && typeof why === "string" && why.length >= 15)) && LANGS.every((l) => Object.keys(CROSS[l]).length <= 40),
+    "engwords: every kept cross reading has a reason and the lists stay short");
+  /* every word the vocabulary makes */
+  const bad = new Set(), used = { pl: new Set(), en: new Set() }; let n = 0;
+  const see = (lang, kind, w) => {
+    if ( !w ) return; n++;
+    const r = crossRefusal(w, lang, { kind }); if ( r ) bad.add(`${lang}/${kind} ${w} (${r.why} ${r.part}~${r.like})`);
+    if ( n % 3 === 0 ) return;
+    for ( const k of Object.keys(CROSS[lang]) ) if ( !used[lang].has(k) ) { const v = CROSS[lang][k]; delete CROSS[lang][k]; if ( crossRefusal(w, lang, { kind }) ) used[lang].add(k); CROSS[lang][k] = v; }
+  };
+  for ( const lang of LANGS ) {
+    for ( const id of KIND_IDS ) for ( const w of Object.values(BANK[lang][id]).flat() ) see(lang, id, w);
+    for ( const [table, rows] of Object.entries(VARIANTS[lang]) ) for ( const b of Object.values(rows) ) if ( typeof b !== "string" ) for ( const w of Object.values(b).flat() ) see(lang, VARY[table][0], w);
+    for ( const id of KIND_IDS ) {
+      const k = KINDS[id], ex = [{}];
+      if ( k.vary && k.vary !== "fire" ) for ( const material of MATS ) ex.push({ material });
+      if ( k.vary === "fire" ) { for ( let i = 1; i <= 5; i++ ) ex.push({ intensity: i }); for ( const stage of FIRE_STAGES ) ex.push({ stage }); }
+      if ( k.sized ) for ( const pieces of ["small", "medium", "large"] ) ex.push({ pieces });
+      for ( const x of ex ) for ( const loud of [0, 0.3, 0.6, 0.85, 1, 2] ) for ( const long of [0, 0.5, 1] ) for ( const prefix of [undefined, true] ) for ( let seed = 1; seed <= 4; seed++ )
+        see(lang, id, V.word(id, { lang, loud, long, prefix, seed, ...x }).text);
+      for ( const seed of [1, 2] ) {
+        let f = null; try { f = V.flow(id, { lang, seed, loud: 0.8 }); } catch {}
+        if ( f ) for ( const s of [f.onset, ...Array.from({ length: 12 }, (_, i) => f.at(i)), f.tail] ) see(lang, id, s?.text);
+        for ( const s of V.series(id, 5, { lang, seed, loud: 0.5 }) ) see(lang, id, s.text);
+        for ( const y of V.syllables(id, { lang, seed }) ?? [] ) see(lang, id, y);
+      }
+    }
+    for ( const name of Object.keys(CHAINS) ) for ( const seed of [1, 2] ) for ( const s of V.chain(name, { lang, seed, magnitude: 1.5 }) ) see(lang, s.kind, s.word?.text);
+  }
+  ok(n > 15000, `engwords: only ${n} words read`);
+  ok(bad.size === 0, `engwords: words that read as a word of the other language: ${bad.size}: ${[...bad].slice(0, 8).join("; ")}`);
+  const stale = LANGS.flatMap((l) => Object.keys(CROSS[l]).filter((k) => !used[l].has(k)).map((k) => `${l} ${k}`));
+  ok(stale.length === 0, `engwords: CROSS entries no word needs any more (remove them): ${stale.join(", ")}`);
+  /* the hero going down: the owner's landing word in both languages, no DUMP, building with loudness */
+  for ( const lang of LANGS ) {
+    const all = []; for ( const loud of [0, 0.3, 0.6, 0.85, 1, 2] ) for ( const long of [0, 0.5, 1] ) for ( const prefix of [undefined, true] ) for ( let seed = 1; seed <= 8; seed++ ) all.push(V.word("thud", { lang, loud, long, prefix, seed }).text);
+    ok(!all.some((w) => /DUMP|TUMP/.test(key(w))), `engwords: ${lang} thud never letters DUMP / THUMP (${all.filter((w) => /DUMP|TUMP/.test(key(w))).slice(0, 3).join(" ")})`);
+    const land = lang === "en" ? "THOM" : "DUM";
+    ok(BANK[lang].thud.l.some((w) => key(w).includes(land)) && BANK[lang].thud.m.some((w) => key(w) === land), `engwords: ${lang} thud carries the owner's landing word ${land} (m alone, l with its lead-in)`);
+    let flat = 0;
+    for ( let seed = 1; seed <= 8; seed++ ) { const [s, m, l] = [0.15, 0.5, 0.95].map((loud) => V.word("thud", { lang, loud, seed })); const len = (w) => clean(w.text).replace(/[^\p{L}]/gu, "").length; if ( !(len(s) <= len(m) && len(m) <= len(l) && s.bangs < m.bangs && m.bangs < l.bangs) ) flat++; }
+    ok(flat === 0, `engwords: ${lang} thud builds on every seed (a louder tier never has fewer letters and always more "!"): ${flat} flat`);
+  }
 }

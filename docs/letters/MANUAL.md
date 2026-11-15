@@ -51,6 +51,8 @@ Keep the section titles stable: other documents and the agent skill link to them
 | KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
 | HOLDS (a held invincible word lives as long as it stands, in the manner of its sound: echo, settle, hum, sag, slosh, rumble, breath; inside its placement; every seat alike; still under reduced motion) | 1.9.10 | API-CONTRACT 1.9.10 (v17) | `tactics-zones-holds` | pending merge (section 11a) |
 | ENGREG (plumbing: one copy rule on every seat with `L.build` / `L.seats()`; the table's own clock `L.clock` under the stepped grid and `L.net`; `ceil` reaches the size model; `L.measure`; a settle memo and faster mark rows) | 1.9.11 | API-CONTRACT 1.9.11 (v18) | `tactics-zones-engreg` | pending merge (sections 2, 5, 6, 8, 16, 17, 18, 20) |
+| ENGWORDS (both deny lists over both languages: `crossRefusal`, `CROSS`; the words that read as a word of the other language replaced, pl KA-DUMP -> KA-DUUM ...) | 1.9.13 | API-CONTRACT 1.9.13 | `tactics-zones-engwords` | pending merge (sections 9, 14, 20) |
+| RIMUNDER (an invincible word on the map gets an ink rim UNDER the whole lettering, letters and duplicate block; `look.rim` ink / paper / none; default ink in world space, none on the screen) | 1.9.12 | API-CONTRACT 1.9.12 | `tactics-zones-rimunder` | pending merge (sections 5, 13, 20) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -260,6 +262,12 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
   0.43 on a 350 px grid), and a lasting sustain (burning fire) still starts when this seat got its event (request E2).
 Unlocated words (thunder) are laid out once in the reference window, then centred into this window and shifted off its panels.
 A seat-rule log (`api.sfx.log()` in the map) lets two seats be compared call by call.
+
+**On the map, let the rim do the contrast (RIMUNDER 1.9.12).** An `invincible` world word gets an ink rim under its lettering by
+default (section 13); do not add your own light outline (`look.outline: "sticker"` covers the duplicate block) or a backdrop for
+contrast. Pass nothing to get it; `look: { rim: "none" }` only where a picture must stay exactly as before; `look: { rim: "paper" }`
+for a word that must also stand off a dark ground; a screen word that sits over the map can ask `look: { rim: "ink" }`. The rim reaches
+up to 0.07 cap (at least 2.5 px) past the letters: the hold box from `L.measure` does not include it, so leave that much air.
 
 **Stay in view and off the interface.**
 - On 1.6.0 the engine does NOT keep words inside the view [C]: a word placed at a token near the edge is cut. Clamp your own `at`
@@ -570,6 +578,22 @@ L.stream({ kind: "gunfire", lang: "auto", at: () => muzzle(), to: target, every:
 - Adding (shared by every module using the engine): `L.vocab.add(lang, kind, words, { replace })` refuses dictionary words, words
   the fonts cannot letter and words over 22 letters (returned in `refused`, one warning) [V]; `L.vocab.define(kind, def)` adds or
   changes a kind [V]; namespace new ids (e.g. `pvfx-webshot`); `L.vocab.remove`, `L.vocab.reset`.
+- Both languages read every word (1.9.13 ENGWORDS): a table reads Polish and English, so a built-in word must not be a word or a
+  near-word of the OTHER language either. `crossRefusal(word, lang, { kind })` (exported by `words.mjs`, next to `refusal` and
+  `sayable`) reads a word with the other language's deny list: the literal spelling and the Polish SZ read as the English SH (and
+  back). It passes the word's own ICONIC / ALLOW syllables (the owner's picks: KA-KROOSH, KLANG, BOOM, KROOM), the reader's ICONIC (and
+  VOICE in voice kinds) and `CROSS`, the readings a reviewer read and kept, each with its reason (the owner rules on that list).
+  check-words section 22 reads every word the vocabulary makes (banks, variant rows, every tier, stretch, prefix, material, fire row,
+  flows, series, stream syllables, chains) [V node]. Callers that letter their own sound words should check them with both `refusal`
+  and `crossRefusal`. `L.vocab.add` still runs only the own-language refusal (question ENGWORDS-3).
+- Words replaced by ENGWORDS (the only pictures that change; every other kind, tier, seed and material letters the same text, proved
+  by a full vocabulary dump and plan + draw fingerprints): pl `thud` (the hero going down) m TUMP, GDUMP -> DUUM, TUUMF and l GDUMMP,
+  KA-DUMP -> GDRUUMF, KA-DUUM (the owner's landing word DUUM, like the English THOOM / KA-THOOM); pl `punch` m TWAK -> TWUP, l TWAKK ->
+  TWAPP; pl `slash` l SWISZK -> SZNIKKT; pl `bite` s SZNAP -> CZNAP; pl `bounce` m BOINNG -> BOJOINNG; pl `splash` l SPLASZ -> GLOOSZ;
+  pl `chime` m TINNG -> DZWINNG; pl `sigh` s HAH… -> FHUU…, m HUUH… -> HUUHF…; pl `cheer` s UUH -> WUUA; pl `meow` s MIII -> MNIII;
+  en `rifle` s PTAK -> KPAK; en `impact` stone s PTAK -> KPAK, m PTAKT -> KPAKT, flesh m SHTUK -> SHWUK; en `gunfire` BUDDA -> DAKKA (s, m,
+  stream); en `rumble` m GRROMM -> HRROMM, l GRRRROMM -> HRRRROMM; en `storm` l KRA-KA-GRROOMM -> KRA-KA-HRROOMM (and the flows and
+  mixes built from them: tornado). The owner may veto any of them (question ENGWORDS-1).
 
 ### 9a. Material, fire ladder, tails and chains (1.7.1 KINDS1)
 Status: new, on branch `tactics-zones-kinds1` [V node: check-words section 20].
@@ -839,6 +863,28 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     Anton's frozen fingerprint changes on purpose (the owner wanted the defect gone in both faces): 624 of 1026 `invincible` +
     `face: "anton"` fingerprints differ, every one a word with a mark (none of the words without one); `comic` / `expressive`: 0 of
     2052 differ. 1.9.7 fails `check-marks.mjs` (22 of 26 checks).
+  - **Rim under the lettering on the map** (RIMUNDER 1.9.12, `look.rim`, [V] `check-rim.mjs`, renders and lane 5 live): ADVX 18 found a
+    word lettered on the MAP lost among the map's own drawings (low contrast on mid, bright and busy ground, under rain and fire
+    glow). The old opt-in light outline (`look.outline: "sticker"`) is stroked OVER the coloured duplicate block, which vanishes
+    (MAPSEAT's renders), so it is not the fix. A letterer's answer is the holding line: a rim round the WHOLE lettering, the letters
+    and their duplicate block together, painted UNDER them. It follows the outer outlines only (round joins; an O's hole and an A's
+    eye keep showing the ground), sweeps along the block's offset in one stroke, and starts where the keyline ends.
+    `look.rim: "ink"` (0.07 cap, at least 2.5 px, at most 16 px): an ink rim. It adapts to the ground by itself: on a dark floor ink
+    on dark is next to invisible (today's look), on bright, mid, busy or fire-lit ground it is the black edge that separates the word.
+    `look.rim: "paper"` (a paper band 0.05 cap, 2-12 px, with an ink line 0.022 cap, 1.25-4 px, round it; the knock-out of the impact
+    frames' kept word): opt-in for a word that must also stand off a dark ground; with the style's white or pale faces the letters
+    merge into the paper (renders), so it suits dark-faced words better. `look.rim: "none"` (or `false`): today's picture.
+    **Default** (`"auto"` or not given): `"ink"` for a word in world space (`space: "world"`, every world layer, the default
+    `overlay` included) without a backdrop; `"none"` on the screen layer. Not on a MOVE echo; the legacy styles ignore the option.
+    Which calls change: only `invincible` words with `space: "world"` (no `look.rim`, no backdrop): every picture of the word
+    (entrance, hold, exit, both faces, both motion types, reduced too) gets the rim, the picture grows by the rim's reach and
+    `plan.hand.halo` = `"ink"` is the only plan field added (letters, sizes, layout, timing unchanged). Proof (5610 plan + draw-log
+    fingerprints: comic / expressive / invincible league smooth / anton stepped / league stepped x 11 texts x every mood x
+    variants incl. `space: "world"`, `"screen"`, none, reduced, plus every vocabulary kind in two languages): 1314 differ, all of
+    them `invincible` + `space: "world"`, 0 of 4296 others; `check-rim.mjs` also shows a world word with `rim: "none"` drawing exactly
+    the screen word's plan and draw log. Cost: one stroke per band per picture; lane 5, 48 world words standing at once, recorder
+    clock off, 3 runs each: no frame over 25 ms with or without the rim (p99 16.8 ms both); a hold picture paints 0.05-0.2 ms slower
+    (0.29-0.45 -> 0.34-0.64 ms) and has 8-13 % more pixels.
   - **Smear**: outline echoes only, no pale filled copies (P15).
   - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
@@ -917,6 +963,7 @@ Status: stable list, append-only. Every new ruling is added here with its date i
 | 2026-11-13 | Impact frames are the exception to the restraint: they may go all out and must be spectacular; a system other effects use (`L.impact`) | one `L.impact.play` per event, at its instant | keep it one call for every caller; section 21a |
 | 2026-11-14 | Impact frames must BUILD with the event: a scratch, a solid hit, a heavy hit, a knock-down and a critical each look different and escalate; they never bury the action longer than the instant; photosensitivity safety is not negotiable and no caller option may switch the guard off | say what the blow is (`I.pick` or kind + magnitude); never add your own flash | six strengths per kind, the ladder pinned in `check-impact.mjs`; every scene change counted by the guard (FXI-ENGINE 1.8.2) |
 | 2026-11-13 | BOOM / BUM only for a blast WITH fire; a blast without fire is KROOM / KRUUM; a hero landing THOOM / DUUM; a cave-in BTHOOM / BDUUM | use `concussion` for a fireless blast, `boom` only with fire | keep `FIRE_BLASTS`; check-words section 21 |
+| 2026-11-15 | (ENGWORDS, derived from the rulings above, not a new ruling) "No dictionary words, no near-words" holds in BOTH languages: a Polish word must not be an English word (KA-DUMP), an English word not a Polish one (PTAK); the hero going down letters the landing word (THOOM / DUUM) | check your own sound words with `refusal` AND `crossRefusal` | `crossRefusal` over every produced word (check-words section 22); a kept cross reading goes on `CROSS` with its reason for the owner |
 | 2026-11-14 | Thunder must not contain BOOM («zmienić») | letter thunder with the `thunder` kind, never a literal word | thunder KRAKOOM / KRA-KA-GRRAWOOM (pl KRAKUUM / KRA-KA-GRRAWUUM), done in 1.9.5 WORDS3 |
 | 2026-11-15 | EVERY option is chosen by the GM for the table («wszystko mg wybiera dla stołu. wszystko»): world scope, players read-only, live | a new option is born world-scoped; no client setting of your own (OS reduced motion / photosensitivity still honoured per seat) | the same for engine settings |
 | 2026-11-15 | The map's destruction lettering gets a size slider: 0 = none, 1, 2 = today's size (default), 3 («aktualna wielkość to 2. dodaj też 1 i 3», «0 to brak»); fire and weather lettering the same, as separate sliders («też z pogody i ognia. mogą być osobne») | step the size through the engine's own options (section 6, "A caller's size step"); at the default pass the options untouched | nothing (callers step the drawn size: `L.sizeOf` + `fit: "world"`, section 6); done in moinen-maps SFXSIZE (`scripts/sfx/sfx-size.mjs`, settings `sfxSizeDestruction` / `sfxSizeFire` / `sfxSizeWeather`) |
@@ -1133,11 +1180,13 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `motionMode`, `motionModes`; play options `kind`, `look.motion`; `w.play.vocabMotion` | 1.9.0 MOTION2 | pending merge, section 11a [V node] |
 | `invFace`, `invFaces`; play option `look.face`; setting `face` | 1.9.7 FONTSEL | pending merge, sections 13, 15 [V node] |
+| play option `look.rim` (`"ink"` / `"paper"` / `"none"` / `"auto"`); `plan.hand.halo` | 1.9.12 RIMUNDER | pending merge, sections 5, 13 [V node, renders, live lane 5] |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
 | `gridClock(fn \| null)`; setting `movement` (world); tools `applyPrefs` | 1.9.2 MODE | pending merge; sections 11a and 15 [V node] |
 | `build` (also `MoinenLetters.build`), `seats()`, `clock` (`now toPage toServer offset error ready state`), `measure(text, opts)`; play option `ceil` | 1.9.11 ENGREG | pending merge; sections 2, 5, 6, 8 [V node] |
+| `crossRefusal`, `CROSS` (exports of `words.mjs`, not on `L`) | 1.9.13 ENGWORDS | pending merge; section 9 [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -1195,6 +1244,10 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (MAPSFXSEAT, moinen-maps caller `tactics-zones-mapsfxseat`, no engine change): one picture for the whole table
   (5: plan on shared data, measured reach, `startAt` join, gather by due time, the seat rule off/read/fit/shift), the table's size
   and the measured reach (6); requests E2-E4 (18).
+- 2026-11-15 (ENGWORDS, 1.9.13, `tactics-zones-engwords`): both deny lists over both languages and the replaced words (9), the
+  derived both-languages row (14), API index (20), stage table.
+- 2026-11-15: RIMUNDER (1.9.12, `tactics-zones-rimunder`): section 13 "Rim under the lettering on the map" (`look.rim`, defaults,
+  which calls change, fingerprint proof, cost), section 5 caller note, stage table, API index.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

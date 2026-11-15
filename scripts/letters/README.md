@@ -355,6 +355,12 @@ an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM
   front: PLOSK ~ PLUSK, TRZAK ~ TRZASK, KLYK ~ KLIK, SZWUM ~ SZUM, BWEEP ~ BEEP, THUM ~ THUMP, DLIP ~ DRIP), or a denied 3-letter
   word with K or T stuck on. A changed or added FIRST letter is not near (WRAM is not TRAM, CZUM is not SZUM). The final text
   (prefix + stretched word) goes through the same refusal, so a prefix cannot make a word (KA-POW = KAPOW is dropped).
+- **Both languages read every word** (ENGWORDS 1.9.13, `crossRefusal(word, lang, { kind })`): a table reads both languages, so a
+  Polish word must not be an English word or near-word (KA-DUMP, BOINNG, TINNG, HUUH, SPLASZ = SPLASH) and an English word not a Polish
+  one (PTAK = a bird, GRROMM = GROM, a thunderclap, BUDDA). The other language's refusal reads the literal spelling and the Polish SZ as
+  the English SH (and back). Passes: the word's own ICONIC / ALLOW syllables (the owner's picks), the reader's ICONIC (and VOICE in voice
+  kinds), and `CROSS`: readings a reviewer read and kept, each with its reason (KROOM is the owner's pick; TLING, SZING, PSZT read as
+  written). check-words section 22 reads every word the vocabulary makes in both languages and fails on an unused `CROSS` entry.
 - **The exception lists**, each entry with its reason, for the owner to rule on: `ICONIC` (at most 16; pl BUM, BAM, PAF, SZSZ, HA,
   BANG; en POW, THUD, BAM, BOOM, BANG, ZAP, WHAM, SHH, PLOP, PLUNK, SPLOOSH, BLAM, BEEP, VROOM, HA, GRR) pass everywhere, also with a
   cut-off added at their end (SZSZT), but a letter changed or put inside one is near (BWEEP, BRANG); `VOICE` (pl HE, HI, CHE, OCH,
@@ -367,7 +373,8 @@ an attack, a lasting part, a cut-off (a blade SZSZT, FSZSZT; a blow TWOOM, WRAMM
 - **Each kind its own words**: a word (repeated letters collapsed) used by two kinds must be on `SHARED` with both kinds and a reason
   (SKRAKT is a crack and an impact, a storm's word is its thunder, a mech walks with DUM-DUM stomps); any other sharing fails the checks,
   so a punch word on a plane cannot come back.
-- **The water family** is fixed by the owner: pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ SPLASZ, bubbles
+- **The water family** (the owner: pl PLUP / PLUMP / SPLOOSZ / GLUB, en PLOP / PLOOP / PLUNK / SPLOOSH / GLUB; the rest the review's):
+  pl small PLUP BLUP PLOP GLUP, heavy PLUMP BLUMP SPLUMP, big SPLOOSZ GLOOSZ (SPLASZ is SPLASH in Polish letters: out, ENGWORDS), bubbles
   GLUB BLUB BULP; en PLOP PLOOP PLUNK SPLOOSH, bubbles GLUB BLUB. The laser pistol is ZAT, TZAT, ZARK, TZAK, FZAT, SKZARK, KTZAK,
   ZZARKT, ZAT-ZAT-ZAT (never PIU PIU). `gunshot` is merged into `pistol` (an alias).
 - **Playing with letters** where it fits the sound: muffled B-/G- onsets (BTHOOM, GDOOMF, BWUMF), hard K-/SK- (KTHOOM, SKROOMM),
@@ -678,6 +685,15 @@ a union-keyline pair the reader cannot read parts by at most 0.04 cap (`UNION_PA
 **Numbers.** `-1`, `+4`, `x2`, `12%` get a calm, even, untreated hand so digits and signs always read.
 **Outline.** The light outer outline goes around the whole word only, never between overlapping letters; a duplicated block
 (extrusion) is used more often than the outline; the outline stays a style (`look.outline: "sticker"`).
+**Rim under the lettering (RIMUNDER, invincible style).** `look.rim: "ink" | "paper" | "none"` (default `"auto"`): the letterer's
+holding line round the WHOLE lettering, the letters and their coloured duplicate block together, painted under it, so the approved look
+stays whole on top (the old `look.outline: "sticker"` strokes its light outline over the block, which vanishes). It follows the
+outer outlines only (round joins, counters stay open) and sweeps along the block's offset in one stroke. `"auto"`: `"ink"` for a word
+in world space (`space: "world"`, every world layer) without a backdrop, `"none"` on the screen. The ink rim (0.07 cap, at least 2.5 px,
+at most 16 px, past the keyline) adapts to the ground by itself: on a dark floor ink on dark is next to invisible, on bright, mid, busy
+or fire-lit ground it is the black edge that separates the word. `"paper"`: a paper band (0.05 cap, 2-12 px) with an ink line
+(0.022 cap, 1.25-4 px) round it, the knock-out of the impact frames' kept word, for a word that must also stand off a dark ground.
+Not on a MOVE echo; legacy styles ignore it. Tables `INV_RIM` / `invRim` (design.mjs), `rimPx` / `paintRim` (paint.mjs); check-rim.mjs.
 **Legibility.** legibility.mjs reads every treated letter against the font's plain letters (Polish marks and digits included:
 Ł keeps its bar, Ę its ogonek, a covered 1 is caught, $ is not S, lower-case look-alikes are caught); the settle step turns,
 pushes or opens letters until each reads. check-look.mjs L1-L17 hold this (ADVT and dice-review cases among them); check-look2.mjs
