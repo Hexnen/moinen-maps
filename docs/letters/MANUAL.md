@@ -584,7 +584,7 @@ Status: pending merge (`tactics-zones-motion2`). [V] = node checks (`check-motio
   | `breath` | the rest | a slow swell and bob (1.2 s) |
   Timing: the life starts at half the body (or when a short hold pinned on a long sound is spent: recoil 220, rattle 340, wobble 520
   ms), shows only partly inside the body (`LIFE_EARLY`, so a hit's envelope still falls) and fully once the body is over; a `still`
-  hold gets it at once. Limits [V]: inside `LIFE_REACH` (0.04 cap heights, 3.5 % scale, 0.03 rad) of the rest pose, and
+  hold gets it at once. Limits [V]: inside `LIFE_REACH` (0.05 cap heights, 4.5 % scale, 0.03 rad) of the rest pose, and
   `trackReach` (keepInView) covers it, so a caller's placement holds; no corner moves over 0.02 cap heights per 60 fps frame; no
   1.5-3 s hold of any kind x pinned hold stands still over 480 ms (1 px at a 150 px cap). Same on every seat: a function of the plan
   and the word's age only (two fake seats at 60 / 144 fps, other clock origins: same poses). Reduced motion: no life (still);

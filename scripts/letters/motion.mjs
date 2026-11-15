@@ -372,13 +372,23 @@ export const LIFE = {
   series: "echo", animal: "breath", device: "breath"
 };
 /* the farthest the life takes the word from its rest pose: displacement (cap heights) and scale */
-export const LIFE_REACH = { xy: 0.04, s: 1.035 };
+export const LIFE_REACH = { xy: 0.05, s: 1.045 };
 /* how much of the life already shows inside the sound's own body (the rest comes once the body is over): a heavy body is debris still
    settling, a ring's own long decay must stay the loudest thing in it */
 export const LIFE_EARLY = { echo: 0.25, settle: 0.45, hum: 0.2, sag: 0.25, slosh: 0.3, breath: 0.3, rumble: 0.3 };
 /* how long the hits' own envelopes last (2 time constants): a short hold a caller pins on a long sound (a rattle on a rumble) is over long
    before the sound's body, and the life must not wait for the body */
 const TRANSIENT_MS = { recoil: 220, rattle: 340, wobble: 520, roll: 500, sputter: 0 };
+/* the onsets of a life's beats: gaps of P x 0.8..1.2 from the plan's phase (a sequence, so a gap never jumps mid-beat); dt = ms since the
+   last onset, k = its index. Long holds (sustains) wrap after 64 beats. */
+function lifeBeat(lt, P, ph) {
+  const gap = (k) => P * (0.8 + 0.4 * (((Math.sin(k * 12.9898 + ph * 78.233) * 43758.5453) % 1 + 1) % 1));
+  let a = 0, k = 0, cyc = 0;
+  for ( let j = 0; j < 64; j++ ) cyc += gap(j);
+  const t = lt % cyc, base = Math.floor(lt / cyc) * 64;
+  while ( k < 63 && a + gap(k) <= t ) { a += gap(k); k++; }
+  return { dt: t - a, k: base + k };
+}
 const smooth01 = (u) => { const v = clamp(u, 0, 1); return v * v * (3 - 2 * v); };
 export function lifeOf(m) {
   if ( m.reduced || m.syllable || !LIFE_HOLDS.includes(m.hold) ) return null;
@@ -398,24 +408,24 @@ export function lifePose(m, t, H, o = { ...REST }) {
   switch ( m.life ) {
     case "echo": {
       /* sharp echoes of the hit (a quick swell, a quick fall), fainter as the hold goes on, over a slow push and give towards the reader */
-      const k = kickAt(lt, 660, [0], true, ph), e = hit(k.dt, 30, 55) * (1 - 0.4 * u);
-      o.s *= 1 + w * (0.011 * (0.5 - 0.5 * Math.cos(TAU * lt / 1600)) + 0.016 * e);
+      const k = lifeBeat(lt, 660, ph), e = hit(k.dt, 45, 60) * (1 - 0.4 * u);
+      o.s *= 1 + w * (0.015 * (0.5 - 0.5 * Math.cos(TAU * lt / 1600)) + 0.022 * e);
       o.r += w * 0.007 * d * Math.sin(TAU * lt / 2300 + ph);
       break;
     }
     case "settle": {
       /* dull aftershocks: each squashes the word onto its base and lets it back; a slow list between them */
-      const k = kickAt(lt, 620, [0], true, ph), e = hit(k.dt, 70, 90) * (1 - 0.4 * u);
-      o.y += w * 0.03 * e; o.sy *= 1 - w * 0.03 * e; o.sx *= 1 + w * 0.02 * e;
+      const k = lifeBeat(lt, 620, ph), e = hit(k.dt, 110, 100) * (1 - 0.4 * u);
+      o.y += w * 0.042 * e; o.sy *= 1 - w * 0.04 * e; o.sx *= 1 + w * 0.028 * e;
       o.r += w * 0.007 * d * Math.sin(TAU * lt / 1900 + ph);
       o.s *= 1 + w * 0.008 * Math.sin(TAU * lt / 1300 + 2 * ph);
       break;
     }
-    case "hum": { const b = Math.sin(TAU * lt / 700 + ph); o.sx *= 1 + w * 0.014 * b; o.sy *= 1 - w * 0.014 * b; o.y += w * 0.004 * Math.sin(TAU * lt / 1400); break; }
+    case "hum": { const b = Math.sin(TAU * lt / 700 + ph); o.sx *= 1 + w * 0.018 * b; o.sy *= 1 - w * 0.018 * b; o.y += w * 0.004 * Math.sin(TAU * lt / 1400); break; }
     case "sag": {
       /* the broken word leans as it gives, creaks back and forth round the lean, and a piece shifts now and then (a small jolt) */
-      const k = kickAt(lt, 720, [0], true, ph), e = hit(k.dt, 40, 50) * (k.k === 0 ? 0 : 1), lean = EASE.io(clamp(lt / 1400, 0, 1));
-      o.r += w * (0.014 * d * lean + 0.007 * e * (k.k % 2 ? 1 : -1) + 0.007 * d * Math.sin(TAU * lt / 1500 + ph));
+      const k = lifeBeat(lt, 720, ph), e = hit(k.dt, 40, 50) * (k.k === 0 ? 0 : 1), lean = EASE.io(clamp(lt / 1400, 0, 1));
+      o.r += w * d * (0.014 * lean + 0.006 * e + 0.007 * Math.sin(TAU * lt / 1300 + ph));   // a piece gives further, then settles back
       o.y += w * (0.02 * lean + 0.01 * e);
       o.x += w * 0.012 * e * (k.k % 2 ? -1 : 1);
       break;
@@ -423,12 +433,12 @@ export function lifePose(m, t, H, o = { ...REST }) {
     case "rumble": {
       /* a low tremor under the word, swelling and easing like a far rumble (slow beats of a ~4.5 Hz shake) */
       const g = 0.6 + 0.4 * Math.sin(TAU * lt / 900 + ph);
-      o.x += w * 0.012 * g * Math.sin(TAU * 4.5 * lt / 1000 + ph); o.y += w * 0.008 * g * Math.sin(TAU * 3.7 * lt / 1000 + 2 * ph);
+      o.x += w * 0.016 * g * Math.sin(TAU * 4.5 * lt / 1000 + ph); o.y += w * 0.008 * g * Math.sin(TAU * 3.7 * lt / 1000 + 2 * ph);
       o.s *= 1 + w * 0.01 * Math.sin(TAU * lt / 1100 + ph);
       break;
     }
-    case "slosh": { const b = Math.sin(TAU * lt / 640 + ph); o.sy *= 1 + w * 0.022 * b; o.sx *= 1 - w * 0.016 * b; o.y -= w * 0.01 * b; break; }
-    default: { const b = Math.sin(TAU * lt / 1200 + ph); o.s *= 1 + w * 0.018 * b; o.y -= w * 0.012 * b; break; }
+    case "slosh": { const b = Math.sin(TAU * lt / 640 + ph); o.sy *= 1 + w * 0.03 * b; o.sx *= 1 - w * 0.022 * b; o.y -= w * 0.014 * b; break; }
+    default: { const b = Math.sin(TAU * lt / 1200 + ph); o.s *= 1 + w * 0.025 * b; o.y -= w * 0.016 * b; break; }
   }
   return o;
 }

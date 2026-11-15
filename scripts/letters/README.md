@@ -195,8 +195,8 @@ dead still. Now the decaying holds (`recoil rattle ring wobble still roll arc sp
 (`motion.mjs` `LIFE`, `lifePose`): `echo` (dry hit: small sharp echoes over a slow push), `settle` (heavy, crash, crumble: dull
 aftershocks that squash the word onto its base), `hum` (metal, electric: width against height), `sag` (break: it leans, creaks, a
 piece shifts), `slosh` (water), `rumble` (boom: a low tremor), `breath` (the rest). It starts partly from half the body (or when a
-short hold a caller pins on a long sound is spent) and fully when the body ends; it stays inside `LIFE_REACH` (0.04 cap heights,
-3.5 % scale; `trackReach` covers it), is a function of the plan and age only (every seat alike), absent under reduced motion and for
+short hold a caller pins on a long sound is spent) and fully when the body ends; it stays inside `LIFE_REACH` (0.05 cap heights,
+4.5 % scale; `trackReach` covers it), is a function of the plan and age only (every seat alike), absent under reduced motion and for
 stream syllables, read on the shared grid in stepped mode. Checks: `check-holds.mjs`; manual 11a.
 
 ### What the sources say (digest, with sources)
