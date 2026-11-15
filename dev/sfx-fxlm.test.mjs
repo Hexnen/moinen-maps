@@ -176,7 +176,9 @@ group("F13", () => {
   const ws = [{ role: "pre", t: 0 }, { role: "main", t: 230 }, { role: "sec", t: 400 }, { role: "sec", t: 500 }];
   const one = C.capWords(ws, 1), two = C.capWords(ws, 2);
   ok(one.length === 1 && one[0].role === "main" && two.map((w) => w.role).join() === "pre,main", "F13 one place: the main word; two: the pre word and the main word, in time order");
-  ok(/mine = C\.capWords\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
+  // (GMALLMAPS: the seat's share moved, unchanged, into the pure sfx-prefs shareOf, fed C.capWords)
+  const PREFS = fs.readFileSync(new URL("../scripts/sfx/sfx-prefs.mjs", import.meta.url), "utf8");
+  ok(/PF\.shareOf\(placed, \{ big, caps, alive: alive\.size, capWords: C\.capWords \}\)/.test(sfx) && /return capWords\(/.test(PREFS) && !/\.slice\(0, room\)/.test(sfx + PREFS), "F13 the runtime caps through capWords");
 });
 
 /* F14: no per-client word memory */

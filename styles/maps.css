@@ -1159,3 +1159,49 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 @keyframes mm-prog-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mm-prog-wait { from { opacity: 0.15; } to { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .mm-prog-bar > span { transition: none; } .mm-prog-bar.is-wait > span { animation: none; } }
+
+/* GMALLMAPS: "Comic sound effects on the map", the table's lettering options (scripts/sfx/sfx-table-ui.mjs). The same family as the
+   lettering engine's own table window (its tokens, its aligned control column, the read-only value pills a player sees). */
+.mm-sfxt {
+  --mm-sfxt-accent: #e5322d; --mm-sfxt-accent-ink: #ffffff;
+  --mm-sfxt-edge: color-mix(in srgb, currentColor 16%, transparent);
+  --mm-sfxt-raise: color-mix(in srgb, currentColor 7%, transparent);
+  --mm-sfxt-muted: color-mix(in srgb, currentColor 66%, transparent);
+  --mm-sfxt-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mm-sfxt ::selection { background: color-mix(in srgb, var(--mm-sfxt-accent) 40%, transparent); }
+.mm-sfxt :where(button, input, select):focus-visible { outline: 2px solid var(--mm-sfxt-accent); outline-offset: 1px; }
+.mm-sfxt .window-content { padding: 0.75rem 0.9rem 0.6rem; }
+.mm-sfxt .mm-sfxt-body fieldset { display: block; gap: 0; margin: 0 0 0.7rem; padding: 0.1rem 0.85rem 0.15rem; border: 1px solid var(--mm-sfxt-edge); border-radius: 8px; }
+.mm-sfxt legend { padding: 0 0.35rem; font-weight: 700; font-size: var(--font-size-14, 0.9rem); }
+.mm-sfxt .mm-sfxt-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 19.5rem; column-gap: 1rem; row-gap: 0.15rem; align-items: center;
+  margin: 0; padding: 0.45rem 0; transition: opacity 0.15s var(--mm-sfxt-ease);
+}
+.mm-sfxt .mm-sfxt-row + .mm-sfxt-row { border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.mm-sfxt .mm-sfxt-row > label { flex: none; margin: 0; font-weight: 600; line-height: 1.3; }
+.mm-sfxt .mm-sfxt-row > .form-fields { display: flex; align-items: center; justify-content: flex-start; min-width: 0; flex: none; }
+.mm-sfxt .mm-sfxt-row > .form-fields > select { width: 100%; }
+.mm-sfxt .mm-sfxt-row > .hint, .mm-sfxt .mm-sfxt-foot { grid-column: 1 / -1; margin: 0; padding: 0; font-size: 0.8rem; line-height: 1.35; color: var(--mm-sfxt-muted); }
+.mm-sfxt .mm-sfxt-foot { padding: 0 0 0.45rem; }
+.mm-sfxt .mm-sfxt-slide { display: flex; align-items: center; gap: 0.7rem; width: 100%; }
+.mm-sfxt .mm-sfxt-slide input[type="range"] { flex: 1; min-width: 0; margin: 0; accent-color: var(--mm-sfxt-accent); }
+.mm-sfxt .mm-sfxt-slide output { flex: none; min-width: 5.2rem; text-align: right; font-weight: 600; white-space: nowrap; }
+.mm-sfxt .mm-sfxt-ro { flex: none; display: inline-block; padding: 0.15rem 0.6rem; border-radius: 6px; background: var(--mm-sfxt-raise);
+  border: 1px solid var(--mm-sfxt-edge); font-weight: 600; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mm-sfxt .is-off [data-group="letters"] .mm-sfxt-row:not([data-key="sfxLetters"]), .mm-sfxt .is-off [data-group="size"] { opacity: 0.5; }
+.mm-sfxt-banner { display: flex; align-items: flex-start; gap: 0.55rem; margin: 0 0 0.75rem; padding: 0.5rem 0.7rem; border-radius: 8px;
+  background: var(--mm-sfxt-raise); border: 1px solid var(--mm-sfxt-edge); line-height: 1.35; }
+.mm-sfxt-banner i { margin-top: 0.15rem; color: var(--mm-sfxt-accent); }
+.mm-sfxt .is-player .mm-sfxt-banner i { color: inherit; opacity: 0.8; }
+.mm-sfxt-seat { margin: 0 0 0.6rem; padding: 0.45rem 0.8rem 0.55rem; border: 1px solid var(--mm-sfxt-edge); border-radius: 8px; }
+.mm-sfxt-seat h4 { margin: 0 0 0.3rem; padding: 0; border: 0; font-family: inherit; font-size: var(--font-size-14, 0.9rem); font-weight: 700; text-transform: none; letter-spacing: normal; line-height: 1.3; color: inherit; }
+.mm-sfxt-seat ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.2rem; }
+.mm-sfxt-seat li { display: flex; align-items: baseline; gap: 0.45rem; font-size: 0.82rem; color: var(--mm-sfxt-muted); }
+.mm-sfxt-seat li i { font-size: 0.7rem; opacity: 0.6; }
+.mm-sfxt-seat li.is-on { color: inherit; }
+.mm-sfxt-seat li.is-on i { color: var(--mm-sfxt-accent); opacity: 1; }
+.mm-sfxt .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+.mm-sfxt .form-footer button { flex: 1 1 auto; white-space: nowrap; }
+.mm-sfxt .form-footer .mm-sfxt-save { color: var(--mm-sfxt-accent-ink); background: var(--mm-sfxt-accent); border-color: color-mix(in srgb, var(--mm-sfxt-accent) 70%, #000); }
+@media (prefers-reduced-motion: reduce) { .mm-sfxt .mm-sfxt-row { transition: none; } }

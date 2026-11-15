@@ -1269,6 +1269,17 @@ values stay in their browsers, unused; a player whose old values differ sees one
 Before 1.9.19 the copy was read only while plus-ultra registered it: a world opened with maps alone fell back to the GM's browser
 values and lost the choices made in plus-ultra's window (check-table section 7 "maps alone").
 
+**A caller's own options are the table's too** (moinen-maps GMALLMAPS, 2026-11-15, no engine change) [V node, dev/sfx-prefs*.test.mjs;
+lane 5 live, GM + Test Gracz 1]: the map's lettering options (which sounds: all / big only / off; the word set; the canvas layer of
+its world words; the size step per group) are world settings of `moinen-maps`, restricted, written by a GM only, live on every seat
+(onChange + `deleteSetting`), shown in ONE window of the map ("Comic sound effects on the map", menu in its settings tab, open to
+players read-only) whose button "Lettering look and motion" opens this engine window (`L.openSettings()`): the two windows never
+repeat each other's rows. A caller's pattern: keep the options out of Foundry's list (`config: false`; a player does not see world
+settings there), cancel a player's write in `preCreateSetting` / `preUpdateSetting` with a notice, migrate the GM's old client
+values once (`localStorage["<module>.<key>"]`; an old world switch "for everyone" off wins), and keep per seat only what the seat's
+machine or system decides (performance caps, reduced motion). Prove "no picture change at the defaults" by evaluating the runtime's
+own resolution lines from the base tree and the new one over the same stored values and comparing per-seat plan logs (with a probe).
+
 No bridge (1.9.19 ENGDROP). plus-ultra since UNMIRROR (tag tactics-integrated-136) keeps no copy: it reads `L.table` / `L.seat`, writes
 `L.setTable`, and carries its old copy itself where it is newer. The engine writes nothing into plus-ultra's namespace. An OLDER
 plus-ultra (132-135, the GMALL mirror) next to this engine: its mirror writes the engine's old client keys, none of which is registered
@@ -1572,6 +1583,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: IMPACT3 (1.9.20, `tactics-zones-impact3`): section 21a (the tokens take part in the impact frames: figure treatments,
   `fig` / `cracks`, the rebuilt ladders, the figures' area cap, `also` / `figures` / `fig` / `kick`, caller lessons); impact README
   "The figures" and "Kinds"; `check-figures.mjs`.
+- 2026-11-15 (GMALLMAPS, moinen-maps caller `tactics-zones-gmallmaps`, no engine change): section 15 "A caller's own options are the
+  table's too" (the map's lettering options world + GM only + live + one window linking this engine's window; migration; the
+  per-seat exceptions); `dev/sfx-prefs.test.mjs`, `dev/sfx-prefs-picture.test.mjs`.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
