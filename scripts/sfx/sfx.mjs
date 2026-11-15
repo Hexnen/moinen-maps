@@ -872,7 +872,7 @@ function groupFit(grp, vw, ui, zoom) {
   const f = SEAT.seatGroup({ items, anchor: grp.anchor, view: vw, panels: ui, zoom, subject: grp.subject ?? null });
   // (the move pulls the words toward the event, where its pins stand: a word it put on a pin steps off it - only when the group moved)
   if ( f.rule !== "ok" && f.rule !== "off" && vw ) {
-    const nds = SEAT.groupNudge(items.map((q) => SEAT.groupBox(q.box, f)), pinBoxes(vw), vw, zoom, undefined, ws.map((q) => [q.t, q.t + lifeMs(q)]));
+    const nds = SEAT.groupNudge(items.map((q) => SEAT.groupBox(q.box, f)), pinBoxes(vw), vw, zoom, undefined, ws.map((q) => [q.t, q.t + lifeMs(q)]), ui);
     f.nudge = new Map(); nds.forEach((d, i) => { if ( d.dx || d.dy ) f.nudge.set(ws[i], d); });
     if ( f.nudge.size ) f.rules = [...f.rules, "pin"];
   }

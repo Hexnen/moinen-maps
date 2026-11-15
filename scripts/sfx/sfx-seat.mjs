@@ -203,7 +203,7 @@ export function seatGroup({ items, anchor = null, view, panels = [], zoom = 1, r
 }
 /** after the group's move, a word that now stands on a pin (the move pulls the words toward the event, where its pins are) steps off it
     by the smallest shift that keeps it in the view: [{ dx, dy }] per box (boxes as this seat draws them, world units) */
-export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE, lives = null) {
+export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE, lives = null, panels = []) {
   const out = boxes.map(() => ({ dx: 0, dy: 0 }));
   if ( !view || !pins?.length ) return out;
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
@@ -214,8 +214,10 @@ export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE, lives 
   boxes.forEach((b, i) => {
     if ( !pins.some((p) => inter(b, p) > 0) ) return;
     const others = boxes.map((q, j) => (j !== i && meet(i, j) ? mv(q, out[j]) : null)).filter(Boolean);
-    const d = shiftClear(b, b, [...pins, ...others], v), nb = mv(b, d);
-    const cost = (q) => [...pins, ...others].reduce((s, p) => s + inter(q, p), 0);
+    // (and this seat's panels: live, the main word stepped off the pin onto the challenges' panel)
+    const obs = [...pins, ...others, ...(panels ?? [])];
+    const d = shiftClear(b, b, obs, v), nb = mv(b, d);
+    const cost = (q) => obs.reduce((s, p) => s + inter(q, p), 0);
     if ( cost(nb) < cost(b) - 1e-6 ) out[i] = d;
   });
   return out;
