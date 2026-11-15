@@ -19,7 +19,16 @@ export const LIMITS = {
   windowMs: 1000,
   localArea: 0.2,        // the gentle variant (and a local change of the scene) stays inside a panel of at most this share of the viewport
   figArea: 0.025,        // IMPACT3: the figures' own art may change brightness (negative, posterised, inked) only while all of them together
-                         // cover at most this share of the view (WCAG 2.3.1's small safe area is 21 824 px of 1024 x 768 = 2.78 %)
+                         // cover at most this share of the view (WCAG 2.3.1's small safe area is 21 824 px of 1024 x 768 = 2.78 %).
+                         // IMPACT5 (1.9.23): no longer the rule on any seat (the gentle and still seats show rims only; ordinary seats: figAreaOpen)
+  /* IMPACT5 (1.9.23, the owner on the 2.5 % limit for ordinary seats: «Poluzuj»): on an ORDINARY seat the figures (enlarged into a cut-in,
+     their art negative / posterised / inked) may change the brightness of at most this share of the short side SQUARED (min(W, H)^2, never
+     more than this share of the view) per drawing, counted at their largest possible size so every seat decides alike at any zoom. The
+     scene's flash rationing (fullPerImpact, fullPerSec, redArea) is unchanged for everyone; photosensitive (gentle) seats keep the rims
+     only and reduced-motion seats one still drawing, exactly as before */
+  figAreaOpen: 0.25,
+  cutMax: 0.44,          // IMPACT5: the cut-in's star figure is never drawn larger than this share of the view's short side (others: cutMaxOther)
+  cutMaxOther: 0.16,
   redArea: 0.01,         // photosafe: saturated red covers at most this share of any drawing (WCAG 2.3.1 "red flash")
   punchMax: 0.022,       // the frame punch moves the scene by at most this share of the viewport (and never past its own zoom margin)
   chromaMax: 0.012,      // chromatic split: plate offset as a share of the viewport's short side
@@ -275,6 +284,12 @@ export function planImpact(spec = {}) {
     const last = steps.reduce((a, s, i) => (s.stop ? i : a), -1), rel = steps.slice(last + 1, steps.length - 2);
     if ( last >= 0 && rel.length >= 2 ) steps.splice(last + 1, rel.length, ...rel.slice(1), rel[0]);
   }
+  /* IMPACT5 (item 9): every drawing of a kind's ladder carries the figures (a splash, a ring, a residue without them covered the struck
+     token on the seats where they were drawn big): the rim before the blow, the figure in its own colours after it */
+  if ( !spec.frames && kind !== "word" ) {
+    let pk = steps.findIndex((s) => (PEAK[s.type] ?? 0) >= 0.8); if ( pk < 0 ) pk = 0;
+    steps.forEach((s, i) => { if ( !s.fig && s.type !== "rest" ) s.fig = i < pk ? "r" : "o"; });
+  }
   /* a caller can only lower the figures' part: figures: false = none, "rim" = the rims only */
   if ( spec.figures === false ) for ( const s of steps ) delete s.fig;
   else if ( spec.figures === "rim" ) for ( const s of steps ) if ( s.fig ) { s.fig = "r"; delete s.z; }
@@ -297,6 +312,7 @@ export function planImpact(spec = {}) {
     frames.push(fr);
     total += ticks;
   }
+  if ( spec.figures !== "rim" ) cutIn(frames, step);
   const t = Array.isArray(spec.colors) && spec.colors.length ? { a: String(spec.colors[0]), b: String(spec.colors[1] ?? spec.colors[0]) } : (TONES[spec.tone] ?? TONES[K.tone]);
   const dir = Number.isFinite(spec.dir) ? (spec.dir * Math.PI) / 180 : null;
   const plan = { kind, tier, step, magnitude, seed, dir, tone: { a: t.a, b: t.b }, frames, ticks: total, ms: total * TICK, mode: "full",
@@ -320,6 +336,29 @@ export function peakOf(plan) {
   return { index: best, tick: bestAt };
 }
 
+/* ---------- IMPACT5 (1.9.23): the cut-in ----------
+   The owner (IMPACT3, again after IMPACT4): «bardziej jak sakuga MAD ... dynamiczniej». In a sakuga impact the camera cuts IN on the
+   fighters and stays on them for the whole cut; before, after ~200 ms only token-sized changes were left (at a far zoom: a few pixels).
+   Every drawing now carries `cu` (0..1: how far the cut-in has gone; the star figure, the struck token or else the attacker, is drawn up
+   to LIMITS.cutMax of the view's short side at its own place) and `kb` (-0.2..1: where it is along the blow: a wind-up against it before the
+   contact, a shove on it, a drift on through the release). The cut-in grows over the lead-in, stands full from the contact through the
+   hold, and eases back over the release, so the last drawing is still moving. The strength sets how far it goes (CU_TOP by step). */
+const CU_TOP = [0.5, 0.6, 0.8, 1, 1, 1];
+function cutIn(frames, step) {
+  if ( !frames.length ) return;
+  const top = CU_TOP[step] ?? 1, pk = peakOf({ frames }).index;
+  const hold = Math.max(pk, frames.reduce((a, f, i) => (f.stop ? i : a), -1));
+  const at = []; let a = 0; for ( const f of frames ) { at.push(a); a += f.ticks; }
+  const relA = at[hold] + frames[hold].ticks, relN = frames.length - hold;
+  frames.forEach((f, i) => {
+    if ( f.type === "rest" ) return;
+    let cu, kb;
+    if ( i < pk ) { cu = top * 0.35 * (i + 1) / pk; kb = -0.2 * (i + 1) / pk; }
+    else if ( i <= hold ) { cu = top; kb = 0.08; }
+    else { cu = top * (1 - (i - hold) / relN); kb = 0.08 + 0.92 * Math.min(1, (at[i] + f.ticks - relA) / Math.max(1, a - relA)); }
+    f.cu = +cu.toFixed(3); f.kb = +kb.toFixed(3);
+  });
+}
 /* IMPACT3: the figures' part for a caller's own sequence (steps = [{ type, ticks, ... }], changed in place) */
 function autoFigs(steps) {
   let pk = steps.findIndex((s) => (PEAK[s.type] ?? 0) >= 0.8);
@@ -368,7 +407,7 @@ export function safety(plan, prefs = {}, env = {}) {
   if ( mode === "local" ) {
     const gentle = prefs.motion === "gentle";
     /* IMPACT3: the gentle variant (also a photosensitive seat): the figures keep their rim only, their art never changes brightness */
-    for ( const f of plan.frames ) { if ( f.full ) toSafe(f); f.stop = false; if ( gentle ) f.punch = 0; else f.punch *= 0.5; if ( f.back === "chroma" && gentle ) f.back = null; if ( f.fig ) f.fig = "r"; delete f.z; if ( !f.punch ) delete f.kick; }
+    for ( const f of plan.frames ) { if ( f.full ) toSafe(f); f.stop = false; if ( gentle ) f.punch = 0; else f.punch *= 0.5; if ( f.back === "chroma" && gentle ) f.back = null; if ( f.fig ) f.fig = "r"; delete f.z; delete f.cu; delete f.kb; if ( !f.punch ) delete f.kick; }
   }
   /* the guard: flash drawings (full-field frames AND drawings that change the scene's brightness, even inside a panel) are rationed,
      per impact and per rolling second (shared with the words' flash frames) */

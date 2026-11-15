@@ -53,6 +53,9 @@ Other calls: `I.prepare(spec)` paints everything ahead and returns `{ play({ sta
 a roll being resolved, a projectile in flight); `I.plan(spec)` = the plan this client would show, without spending flash budget;
 `I.pick(event)`; `I.show(type, spec)` holds ONE frame type up to 2 s (gallery, design); `I.gallery(opts)`; `I.stopAll()`;
 `I.kinds`, `I.frames`, `I.tones`, `I.limits`, `I.steps`, `I.series`, `I.stats`, `I.busy`, `I.mode()`, `I.setMode("full" | "local" | "off")`.
+1.9.23 IMPACT5: `I.seatMode()` = what THIS seat shows (`"full" | "local" | "static" | "off"`, its own photosensitive and motion settings
+applied; `I.mode()` stays the table's setting), `I.warm(tokens?)` = work the tokens' art out ahead (none: the visible tokens, while idle),
+`handle.trace` = the drawings this seat showed with their instants.
 `plan.peakMs` (1.9.1): ms from the impact's start to its strongest drawing.
 
 Sizes (1.9.1): the star, the gentle panel and the cracks are sized from the subject as it is ON SCREEN (its picture's radius), with a
@@ -128,10 +131,17 @@ is drawn as `SAFE_RED`. Frames that already show the subject enlarged (`shadow`,
 and still draw the others. The ladders put the palette jumps on ONES under the hit-stop (each held tick a new palette) and release on
 twos; a seed swaps the order of the negative and the posterised jump, so two blows of the same strength do not cut alike.
 
-Safety of the figures (on top of the table below): `i`, `p`, `k` change brightness, so on every drawing that is not itself a flash the
-figures that get them may cover together at most `LIMITS.figArea` = 2.5 % of the view (their own alpha area at this screen's size;
-shared out target first, then the attacker, then the rest). That is under the small safe area of WCAG 2.3.1 (a 341 x 256 px square on
-a 1024 x 768 screen = 2.78 %), so a figure's palette jump is never a flash by itself and takes no flash slot.
+Safety of the figures (on top of the table below). **Since 1.9.23 (IMPACT5, the owner on the old limit for ordinary seats: «Poluzuj»)
+the rule is:** on an ORDINARY seat the figures may change the brightness (a bright treatment `i p k`, or an enlargement that covers the
+scene round a token) of at most `LIMITS.figAreaOpen` = 25 % of the view's short side squared (min(W, H)^2: 14 % of a 16:9 view) on every
+drawing that is not itself a flash; each figure is counted at its LARGEST possible size (its cut-in cap below), so the decision depends
+on the figures' art and roles only, never on the zoom or the screen. A PHOTOSENSITIVE seat (the gentle variant: Foundry's
+photosensitive mode, `flashes` off, `motion: gentle`, `impact: local`, a caller's `gentle: true`) still draws the figures with their rims
+only, nothing enlarged, no art changed; a REDUCED-MOTION seat one still drawing: both exactly as before. The scene's flash rationing (2
+per impact, 2 per rolling second, saturated red 1 %) is unchanged for every seat.
+(1.9.20-1.9.22: `LIMITS.figArea` = 2.5 % of the view at the size on THAT screen, under WCAG 2.3.1's small safe area of 2.78 %; a seat
+zoomed closer then got the luminance-held twin while the far seat got the negative: two pictures of one blow. `figArea` stays exported
+and is no longer applied.)
 
 1.9.21 IMPACT4 (the owner: colour inversions ON the tokens, accents on their edges, more, more dynamic). In 1.9.20 a token of ordinary
 size at the table's zoom (The Warehouse at 0.75: 262 px = 4.8 % of a 1600 x 900 view) was already over the cap and got rims only, and a
@@ -163,6 +173,39 @@ display frame with its token (a CSS transform from the token mesh's world transf
 a fall; one frame old at most; frozen while the hit-stop holds the ticker); an element subject follows its box. The gentle panel keeps
 its figures inside its clip, painted where the blow found them (1.9.20 behaviour). Before 1.9.21 the figure stayed where the blow found
 it while the token's reaction moved.
+
+### The cut-in (1.9.23 IMPACT5)
+
+The owner after IMPACT4: «bardziej jak sakuga mad ... Dynamiczniej». Measured before: after ~200 ms only token-sized changes were left,
+and at a far zoom (a token of 20-30 px) the whole cut read as a few blinking pixels; a seat zoomed closer got another picture than the far
+one (the 2.5 % area cap); splashes, rings and residue without the figures covered the struck token. Now:
+- **The camera cuts in on the star for the whole impact.** The star is the struck figure; with no struck figure (a critical with no
+  target) the attacker `from`; else the first figure `also` names. Every drawing carries `cu` (0..1) and `kb` (plan.mjs `cutIn`): the
+  star is drawn enlarged AT ITS OWN PLACE to about 34 % of the view's short side (at least 1.3 x its token, never past `LIMITS.cutMax` =
+  44 %), the other figures a little (up to `cutMaxOther` = 16 %). `cu` grows over the lead-in (to 35 %), stands full from the contact
+  through the hold, and eases back over the release, so the last drawing still moves; the strength sets how far (steps 0-2: 50 / 60 /
+  80 %). The contact's pop (`z`) adds on top inside the same cap. A token already larger than the cap on this screen is not enlarged.
+- **It moves.** `kb`: a wind-up AGAINST the blow over the lead-in, a shove on the contact, a drift along the blow through the release (up
+  to 22 % of the cut-in's size); the star is kept in the view (pulled in by at most half its size: a token off the screen stays off).
+- **The ink is laid round the cut-in** (`frameEnv`): stars, rings, splashes, flares, panels and the knock-back echoes are sized and placed
+  from the enlarged star, not from its token, at every zoom.
+- **Every drawing of a ladder carries the figures** (a rim before the blow, the figure in its own colours after it, where a ladder named
+  nothing): no splash or ring is drawn over a bare token any more.
+- **The same picture on every seat**: the open area rule above counts each figure at its cut-in cap, so a close seat and a far seat give
+  every figure the same treatment and both show the star at the same share of their view.
+- **The rim stands off the figure's edge** (`rimFor`): the seeded accent stays unless it is close to the colour of the art's own edge
+  (a yellow ring of a portrait), then the other accent, paper or ink, whichever stands off most.
+- **No pink by the engine's choice** (ENGPINK): a token's negative (`i`), hue negative (`n`) and hue cycle (`h`) are turned out of the pink
+  band (`unpinkRgb`: OKLCH hue 290..360 / 0..15 -> blue-violet 284 or red-orange 22, at its own lightness; the held ones fitted back to
+  the pixel's luminance). A token's own colours (`o`) are its art and stay.
+- **Nothing the first use costs falls inside the impact** (item 2): the art of every figure is worked out at the call (`warmFigs`),
+  the visible tokens are worked out while the browser is idle after `canvasReady` (`I.warm()`), the player paints two drawings ahead,
+  and a flash or hit-stop drawing shown in a frame that then ran long (> 50 ms) stays one more display frame (`stats.held`). Each
+  handle keeps `h.trace`: `[{ i, type, fig, at (ms after the start), frame (ms of the display frame that presented it) }]`.
+The gentle variant and reduced motion get none of this (no `cu`, no `kb`, rims only), exactly as before.
+Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps film clock): six impacts (hit, heavy, crit, crit
+without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
+same instants within one frame; no frame over 20 ms; the call's warm-up took 0-31 ms before the start (0 when the idle warm-up had run).
 
 ## Kinds
 
@@ -230,7 +273,7 @@ Full-screen flashes and inversions can harm photosensitive viewers. The engine's
 |---|---|---|
 | length of an impact | at most 24 ticks = 1 s (1.9.21; was 12 = 500 ms); one drawing at most 4 ticks | `planImpact` (also a caller's own `frames`) |
 | hit-stop | at most 8 ticks = 333 ms per impact (1.9.21; was 4) | `planImpact` |
-| the figures' colours (1.9.21) | bright treatments (`i p k`) and pops share `figArea` (2.5 %) on non-flash drawings; held treatments (`n d h`) keep every pixel's relative luminance within 0.01 (measured 0.004) and never give saturated red, so they need no area | `figTreat`, `heldPixels` |
+| the figures' colours (1.9.21; 1.9.23 IMPACT5 «Poluzuj») | ordinary seats: bright treatments (`i p k`) and enlarged figures share `figAreaOpen` (25 % of min(W, H)^2, each figure counted at its cut-in cap, so every seat decides alike) on non-flash drawings; the cut-in's star never larger than `cutMax` (44 % of the short side), the others `cutMaxOther` (16 %); photosensitive (gentle) seats rims only, reduced-motion seats one still, both unchanged (1.9.20-1.9.22: `figArea` 2.5 % of the view on every seat); held treatments (`n d h`) keep every pixel's relative luminance within 0.01 (measured 0.004) and never give saturated red, so they need no area | `figTreat`, `heldPixels` |
 | flash drawings, guard on (`photosafe`, the default) | a FLASH is a full-field frame OR any drawing that changes the scene's brightness behind it, even inside a panel (`ink`, `shatter`, the gentle variant's panels; `isFlash`). At most 2 per impact AND at most 2 in any rolling second on this client, counted in the SAME log as the words' flash frames; over the budget a full frame becomes its quiet twin (`slam` -> `ink`, `shadow`/`window` -> `pop`, `glare` -> `lines`, `swap` -> `dots`, `tear` -> `rip`) and a twin or panel that would still change the scene keeps its ink and leaves the scene alone. The slam is kept first. Two flashes a second is under the three of WCAG 2.3.1 (1.8.2: before, `ink` and `shatter` turned the WHOLE view black and white uncounted, and the guard's twin for `slam` was that whole-view `ink`) | `safety` |
 | scene changed by a drawing that is not full-field | only inside a jagged panel of at most 20 % of the view round the blow (`localPanelR`, `backClip`) | `draw.mjs` |
 | saturated red (R / (R+G+B) >= 0.7, stricter than WCAG's 0.8) | under the guard covers at most 1 % of ANY drawing (`LIMITS.redArea`): every red accent (a kind's, a `tone`, a caller's `colors`) is drawn as the deep crimson `SAFE_RED` (#b02840, 0.63); the guard off keeps the red. Measured in check-impact.mjs on every frame type x red tones x subjects (1.8.2: before, the knock-out's shadow frame threw red spikes over the black field: ADVI 18) | `draw.mjs` `guarded` |
