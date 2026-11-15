@@ -156,6 +156,18 @@ async function engineChecks(dir) {
     ok(cmp >= 15 && same >= cmp - 2, `sustain seats: on the event's clock a seat joining 2.5 s late shows the same phrases at the same place (${same}/${cmp} instants alike${first ? `; first differing ${first}` : ""})`);
   });
 
+  /* 9. a word drawn in by parts (a split phrase, `parts`) stands in its hold's first pose until the hold begins: the hold's decaying
+     envelopes read at a negative time threw it hundreds of cap heights away and seven times its size (1.9.14: recoil, throb, roll) */
+  for ( const [t, k] of [["KA-BUM", "explosion"], ["KRA-KA-DOOM", "thunder"], ["TIK-TAK", "clock"], ["CLANG-CLANG", "bell"], ["THUD-THUD", "step"]] ) await block(t, async () => {
+    const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+    const h = await L.play(t, { kind: k, parts: "syllables", seed: `sg-parts-${t}`, at: { x: 2000, y: 1500 }, space: "world", size: 58 });
+    let mx = 0, ms = 0;
+    for ( let f = 0; f < 45; f++ ) { await E.tick(33, 33); const sp = h.sprite; if ( !sp?.visible ) continue; mx = Math.max(mx, Math.hypot(sp.position.x - 2000, sp.position.y - 1500)); ms = Math.max(ms, Math.abs(sp.scale.y)); }
+    const cap = h.size * h.plan.sizeK;
+    ok(mx / cap <= 0.5 && ms <= 1.6, `parts ${t} (${k}, hold ${h.track?.hold}): stays at its place while drawn in by parts (max ${(mx / cap).toFixed(2)} cap off, scale ${ms.toFixed(2)})`);
+    E.restoreWarn?.();
+  });
+
   console.log(`sustain-engine: ${n} checks, ${failed} failed`);
   return failed;
 }

@@ -265,5 +265,14 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   ok(r.status === 0, `engreg engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
+/* 14. SUSTAINGAP: a sustained sound's phrases and a stream's syllables never pile on each other while legible (every sustained kind,
+   three sizes, both faces, both motion types, the map's burn call, view edge, a caller's room, two seats on one clock) (own process;
+   `--engine <older letters>` shows them failing) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-sustain.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 900000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `sustain engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
 console.log(`letters: ${n} checks, ${failed} failed`);
 process.exit(failed ? 1 : 0);
