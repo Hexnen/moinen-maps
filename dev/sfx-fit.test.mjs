@@ -158,7 +158,8 @@ await group("RIDE", () => {
   const r = FIT.rideFit(out, v, ui, 300, 80, 1.15, 16);
   ok(r.every((q) => q.x - 300 * 1.15 / 2 >= v.x0 + 16 - 1e-6 && FIT.hitOf({ x0: q.x - 150, y0: q.y - 40, x1: q.x + 150, y1: q.y + 40 }, ui, null) === 0), "a way past the edge and under a panel is held inside the view, off the panel");
   ok(r.map((q) => q.ms).join() === "0,300,400" && r[2].x < r[0].x, "its times and its direction are kept");
-  ok(/spec\.path = FIT\.rideFit\(wr\.ride, v, uiBoxes\(\)/.test(sfx), "the runtime fits the wave's way");
+  ok(/spec\.path = FIT\.rideFit\(wr\.ride, v, \[\.\.\.uiBoxes\(\), \.\.\.pinBoxes\(v\), \.\.\.\(p\.mainBox \? \[p\.mainBox\] : \[\]\)/.test(sfx), "the runtime fits the wave's way (off the panels, the pins, the main word)");
+  ok(/\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\)\.filter\(Boolean\), \.\.\.pinBoxes\(v\)\], em = burnSize/.test(sfx), "a burning fire's spots keep off the pins");
   // (the ladder with no clean size takes the size that covers least, not the biggest)
   const pen = (p) => ({ off: 0, pui: p, tok: 0, pin: 0, wrd: 0, sub: 0, pen: p });
   const fake = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.6 : w.fitK > 0.4 ? 0.4 : 0.1) }));
