@@ -58,7 +58,7 @@ group("F2", () => {
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
   // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /placeFit\(.*\{ view: v, ui, tokens, pins/.test(sfx) && /function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and places around them");
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /SEAT\.seatFit\(\{ box, reach, view: view\(\), panels: uiBoxes\(\)/.test(sfx) && /function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift)");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
@@ -105,7 +105,7 @@ group("F5", () => {
   const st = { id: "f", k: "fire", q: 10000, r: 60, lv: 2, p: [0, 0, 600, 0, 1200, 0] };
   const c = C.strokeEvents(st, null, 10000, 40000, { grid: G, late: 1500 }).find((e) => e.voice === "fire");
   ok(c.gate === "f", "F5 the catch word waits for its flames to show on this client");
-  ok(/fireShown/.test(fs.readFileSync(new URL("../scripts/fire/fire.mjs", import.meta.url), "utf8")) && /e\.t, at \+ 120/.test(sfx), "F5 ... told by the fire layer when it shows them");
+  ok(/fireShown/.test(fs.readFileSync(new URL("../scripts/fire/fire.mjs", import.meta.url), "utf8")) && /if \( e\.gate \) e = \{ \.\.\.e, t: e\.t \+ CATCH_SHOW_MS \};/.test(sfx), "F5 ... told by the fire layer when it shows them; MAPSFXSEAT: lettered at the moment a seat on time shows them, the same on every seat");
   const plan = C.burnPlan([st], { grid: G, catchMs: () => 4000, levelNow: (s, t) => (t > 20000 ? 3 : s.lv) });
   ok(plan.level(15000) < plan.level(25000), "F5 a burning fire's sound follows its level (a flare-up is louder)");
   const a0 = plan.at(0, 11000), a1 = plan.at(0, 12000);
@@ -173,7 +173,7 @@ group("F13", () => {
   const ws = [{ role: "pre", t: 0 }, { role: "main", t: 230 }, { role: "sec", t: 400 }, { role: "sec", t: 500 }];
   const one = C.capWords(ws, 1), two = C.capWords(ws, 2);
   ok(one.length === 1 && one[0].role === "main" && two.map((w) => w.role).join() === "pre,main", "F13 one place: the main word; two: the pre word and the main word, in time order");
-  ok(/capWords\(placeFit\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
+  ok(/mine = C\.capWords\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
 });
 
 /* F14: no per-client word memory */
@@ -339,7 +339,8 @@ group("CROWD", () => {
   ok(C.burnCrowded([{ x: 100, y: 100 }], [{ x: 150, y: 120 }], 20) && !C.burnCrowded([{ x: 100, y: 100 }], [{ x: 400, y: 100 }], 20), "CROWD a fire's phrases next to a bigger fire's are left out; far apart both letter");
   ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
   // (THUNDERFIT added the map's pins after the words up: the same obstacles, plus the pins)
-  ok(sfx.includes("ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)]"), "CROWD a burning fire's phrases keep off the event words still up");
+  // (MAPSFXSEAT: the event words up are the TABLE's - the ledger, the same on every seat - not what this seat drew)
+  ok(sfx.includes("ui = [...uiBoxes(), ...ledger.boxes(sharedNow(), sharedNow() + 1000), ...pinBoxes(v)]"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */

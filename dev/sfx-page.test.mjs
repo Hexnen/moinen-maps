@@ -196,7 +196,7 @@ group("UNLOCATED", () => {
   ok(/!reported && hits\.length/.test(s), "no shooter: the report is shown on screen");
   ok(/!shooterSeen\(it\.from, it\.fr\)/.test(s), "hidden shooter: on screen, not at its place");
   // (EFFECTS2: the word's SOURCE point is tested - `at` when the word sits beside it, e.g. a plough's or a strike's)
-  ok(/if \( !hereVisible\(w\.at\?\.x \?\? w\.x, w\.at\?\.y \?\? w\.y\) \) \{ playScreen\(spec\)/.test(s), "page words under a player's fog: on screen");
+  ok(/if \( !hereVisible\(q\.sx \?\? q\.x, q\.sy \?\? q\.y\) \) \{ playScreen\(q\)/.test(s) && /sx: w\.at\?\.x \?\? w\.x, sy: w\.at\?\.y \?\? w\.y/.test(s), "page words under a player's fog: on screen");
 });
 // INVIEW: a debris word or the catch letters a landing / a fire this client can see (live at a close zoom every chosen landing was off
 // the screen and the debris words were all dropped)

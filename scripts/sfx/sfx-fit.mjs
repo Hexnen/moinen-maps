@@ -41,11 +41,19 @@ export function freeRuns(ui, x0, x1, y0, y1) {
 export const hitOf = (b, ui, v) => ui.reduce((s, u) => s + inter(b, u), 0) + (v ? area(b) - inter(b, v) : 0);
 const boxAt = (x, y, bw, bh) => ({ x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 });
 
-/** how far a word's entrance reaches beyond its box (sfx.mjs measure's box), as a factor of it: the engine keeps the whole REACH in the
-    view (its keepInView), so a word fitted only by its box is pushed by the engine onto what it was placed off. Measured on the engine
-    (dev/sfx-fit.test.mjs REACH): a slam's contact pose up to 1.33 x the box, a rise up to 1.37 x its height, the others about 1.12 */
+/** how far a word's entrance reaches beyond its box (sfx.mjs measure's box), as a factor of it - ONLY the fallback for an engine without
+    L.measure (before LETR 1.9.11). The map now takes each word's own reach from the engine (reachFactor of L.measure): these factors
+    went stale when the engine's motion changed (LETR 1.9.10 HOLDS: a held word moves while it stands - a debris word's reach grew to
+    1.18 x its box, over the 1.15 here, and the trunk's check went red) */
 export const REACH = { slam: 1.36, rise: 1.4, other: 1.15 };
 export const reachOf = (stageIn) => REACH[stageIn] ?? REACH.other;
+/** MAPSFXSEAT: a word's reach factor from the ENGINE's own measure (L.measure: `reach` { l, r, u, d } from its centre, here in units of its
+    cap height like the hold box `hb`): the share of its box (wordBox) the whole entrance and hold reach, never under 1 */
+export const reachFactor = (hb, reach) => {
+  if ( !hb || !reach ) return REACH.other;
+  const b = wordBox(hb, 1);
+  return Math.max(1, (reach.l + reach.r) / Math.max(1e-6, b.bw), (reach.u + reach.d) / Math.max(1e-6, b.bh));
+};
 
 /**
  * A spot (screen px) for an unlocated word of box `bw` x `bh` (its hold picture with room for its outline: wordBox) on a screen `view`
@@ -102,6 +110,9 @@ export function screenFit({ today = null, want, bw, bh, rk = 1, view, ui = [], m
 /** the shares of a bigger step's extra size a word tries, from its whole stepped size down to today's (0): a step-3 word that finds no
     clean place at its stepped size takes the largest of these that does (never smaller than today's word) */
 export const LADDER = [1, 0.5, 0];
+/** how much more of its main word's placement penalty a bigger ladder size may cover than the least covering one and still be taken
+    when no size is clean (sfx-core place's penalty: about a tenth of a panel's weight) */
+export const LADDER_SLACK = 0.1;
 /** Is a placed word clean (sfx-core place penalties `pen`): inside the view, off the panels, the tokens, the pins and the other words,
     and over its subject no more than its voice allows? */
 export const isClean = (pen) => !!pen && pen.off <= 1e-6 && pen.pui <= 0.02 && pen.tok <= 1e-6 && (pen.pin ?? 0) <= 1e-6 && pen.wrd <= 0.05 && pen.sub <= 1e-6;
@@ -126,13 +137,20 @@ export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (
   const score = (r, i) => (mainOk(r) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && isClean(q.pen)).length - i * 0.5 - dirt(r);
   const full = (r) => mainOk(r) && r.length >= n;
   if ( full(placed) ) return placed;
-  let best = { r: placed, s: score(placed, 0) };
+  const tries = [{ r: placed, s: score(placed, 0), i: 0 }];
   for ( let i = 1; i < LADDER.length; i++ ) {
     const r = place(specs.map((w) => (grows(w) ? resize(w, LADDER[i]) : w)), ctx), sc = score(r, i);
     if ( full(r) ) return r;
-    if ( sc > best.s ) best = { r, s: sc };
+    tries.push({ r, s: sc, i });
   }
-  return best.r;
+  // (MAPSFXSEAT: no size gives a clean place - the BIGGEST size that keeps as many words and covers no more than LADDER_SLACK more of
+  // its main word's penalty than the least covering size: live, a step-3 main word with no clean place anywhere stood at today's size,
+  // step 3 looked like step 2, though the bigger size covered barely more)
+  const pen = (r) => { const m = lead(r); return m ? (m.pen?.pen ?? 0) : 0; };
+  const most = Math.max(...tries.map((q) => q.r.length)), anyOk = tries.some((q) => mainOk(q.r));
+  const pool = tries.filter((q) => q.r.length === most && (!anyOk || mainOk(q.r)));
+  const least = Math.min(...pool.map((q) => pen(q.r)));
+  return (pool.find((q) => pen(q.r) <= least + LADDER_SLACK) ?? tries.sort((a, b) => b.s - a.s)[0]).r;
 }
 
 /**
@@ -143,6 +161,8 @@ export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (
  * (THUNDERFIT): a blast's wave word rode out past the left edge and under the controls column. A way that is clean already is returned
  * as it is (the same points: today's picture).
  */
+/** the points between two of a ride's points at which its box is checked (MAPSFXSEAT) */
+export const RIDE_SAMPLES = 6;
 export function rideFit(path, v, ui = [], bw = 0, bh = 0, rk = REACH.other, m = 0) {
   if ( !v || !Array.isArray(path) || !path.length ) return path;
   const hx = Math.min((bw * rk) / 2 + m, (v.x1 - v.x0) / 2), hy = Math.min((bh * rk) / 2 + m, (v.y1 - v.y0) / 2);
@@ -151,10 +171,21 @@ export function rideFit(path, v, ui = [], bw = 0, bh = 0, rk = REACH.other, m = 
   const p0 = { ...path[0], ...inV(path[0]) };
   let changed = p0.x !== path[0].x || p0.y !== path[0].y;
   const out = [p0];
+  // (MAPSFXSEAT: the box is checked ALONG the way, not only at its points - live at step 3 the wave word crossed the map pin between two
+  // clean points of its way)
+  const segHit = (a, b) => { for ( let k = 1; k <= RIDE_SAMPLES; k++ ) { const f = k / RIDE_SAMPLES; if ( hit({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }) ) return true; } return false; };
   for ( let i = 1; i < path.length; i++ ) {
     const q = path[i]; let c = inV(q);
-    // (in the way: drawn back toward the start to the first clean point - not nearer than a third of the way; none clean: where it was)
-    if ( hit(c) ) for ( let f = 0.9; f >= 0.3; f -= 0.1 ) { const t = { x: p0.x + (c.x - p0.x) * f, y: p0.y + (c.y - p0.y) * f }; if ( !hit(t) ) { c = t; break; } }
+    const prev = out[i - 1];
+    // (in the way: drawn back toward the start to the first point whose way there is clean - not nearer than a third of the way; none
+    // clean: where it was)
+    if ( segHit(prev, c) ) {
+      let ok = false;
+      for ( let f = 0.9; f >= 0.3 - 1e-9; f -= 0.1 ) { const t = { x: p0.x + (c.x - p0.x) * f, y: p0.y + (c.y - p0.y) * f }; if ( !segHit(prev, t) ) { c = t; ok = true; break; } }
+      // (the obstacle lies right on the way: the word rides only up to it - the farthest clean point toward where it was going - and
+      // stands there; a word already on it keeps its way)
+      if ( !ok && !hit(prev) ) { let t = prev; for ( let k = 1; k <= RIDE_SAMPLES * 4; k++ ) { const f = k / (RIDE_SAMPLES * 4), q2 = { x: prev.x + (c.x - prev.x) * f, y: prev.y + (c.y - prev.y) * f }; if ( hit(q2) ) break; t = q2; } c = t; }
+    }
     if ( c.x !== q.x || c.y !== q.y ) changed = true;
     out.push({ ...q, x: c.x, y: c.y });
   }

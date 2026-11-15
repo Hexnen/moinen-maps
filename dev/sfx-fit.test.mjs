@@ -19,6 +19,8 @@ import * as FIT from "../scripts/sfx/sfx-fit.mjs";
 import * as C from "../scripts/sfx/sfx-core.mjs";
 import * as EV from "../scripts/sfx/sfx-events.mjs";
 import * as SZ from "../scripts/sfx/sfx-size.mjs";
+import * as SEAT from "../scripts/sfx/sfx-seat.mjs";
+import { sizeFor } from "../scripts/letters/size.mjs";
 import { revTree } from "./lib/baseline.mjs";
 
 let n = 0;
@@ -27,6 +29,7 @@ const failed = [];
 const group = async (id, fn) => { try { await fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sfx = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
+const seatSrc = fs.readFileSync(path.join(root, "scripts/sfx/sfx-seat.mjs"), "utf8");
 const V = !!process.env.THUNDERFIT_VERBOSE;
 const area = (b) => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
 const inter = (a, b) => area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) });
@@ -97,7 +100,7 @@ await group("STEP2", () => {
     if ( C0.burnCrowded(pts, taken, em) === C.burnCrowded(pts, taken, em) ) bs++;
   }
   ok(bs === 400, "burnCrowded with plain spots = the base commit");
-  ok(/const b = FIT\.wordBox\(hb, u\);\n\s*w\.bw = b\.bw; w\.bh = b\.bh;/.test(sfx) && /const hd = holdOf\(w\.text, o\), hb = hd \?\? FIT\.estHold/.test(sfx), "measure boxes a word as before (the engine's hold box, live from L.planFor)");
+  ok(/const b = FIT\.wordBox\(hb, u\);\n\s*w\.bw = b\.bw; w\.bh = b\.bh;/.test(sfx) && /const md = measureOf\(w\.text, o\), hd = md \?\? holdOf\(w\.text, o\), hb = hd \?\? FIT\.estHold/.test(sfx), "measure boxes a word as before (the engine's hold box: L.measure, else L.planFor)");
 });
 await group("PINS", () => {
   let avoided = 0, freeExists = 0, satOnPin = 0, mains = 0;
@@ -117,8 +120,9 @@ await group("PINS", () => {
   }
   ok(satOnPin === 0, "a side word is never laid over a pin (it is dropped or moved)");
   ok(freeExists > 100 && avoided === freeExists, `a main word with a clean place keeps off the pins: ${avoided} of ${freeExists} (${mains} placed)`);
-  ok(/pins: pinBoxes\(v\)/.test(sfx) && /const v = view\(\), tokens = tokenBoxes\(v\), ui = uiBoxes\(\), pins = pinBoxes\(v\);/.test(sfx) && /\{ view: v, ui, tokens, pins, alive:/.test(sfx), "every placement of the runtime gets this seat's pins");
-  ok(/if \( !n\.visible \|\| n\.destroyed \) continue;/.test(sfx), "a pin this seat does not see is no obstacle (nothing of a hidden note shows in a player's placement)");
+  // (MAPSFXSEAT: the TABLE placement gets the pins every seat counts; an unlocated word keeps off this seat's own pins on its screen)
+  ok(/return \{ view: v, ui: \[\], tokens: sharedTokens\(v\), pins: sharedPins\(v\), alive: ledger\.boxes\(t0, t1, skip\) \};/.test(sfx) && /panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "every placement of the runtime gets the pins");
+  ok(/if \( !n\.visible \|\| n\.destroyed \) continue;/.test(sfx) && /if \( !SEAT\.sharedPin\(players, /.test(sfx), "a pin a seat does not see is no obstacle (nothing of a hidden note shows in a player's placement: the table counts only pins every player may see)");
 });
 
 /* ---------------------------------------------------------------- LADDER (pure) */
@@ -143,7 +147,7 @@ await group("LADDER", () => {
   ok(cleanAt3 === cleanAny, `where today's size has a clean place for the main word, step 3 finds one too: ${cleanAt3} of ${cleanAny}`);
   ok(dropsAfter <= dropsBefore && dropsAfter < dropsBefore, `fewer side words dropped at step 3: ${dropsBefore} -> ${dropsAfter} of the scenarios' words`);
   ok(/function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place, grows: \(w\) => !!w\.text && !w\.stream && !w\.path && stepFor\(grpOf\(w\)\) > SZ\.SIZE_DEFAULT,/.test(sfx), "only a word at a BIGGER step than today's climbs down the ladder");
-  ok(/if \( step > SZ\.SIZE_DEFAULT && Number\.isFinite\(fitK\) && fitK < 1 \) px = z\.px \+ \(px - z\.px\) \* Math\.max\(0, fitK\);/.test(sfx), "the ladder's share is a share of the EXTRA size (0 = today's drawn size)");
+  ok(/px = s > SZ\.SIZE_DEFAULT && Number\.isFinite\(fitK\) && fitK < 1 \? px \+ \(st - px\) \* Math\.max\(0, fitK\) : st;/.test(seatSrc), "the ladder's share is a share of the EXTRA size (0 = the table's step-2 size; sfx-seat tableSize)");
   if ( V ) console.log("LADDER", { tried, cleanAt3, cleanAny, dropsBefore, dropsAfter });
 });
 
@@ -158,15 +162,29 @@ await group("RIDE", () => {
   const r = FIT.rideFit(out, v, ui, 300, 80, 1.15, 16);
   ok(r.every((q) => q.x - 300 * 1.15 / 2 >= v.x0 + 16 - 1e-6 && FIT.hitOf({ x0: q.x - 150, y0: q.y - 40, x1: q.x + 150, y1: q.y + 40 }, ui, null) === 0), "a way past the edge and under a panel is held inside the view, off the panel");
   ok(r.map((q) => q.ms).join() === "0,300,400" && r[2].x < r[0].x, "its times and its direction are kept");
-  ok(/spec\.path = FIT\.rideFit\(wr\.ride, v, \[\.\.\.uiBoxes\(\), \.\.\.pinBoxes\(v\), \.\.\.\(p\.mainBox \? \[p\.mainBox\] : \[\]\)/.test(sfx), "the runtime fits the wave's way (off the panels, the pins, the main word)");
-  ok(/\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\)\.filter\(Boolean\), \.\.\.pinBoxes\(v\)\], em = burnSize/.test(sfx), "a burning fire's spots keep off the pins");
-  ok(/PG\.waveRide\(.*\.\.\.pinBoxes\(v\)\],/.test(sfx), "the wave's way is chosen off the pins");
+  // (MAPSFXSEAT: on the table - the reference view, the shared pins, the table's main word and words up; the seat rule then moves the
+  // whole way off this seat's panels; its reach is the engine's own measure of the word)
+  ok(/const avoid = \[\.\.\.\(env\.mainBox \? \[env\.mainBox\] : \[\]\), \.\.\.upNow\(\), \.\.\.env\.pins\];/.test(sfx) && /spec\.path = FIT\.rideFit\(wr\.ride, vw, avoid, spec\.bw \?\? G, spec\.bh \?\? G \* 0\.4, spec\.rk \?\? FIT\.REACH\.other, FIT\.EDGE \/ z\);/.test(sfx), "the runtime fits the wave's way (off the pins, the main word, the words up; its measured reach)");
+  ok(/\.\.\.ledger\.boxes\(sharedNow\(\), sharedNow\(\) \+ 1000\), \.\.\.pinBoxes\(v\)\], em = burnSize/.test(sfx), "a burning fire's spots keep off the pins");
+  ok(/PG\.waveRide\(w\.wave\.at, w\.wave\.r0, w\.wave\.reach, w\.wave\.rim, \{ avoid, /.test(sfx), "the wave's way is chosen off the pins");
+  // (MAPSFXSEAT, live at step 3: the wave word crossed the map pin BETWEEN two clean points of its way - the box is checked along it)
+  const pin = { x0: 1500, y0: 1370, x1: 1560, y1: 1430 };
+  const cross = [{ x: 1800, y: 1400, ms: 0 }, { x: 1250, y: 1400, ms: 300 }, { x: 1150, y: 1400, ms: 400 }];
+  const along = (pth) => { for ( let i = 1; i < pth.length; i++ ) for ( let k = 0; k <= 20; k++ ) { const f = k / 20, x = pth[i - 1].x + (pth[i].x - pth[i - 1].x) * f, y = pth[i - 1].y + (pth[i].y - pth[i - 1].y) * f;
+    if ( FIT.hitOf({ x0: x - 150, y0: y - 40, x1: x + 150, y1: y + 40 }, [pin], null) > 0 ) return true; } return false; };
+  ok(along(cross), "the way as planned crosses the pin between its clean points");
+  const rc = FIT.rideFit(cross, v, [pin], 300, 80, 1.15, 16);
+  ok(rc.slice(1).every((q, i) => { const a = rc[i]; for ( let k = 1; k <= FIT.RIDE_SAMPLES; k++ ) { const f = k / FIT.RIDE_SAMPLES; if ( FIT.hitOf({ x0: a.x + (q.x - a.x) * f - 150, y0: a.y + (q.y - a.y) * f - 40, x1: a.x + (q.x - a.x) * f + 150, y1: a.y + (q.y - a.y) * f + 40 }, [pin], null) > 0 ) return false; } return true; }) || FIT.hitOf({ x0: rc[0].x - 150, y0: rc[0].y - 40, x1: rc[0].x + 150, y1: rc[0].y + 40 }, [pin], null) > 0,
+    "a way whose points are clean but whose box crosses a pin between them is drawn back off the pin (checked along the way)");
   // (the ladder with no clean size takes the size that covers least, not the biggest)
   const pen = (p) => ({ off: 0, pui: p, tok: 0, pin: 0, wrd: 0, sub: 0, pen: p });
   const fake = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.6 : w.fitK > 0.4 ? 0.4 : 0.1) }));
   const r2 = FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) });
   ok(r2[0].fitK === 0, "a step-3 main word with no clean place anywhere stands at the size that covers least");
-  ok(/ui: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "an unlocated word keeps off the map's pins too");
+  ok(/panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "an unlocated word keeps off the map's pins too (this seat's: the seat rule)");
+  // (MAPSFXSEAT: with no clean size the BIGGEST size within LADDER_SLACK of the least covering one - not today's size by default)
+  const fake2 = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.45 : w.fitK > 0.4 ? 0.42 : 0.4) }));
+  ok(FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake2, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) })[0].fitK === undefined, "a step-3 main word with no clean place keeps its stepped size when it covers barely more than today's");
 });
 
 /* ---------------------------------------------------------------- BURN (pure) */
@@ -205,46 +223,65 @@ const L = E.engine; L.lookStyle("invincible");
 const hold = (text, o) => { const p = L._plan(text, o); L._settle(p); return { w: p._holdBox.w, h: p._holdBox.h, sk: p.sizeK }; };
 
 await group("REACH", async () => {
-  // (the map's words with their entrances: the engine's reach around the word / the placement box must stay under the REACH factor)
+  // MAPSFXSEAT: the map takes each word's reach from the ENGINE's own measure (L.measure, LETR 1.9.11) - its whole entrance and hold - and
+  // fits that (FIT.reachFactor). The reach the engine then keeps in the view when it plays the word (h.reach) is that same reach, and the
+  // map's fit holds it. Before, a factor per entrance (FIT.REACH) stood in for it and went stale: since LETR 1.9.10 a held word moves while
+  // it stands, and a debris word reached 1.14 x 1.18 of its box, over the 1.15 of its factor (the trunk went red on exactly that).
   const words = [["thunder", { loud: 0.96, prefix: true }, "slam"], ["thunder", { loud: 0.72 }, "slam"], ["thunder", { loud: 0.32, long: 0.6 }, "grow"], ["rumble", { loud: 0.15, long: 0.8 }, "grow"],
     ["boom", { loud: 1, prefix: true }, "slam"], ["grenade", { loud: 0.7 }, "slam"], ["debris", { pieces: "large", material: "earth", loud: 0.5 }, "pop"], ["fire", { stage: "ignite", loud: 0.5 }, "rise"],
     ["fire", { stage: "out", loud: 0.3, long: 0.6 }, "pop"], ["shockwave", { loud: 0.7, long: 0.5 }, "grow"], ["zap", { loud: 0.2 }, "pop"]];
-  let worst = {};
+  let stale = 0, cases = 0;
   for ( const [kind, wo, inn] of words ) for ( const seed of ["a", "b", "c"] ) for ( const lang of ["en", "pl"] ) {
     const w = L.word(kind, { ...wo, seed, lang });
-    const h = L.play(w.text, { ...w.play, in: inn, space: "screen", size: 60, fit: "screen", seed, at: { x: 800, y: 450 } });
+    const o = { ...w.play, in: inn, space: "screen", size: 60, fit: "screen", seed, at: { x: 800, y: 450 }, reduced: false };
+    const m = L.measure(w.text, o), u = m.unit;
+    const hb = { w: m.hold.w / u, h: m.hold.h / u }, reach = { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u };
+    const rk = FIT.reachFactor(hb, reach), b = FIT.wordBox(hb, 1);
+    const h = L.play(w.text, o);
     await E.tick(120);
-    const e = h.reach, b = FIT.wordBox(h.plan._holdBox, 1), R = FIT.reachOf(inn);
-    const rw = (e.l + e.r) / b.bw, rh = (e.u + e.d) / b.bh;
-    worst[inn] = Math.max(worst[inn] ?? 0, rw, rh);
-    ok(rw <= R + 1e-6 && rh <= R + 1e-6, `${kind} ${w.text} (${inn}): the engine's reach ${rw.toFixed(2)} x ${rh.toFixed(2)} of the box, under ${R}`);
+    const e = h.reach, k = h.size * h.plan.sizeK;
+    cases++;
+    // (the engine keeps exactly the measured reach in the view: the map's numbers are the engine's)
+    ok(["l", "r", "u", "d"].every((s2) => Math.abs(e[s2] * k - m.reach[s2]) <= 1e-6 * Math.max(1, m.reach[s2])), `${kind} ${w.text} (${inn}): the reach the engine keeps in view is its measured reach`);
+    // (and the map's fit factor holds it, on both axes)
+    ok((e.l + e.r) / b.bw <= rk + 1e-9 && (e.u + e.d) / b.bh <= rk + 1e-9, `${kind} ${w.text} (${inn}): the map's measured reach factor ${rk.toFixed(2)} holds the engine's reach`);
+    if ( (e.l + e.r) / b.bw > FIT.reachOf(inn) + 1e-6 || (e.u + e.d) / b.bh > FIT.reachOf(inn) + 1e-6 ) stale++;
     h.stop({ quick: true }); await E.tick(40);
   }
-  if ( V ) console.log("REACH worst", worst);
+  ok(/w\.reachU = md\?\.reach \?\? null; w\.rk = md \? FIT\.reachFactor\(hb, md\.reach\) : FIT\.reachOf\(o\.in\);/.test(sfx) && /const m = L\?\.measure\?\.\(text, \{ \.\.\.o, reduced: false/.test(sfx), "the runtime takes every world word's reach from L.measure (the factor only on an engine without it)");
+  ok(/const rk = reach \? FIT\.reachFactor\(hold, reach\) : FIT\.reachOf\(stageIn\)/.test(seatSrc), "and every unlocated word's");
+  if ( V ) console.log("REACH", { cases, overTheOldFactor: stale });
 });
 
 await group("THUNDER", async () => {
-  // a close strike beyond the view: its word at the edge toward it, rank 5 (level 3) or 4, at every step, on every screen
-  const zoom = 1;
-  let before = 0, after = 0, cases = 0, sizeOrder = 0, shrunkToday = 0;
+  // A close strike beyond the view: its word at the edge toward it, rank 5 (level 3) or 4, at every step, on four screens, on a GM's seat
+  // with his usual panels and on a player's with none. MAPSFXSEAT: laid out ONCE in the reference window (sfx-seat screenLayout: the rank's
+  // share of the reference height, the engine's measured reach, off the shared panel zones), then drawn by the seat rule (seatScreen: the
+  // reference window centred, shifted off this seat's panels, smaller only when its reach is bigger than this window). Before, every seat
+  // sized it by its own height and shrank it around its own panels: the GM's word was smaller than the player's (defect 3).
+  let before = 0, after = 0, cases = 0, sizeOrder = 0, sameSeats = 0, seatPairs = 0, fitOnly = 0;
+  const drawn = (ref, s3) => {
+    const f = s3.k, cx = s3.at.x, cy = s3.at.y, dx = cx - ref.x, dy = cy - ref.y;
+    const sc = (b) => ({ x0: cx + (b.x0 + dx - cx) * f, x1: cx + (b.x1 + dx - cx) * f, y0: cy + (b.y0 + dy - cy) * f, y1: cy + (b.y1 + dy - cy) * f });
+    return { box: sc(ref.box), reach: sc(ref.reach) };
+  };
   for ( const [W, H] of SCREENS ) {
     globalThis.innerWidth = W; globalThis.innerHeight = H;
-    const ui = panels(W, H), view = { x0: 0, y0: 0, x1: W, y1: H - 0 };
+    const ui = panels(W, H);
     for ( const dir of [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]] ) for ( const lv of [1, 2, 3] ) for ( const seed of ["s1", "s2"] ) {
       const v = { x0: 0, y0: 0, x1: W, y1: H };
       const place = { x: W / 2 + dir[0] * W, y: H / 2 + dir[1] * H };
       const fw = EV.flashWord({ kind: "close", k: 7, t: 1000, lv, strokes: [1] }, place, v, seed);
       const word = L.word("thunder", { ...fw.wo, seed: `${seed}|${fw.seed}`, lang: seed === "s1" ? "en" : "pl" });
-      const o0 = { ...word.play, in: "slam", holdKind: "rattle", space: "screen", seed: fw.seed };
+      const o0 = { ...word.play, in: "slam", holdKind: "rattle", space: "screen", seed: fw.seed, reduced: false };
       const sizes = [];
       for ( const step of [1, 2, 3] ) {
         cases++;
-        // (today: the box of the WORLD word - rank size in scene px, the engine's legibility clamp - times the zoom; the screen word
-        // drawn at its rank's share of the view height, unclamped; the spot clamped by that box: sfx.mjs playScreen before THUNDERFIT)
+        // (today, before THUNDERFIT: the box of the WORLD word, the screen word at its rank's share of THIS view's height, its spot clamped)
         const hb = hold(word.text, o0);
-        const zw = L.sizeOf(word.text, { ...word.play, space: "world", size: EV.rankSize(fw.rank, H / zoom), ceilK: 1, magnitude: 1.5 });
+        const zw = L.sizeOf(word.text, { ...word.play, space: "world", size: EV.rankSize(fw.rank, H), ceilK: 1, magnitude: 1.5 });
         const ob = FIT.wordBox(hb, zw.size * hb.sk);
-        let bw = ob.bw * zoom, bh = ob.bh * zoom;
+        let bw = ob.bw, bh = ob.bh;
         const o = { ...o0, size: EV.rankSize(fw.rank, H), fit: "screen" };
         if ( step !== 2 ) {
           const s0 = o.size;
@@ -254,22 +291,30 @@ await group("THUNDER", async () => {
         }
         const fx = bw * 0.5 + 16, fy = bh * 0.75 + 16;
         const today = { x: Math.min(Math.max(fw.screen.fx * W, fx), Math.max(fx, W - fx)), y: Math.min(Math.max(fw.screen.fy * H, fy), Math.max(fy, H - fy)) };
-        const real = FIT.wordBox(hb, o.size * hb.sk), rk = FIT.reachOf("slam");
-        const bad = (x, y, k) => { const b = boxAt(x, y, real.bw * k, real.bh * k), r = boxAt(x, y, real.bw * k * rk, real.bh * k * rk);
-          return area(r) - inter(r, { x0: 16, y0: 16, x1: W - 16, y1: H - 16 }) > 1 || ui.some((u) => inter(b, u) > 1); };
-        if ( bad(today.x, today.y, 1) ) before++;
-        // (now: sfx.mjs screenPlace)
-        const kv = FIT.viewFit(real.bw * rk, real.bh * rk, W, H);
-        const r = FIT.screenFit({ today: kv >= 1 ? today : null, want: { x: fw.screen.fx * W, y: fw.screen.fy * H }, bw: real.bw * kv, bh: real.bh * kv, rk, view, ui });
-        const k = kv * r.k;
-        if ( bad(r.x, r.y, k) ) { after++; if ( V ) console.log("still bad", W, H, dir, lv, step, word.text, k.toFixed(2)); }
-        if ( step === 2 && k < 1 ) shrunkToday++;
-        sizes.push(o.size * k);
-        // (the engine draws it there: no shift of its own - its whole reach is inside the view)
+        const real = FIT.wordBox(hb, o.size * hb.sk), rk0 = FIT.reachOf("slam");
+        const r0 = boxAt(today.x, today.y, real.bw * rk0, real.bh * rk0), b0 = boxAt(today.x, today.y, real.bw, real.bh);
+        if ( area(r0) - inter(r0, { x0: 16, y0: 16, x1: W - 16, y1: H - 16 }) > 1 || ui.some((q) => inter(b0, q) > 1) ) before++;
+        // (now: the table's layout - the same call on every seat - then the seat rule on the GM's seat and on a player's)
+        const plan = { sizeK: hb.sk, hold: { w: hb.w } };
+        const so = { ...o0, size: EV.rankSize(fw.rank, SEAT.REF_VH), fit: "screen" };
+        const size = SEAT.tableScreenSize(sizeFor, L.sizeModel, so, plan, step);
+        const m = L.measure(word.text, { ...so, size, at: { x: 0, y: 0 } }), u = m.unit;
+        const ref = SEAT.screenLayout({ hold: { w: m.hold.w / u, h: m.hold.h / u }, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u }, cap: size * m.sizeK, fixed: fw.screen });
+        const gm = SEAT.seatScreen(ref, { W, H, panels: ui }), pl = SEAT.seatScreen(ref, { W, H, panels: [] });
+        const g = drawn(ref, gm);
+        const out = area(g.reach) - inter(g.reach, { x0: 15, y0: 15, x1: W - 15, y1: H - 15 }) > 1, under = ui.some((q) => inter(g.box, q) > 1);
+        if ( out || under ) { after++; if ( V ) console.log("still bad", W, H, dir, lv, step, word.text, gm.fit.rules, out, under); }
+        // (the GM with his panels and a player with none draw it the SAME size: only the "fit" rule - its reach bigger than the window -
+        // may make it smaller, the same on both: a window, not panels)
+        seatPairs++;
+        if ( Math.abs(gm.k - pl.k) < 1e-9 ) sameSeats++;
+        if ( gm.k < 1 && !gm.fit.rules.includes("fit") ) fitOnly++;
+        sizes.push(size * ref.k * gm.k);
+        // (the engine draws it there: no shift of its own - its whole reach is inside the window)
         if ( step === 2 && seed === "s1" && (dir[0] + dir[1]) % 2 === 0 ) {
-          const h = L.play(word.text, { ...o, size: o.size * k, at: { x: r.x, y: r.y } });
+          const h = L.play(word.text, { ...so, size: size * ref.k * gm.k, at: gm.at });
           await E.tick(120);
-          ok(h.lastPos && Math.hypot(h.lastPos.x - r.x, h.lastPos.y - r.y) < 2, `${W}x${H} the engine keeps the fitted word where it was put (${word.text})`);
+          ok(h.lastPos && Math.hypot(h.lastPos.x - gm.at.x, h.lastPos.y - gm.at.y) < 2, `${W}x${H} the engine keeps the fitted word where it was put (${word.text})`);
           h.stop({ quick: true }); await E.tick(30);
         }
       }
@@ -277,10 +322,11 @@ await group("THUNDER", async () => {
     }
   }
   ok(before > 0, `today's rule: the close strike's word ran off the view or under the panels in ${before} of ${cases} cases`);
-  ok(after === 0, `now: whole inside the view and off the panels in every case (${after} of ${cases} not)`);
+  ok(after === 0, `now: whole inside the view and off the GM's panels in every case (${after} of ${cases} not)`);
+  ok(sameSeats === seatPairs && fitOnly === 0, `the GM's seat and a player's draw it the same size (${sameSeats} of ${seatPairs}); smaller only by the window's fit rule`);
   ok(sizeOrder === cases / 3, `step 1 <= step 2 <= step 3 (within the fit's half-percent search) for every flash and screen: ${sizeOrder} of ${cases / 3}`);
-  if ( V ) console.log("THUNDER", { cases, before, after, shrunkToday });
-  ok(/const fit = screenPlace\(spec\.text, o, at, fixed\);/.test(sfx) && /const rk = FIT\.reachOf\(o\.in\), kv = FIT\.viewFit\(b\.bw \* rk, b\.bh \* rk, W, H\);/.test(sfx), "the runtime fits every unlocated word this way");
+  if ( V ) console.log("THUNDER", { cases, before, after });
+  ok(/const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return SEAT\.screenLayout\(\{ hold: hd, reach: md\?\.reach \?\? null, /.test(sfx) && /const ss = SEAT\.seatScreen\(ref, \{ W: innerWidth, H: innerHeight, panels: /.test(sfx), "the runtime lays out and draws every unlocated word this way");
 });
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900;
 fs.rmSync(base, { recursive: true, force: true });

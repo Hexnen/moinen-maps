@@ -36,18 +36,26 @@ import { fallAt as landingFallAt } from "../presets/landing-fx.mjs";
 import * as EV from "./sfx-events.mjs";
 import * as SZ from "./sfx-size.mjs";
 import * as FIT from "./sfx-fit.mjs";
+import * as SEAT from "./sfx-seat.mjs";
+import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
-const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
+const BURN_AFTER = 1500;
+// MAPSFXSEAT: a fire's catch word is lettered this long after the fire's shared moment on every seat (a seat on time shows the flames by
+// then: their field is computed in a worker); before, each seat waited for its OWN flames (question MAPSFXSEAT-2)
+const CATCH_SHOW_MS = 400;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
 const UI_MS = 400;             // the interface rectangles are measured at most this often
 const DRIFT = [0.15, 0.9];     // steam's way up off what was put out (grid squares: sideways, up)
 // a live fire's lasting word: the engine's sustain treatments WITHOUT "echo" (EFFECTS1, live: the echo copies sat stacked on
 // the word itself, FOOOFF three times over one fire)
 const BURN_TREATMENTS = ["breath", "stretch", "split", "shed", "accent"];
 
-let L = null, loading = null, gen = 0;      // gen: the scene's generation (a scene change makes every waiting callback stale)
+let L = null, loading = null, gen = 0;
+// MAPSFXSEAT: the size model of the engine copy this page RUNS (its own scripts/letters/size.mjs, from the copy the registry chose: maybe
+// plus-ultra's) - the table sizes are its model fed the reference view (engine request MAPSFXSEAT-E3: L.sizeOf with an explicit view)
+let engineSizeFor = null;      // gen: the scene's generation (a scene change makes every waiting callback stale)
 let known = null;              // the engine's sound kinds
 let pending = [], gatherTimer = 0;
 const sched = new Map();       // key -> { id, obj, voice }: timers of events and words scheduled ahead
@@ -76,6 +84,13 @@ let soon = [];                  // boxes of words placed, not started yet ({ box
 let stormTimer = 0;
 const flashSeen = new Set();
 let farCount = { key: "", k: 0, n: 0, list: new Map() };
+// MAPSFXSEAT: the table picture (sfx-seat.mjs): the words every seat holds, planned from shared data; and this seat's own log of every
+// lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
+const ledger = SEAT.makeLedger();
+let seatLog = [];
+const holdMemo = new Map();     // word + look -> the engine's hold box (a page plans many words in one frame)
+const pageWaits = new Map();    // firing id -> the shared moment its page stops waiting for its strokes
+const PAGE_WAIT_MS = 4000;      // a page waits this long (shared ms after its firing's moment) for all its fire-layer strokes
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
 /* ---------------------------------------------------------------- settings */
@@ -114,8 +129,9 @@ const layerOpts = () => { const k = get("sfxLayer", "overlay"); return { layer: 
 function engine() {
   if ( L ) return L;
   // (once loaded: what waits in this scene is gathered at once; teardown empties `pending`, so another scene's events never come back)
-  loading ??= letters().then((e) => {
+  loading ??= letters().then(async (e) => {
     L = e; try { known = new Set((L.vocab?.list?.("en") ?? []).map((k) => k.id)); } catch { known = null; }
+    engineSizeFor = await servingSizeFor(e);
     if ( pending.length && !gatherTimer ) gatherTimer = setTimeout(flush, 0);
     scheduleBurn(0);
     return e;
@@ -123,11 +139,24 @@ function engine() {
   return null;
 }
 
+/** MAPSFXSEAT: the size model (sizeFor) of the engine copy the page runs: the registry's copy of the same VERSION and module (L.build) */
+async function servingSizeFor(e) {
+  try {
+    const all = globalThis.MoinenLetters?.copies ?? [], m = e?.build?.module;
+    const c = all.find((q) => q.version === e.version && (!m || String(q.base).includes(`/${m}/`))) ?? all.find((q) => q.version === e.version);
+    if ( !c?.base ) return null;
+    const mod = await import(new URL("size.mjs", c.base).href);
+    return typeof mod.sizeFor === "function" ? mod.sizeFor : null;
+  } catch { return null; }
+}
+
 /* ---------------------------------------------------------------- events in */
 
 const grid = () => canvas?.grid?.size || 100;
 /** a shared-clock moment -> this page's performance clock */
 const toPerf = (t) => performance.now() + (t - sharedNow());
+/** this page's performance-clock moment -> the shared clock */
+const toShared = (t) => sharedNow() + (t - performance.now());
 const later = (key, ms, fn, info = {}) => {
   const g0 = gen;
   const id = setTimeout(() => { sched.delete(key); if ( g0 === gen ) fn(); }, Math.max(0, ms));
@@ -153,13 +182,10 @@ export function add(e) {
   seenEvent.add(e.key);
   if ( seenEvent.size > 4000 ) { const it = seenEvent.values(); for ( let i = 0; i < 1000; i++ ) seenEvent.delete(it.next().value); }
   stats.events++;
-  // a fire's catch waits until its flames show here (the field is computed in a worker: a big fire shows a second or two later)
-  if ( e.gate ) {
-    const at = shownAt.get(e.gate);
-    if ( at === undefined ) { const l = gated.get(e.gate) ?? []; l.push({ ...e, waitFrom: performance.now() }); gated.set(e.gate, l);
-      later(`gate|${e.key}`, C.GATE_MAX_MS, () => { const l2 = gated.get(e.gate); if ( l2 ) gated.set(e.gate, l2.filter((q) => q.key !== e.key)); }, { obj: e.obj, voice: e.voice }); return; }
-    e = { ...e, t: Math.max(e.t, at + 120) };
-  }
+  // (MAPSFXSEAT: a fire's catch is lettered at its shared moment on every seat. Before, it waited until its flames showed HERE - the
+  // field is computed in a worker, a busy seat shows a big fire a second or two later - so each seat lettered it at another instant, and
+  // a seat still applying a blast dropped it as too late: the player got no catch word in the GM's window. Question MAPSFXSEAT-2)
+  if ( e.gate ) e = { ...e, t: e.t + CATCH_SHOW_MS };
   const due = C.dueAt(e) - performance.now();
   if ( e.t - performance.now() > MAX_AHEAD ) return;
   if ( due > 30 ) { later(e.key, due, () => queue(e), { obj: e.obj, voice: e.voice, ev: e }); return; }
@@ -180,8 +206,6 @@ function onFireShown(ids) {
     if ( shownAt.has(id) ) continue;
     fresh = true;
     shownAt.set(id, now);
-    const l = gated.get(id); gated.delete(id);
-    for ( const e of l ?? [] ) { seenEvent.delete(e.key); stats.events--; const k = sched.get(`gate|${e.key}`); if ( k ) { clearTimeout(k.id); sched.delete(`gate|${e.key}`); } add({ ...e, gate: e.gate }); }
   }
   if ( shownAt.size > 400 ) for ( const [k, t] of shownAt ) if ( now - t > 600000 && !(Fire.allStrokes?.() ?? new Map()).has(k) ) shownAt.delete(k);
   if ( fresh ) scheduleBurn(BURN_AFTER + 50);
@@ -196,7 +220,8 @@ function onEntry(d, g, opts, start) {
   // (a Superhero plough: its own story - bite, grind, stop - instead of the stroke's word riding the front; EFFECTS2)
   if ( g.objId && onPlough(d, g, start) ) return;
   // (a damage area of a preset firing told as a page: silent - its ground tells the page what the debris lands on)
-  if ( g.objId && owned.d.has(g.objId) ) { for ( const p of pages.values() ) if ( p.pg.owned.d.has(g.objId) && !p.ground ) p.ground = C.matOf(I.mat); return; }
+  // (MAPSFXSEAT: its ground is read from the map when the page is planned, the same on every seat - not from the first area to enter here)
+  if ( g.objId && owned.d.has(g.objId) ) return;
   const k = `${g.hash}|${Math.round(start / 100)}`;
   if ( seenEntry.has(k) ) return;
   const pn = performance.now();
@@ -268,7 +293,7 @@ function storyPage(id, t0, words, ground = null, grp = null) {
   const p = { rec: { id, t0, size: 1 }, pg: { words }, ground, grp };
   for ( const w of words ) {
     const t = toPerf(w.t), lead = 140;
-    if ( t + Math.max(C.LATE_MS, (w.ms ?? 0) * 0.6) < performance.now() ) continue;
+    if ( lifeOver({ ...w, t }) ) continue;
     later(`st|${id}|${w.key ?? w.role}`, t - lead - performance.now(), () => pageWord(p, w, t));
   }
   return p;
@@ -309,7 +334,7 @@ function onDetonate(d, start) {
     if ( ownedBy?.pg.main ) e.voice = { boom: "boom", grenade: "boom", thud: "thud", thunder: "thunder", shockwave: "whump" }[ownedBy.pg.main] ?? e.voice;
     evs.push(e);
   }
-  const comp = EV.detonateComposition(evs, { grid: grid(), max: EV.DETONATE_MAX[perfMode()] ?? 3, prio: (v) => C.VOICES[v]?.prio ?? 0 });
+  const comp = EV.detonateComposition(evs, { grid: grid(), max: EV.DETONATE_MAX.high ?? 3, prio: (v) => C.VOICES[v]?.prio ?? 0 });
   stats.detonates = (stats.detonates ?? 0) + 1;
   for ( const e of comp ) add(e);
 }
@@ -368,16 +393,26 @@ function scanFirings() {
   firingsSeen = F;
   for ( const rec of Object.values(F) ) if ( rec?.id && !pages.has(rec.id) ) planPage(rec);
 }
-/** The page of a firing: planned once its fire-layer strokes are here (they come in the same scene update, maybe a moment later). */
+/** The page of a firing: planned once ALL its fire-layer strokes are here (they come in the same scene update, maybe a moment later). */
 function planPage(rec, tries = 0) {
   if ( !rec?.id || pages.has(rec.id) ) return;
+  // MAPSFXSEAT: the firing's own strokes are silent from the moment its record is here. Before, they were silent only once its page was
+  // planned, and a page waited about a second for its fire strokes: a seat that got them later (busy applying the destruction) planned a
+  // page without its burst (the shock wave as the main word, VWOOOOMMFF!) or none, and lettered the firing's damage areas by themselves
+  // (KA-TWOOOOMM at that seat's own size): other words than the seat beside it.
+  for ( const d of rec.d ?? [] ) if ( d?.id ) owned.d.add(d.id);
+  for ( const e of rec.f ?? [] ) if ( e?.id ) { owned.f.add(e.id); owned.catch.add(e.id); }
   const all = Fire.allStrokes?.() ?? new Map();
   const missing = (rec.f ?? []).some((e) => !all.has(e.id));
-  if ( missing && tries < 12 ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) planPage(rec, tries + 1); }, 80); return; }
+  // (the page waits for all its strokes as long as the firing can still be lettered: a part of a page is another page)
+  pageWaits.set(rec.id, pageWaits.get(rec.id) ?? Math.max(Number(rec.t0) || 0, sharedNow()) + PAGE_WAIT_MS);
+  if ( missing && sharedNow() < pageWaits.get(rec.id) ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) planPage(rec, tries + 1); }, 80); return; }
+  pageWaits.delete(rec.id);
   let pg;
   try { pg = PG.firingPage(rec, { grid: grid(), strokes: all, wayOf: MC.wayOf, headAt: MC.headAt, fallAt: landingFallAt, lift: 0.5 }); }
   catch ( err ) { console.warn(`${MODULE_ID} | sfx: a firing's page failed`, err); return; }
-  const p = { rec, pg, ground: null };
+  // (MAPSFXSEAT: the ground under the impact from the map's own pixels, the same on every seat, known before any word is written)
+  const p = { rec, pg, ground: groundAt(rec) };
   pages.set(rec.id, p);
   for ( const id of pg.owned.d ) owned.d.add(id);
   for ( const id of pg.owned.f ) owned.f.add(id);
@@ -390,62 +425,78 @@ function planPage(rec, tries = 0) {
   for ( const w of pg.words ) {
     if ( stepFor(SZ.groupOfPageWord(w)) === 0 ) continue;                                // (SFXSIZE: its group letters nothing)
     const t = toPerf(w.t), lead = 140;
-    if ( t + Math.max(C.LATE_MS, (w.ms ?? 0) * 0.6) < performance.now() ) continue;      // (a late joiner: its moment is over)
+    if ( lifeOver({ ...w, t }) ) continue;                                                 // (a late joiner: its whole life on the table is over)
     later(`pg|${rec.id}|${w.key}`, t - lead - performance.now(), () => pageWord(p, w, t));
   }
 }
-/** One word of a page, at its moment: written (its ground resolved now), placed on this client's screen, played. */
-function pageWord(p, w, t, waited = 0) {
-  if ( mode() === "off" || !canvas?.ready ) return;
-  if ( !L ) { engine(); return; }
-  if ( mode() === "big" && w.role !== "main" ) return;
-  const grp = SZ.groupOfPageWord(w, p.grp);
-  if ( stepFor(grp) === 0 ) return;
-  // a catch waits for its flames to show here
-  if ( w.gate && !shownAt.has(w.gate) ) {
-    if ( waited < C.GATE_MAX_MS ) { const g0 = gen; setTimeout(() => { if ( g0 === gen ) pageWord(p, w, Math.max(t, performance.now() + 120), waited + 150); }, 150); }
-    return;
+/** MAPSFXSEAT: the ground at a firing's impact from the map's pixels (sfx-seat groundOfPixels: the destruction bake's own rule). */
+function groundAt(rec) {
+  try {
+    const at = Array.isArray(rec?.at) ? { x: Number(rec.at[0]), y: Number(rec.at[1]) } : null;
+    if ( !at || !Number.isFinite(at.x) || !Number.isFinite(at.y) ) return null;
+    const r = canvas.dimensions?.sceneRect ?? canvas.dimensions?.rect ?? { x: 0, y: 0 }, R = Math.max(8, Math.round(grid() * 0.6));
+    const box = { x0: Math.round(at.x - (r.x ?? 0) - R), y0: Math.round(at.y - (r.y ?? 0) - R), w: 2 * R, h: 2 * R };
+    return SEAT.groundOfPixels(mapPixels(1, box), box.w);
+  } catch { return null; }
+}
+/**
+ * MAPSFXSEAT: the TABLE picture of a page, planned once from what every seat shares: every word written in page order (its ground known
+ * from the map), sized on the reference view, measured by the engine, placed off the shared obstacles and the words the table already
+ * holds, timed on the shared clock. A seat then shows each word by the seat rule only (pageWord -> play / playScreen).
+ */
+function tablePage(p) {
+  if ( p.table || !L ) return p.table ?? null;
+  p.table = new Map();
+  const G = grid(), lg = lang(), sid = canvas.scene?.id ?? "";
+  const words = p.pg.words, main = words.find((q) => q.role === "main") ?? words[0];
+  if ( !main ) return p.table;
+  // (the reference view: centred on the page's main sound, at the zoom that holds its subject)
+  const c = { x: main.x, y: main.y }, zr = main.r ?? G * 0.5, z = SEAT.refZoom(G, zr), vw = SEAT.refView(c, z);
+  const env = { c, z, zr, vw, used: new Set(), mainBox: null, pins: sharedPins(vw) };
+  p.texts ??= new Set();
+  for ( const w of words ) {
+    const sd = `${sid}|${w.seed}`;
+    const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
+    if ( wo.material == null ) delete wo.material;
+    // the word is written BEFORE any spot is picked (every seat writes the same words in the same order, whatever it shows), and never
+    // repeats a word of its own page: one bomb's debris words were seen saying the same thing twice (EFFECTS1)
+    let word;
+    try { word = PG.unrepeated((s) => L.word(w.kind, { ...wo, seed: s, lang: lg }), sd, p.texts); }
+    catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); continue; }
+    if ( !word?.text ) continue;
+    p.texts.add(word.text);
+    const q = tableWord(p, w, word, sd, env);
+    p.table.set(w.key, q);
+    if ( w.role === "main" && q?.box ) env.mainBox = q.box;
   }
-  const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
-  if ( w.role !== "main" && alive.size >= caps.alive ) { stats.dropped++; return; }
-  // a landing or a fire this client can see (its own, else the nearest in time in view): the debris and the catch are lettered where
-  // this screen shows them
-  const G = grid(), lg = lang(), sd = `${canvas.scene?.id ?? ""}|${w.seed}`;
-  const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
-  if ( wo.material == null ) delete wo.material;
-  // the word is written BEFORE this screen picks its spot (so every client writes the same words in the same order, whatever it
-  // drops), and never repeats a word of its own page: one bomb's debris words were seen saying the same thing twice (EFFECTS1)
-  p.texts ??= new Set(); p.wt ??= new Map();
-  let word = p.wt.get(w.key);
-  if ( !word ) {
-    try {
-      word = PG.unrepeated((s) => L.word(w.kind, { ...wo, seed: s, lang: lg }), sd, p.texts);
-    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); return; }
-    p.texts.add(word.text); p.wt.set(w.key, word);
-  }
-  let alts = [], spot0 = null;
-  const w0 = w;
+  return p.table;
+}
+/** One word of a page on the TABLE: its spot (a landing or a fire the reference view holds), its size, its box, its way, its place. */
+function tableWord(p, w0, word, sd, env) {
+  const G = grid(), { vw, z, zr } = env;
+  let w = w0, alts = [];
   if ( w.cands ) {
-    p.used ??= new Set();
-    const ss = PG.pickSpots(w, view(), p.used, Number(p.rec.t0), 6), s = ss[0];
-    if ( !s ) { stats.dropped++; return; }
+    const ss = PG.pickSpots(w, vw, env.used, Number(p.rec.t0), 6), s = ss[0];
+    if ( !s ) return { dropped: "spot", text: word.text, key: w0.key };
     alts = ss.slice(1);
-    p.used.add(spot0 = `${Math.round(s.x)},${Math.round(s.y)}`);
-    w = { ...w, x: s.x, y: s.y, ...(s.gate ? { gate: s.gate } : {}) };
+    env.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
+    w = { ...w, x: s.x, y: s.y };
   }
-  if ( !word?.text ) return;
   const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
-  const r = w.r ?? G * 0.4;
-  const spec = { role, grp, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t, ms: w.ms ?? 700, seed: sd,
-    // (EFFECTS2: a story's words are sized by rank as a share of this client's view: readable at any zoom, a lower rank never bigger)
+  const r = w.r ?? G * 0.4, grp = SZ.groupOfPageWord(w0, p.grp), lag = w0.gate ? CATCH_SHOW_MS : 0;
+  const spec = { role, grp, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t: toPerf(w.t + lag), ts: w.t + lag, ms: w.ms ?? 700, seed: sd,
+    key: `${p.rec.id}|${w0.key}`, page: p.rec.id, z, zr, sx: w.at?.x ?? w.x, sy: w.at?.y ?? w.y,
+    // (EFFECTS2: a story's words are sized by rank as a share of the REFERENCE view: readable, a lower rank never bigger)
     rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
     cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
+  if ( w.screen ) return { ...spec, screenAt: w.screen };
+  spec.alive = ledger.count(spec.ts, spec.ts + lifeMs(spec));
   measure(spec);
-  // (a ride from beyond the screen's edge comes in AT the edge, whole; one going past it - the plough's grind - stops at it)
+  // (a ride from beyond the reference view's edge comes in AT the edge, whole; one going past it - the plough's grind - stops at it)
   if ( w.ride && spec.path ) {
-    spec.path = PG.rideInView(spec.path, view(), spec.bw ?? 0, spec.bh ?? 0);
+    spec.path = PG.rideInView(spec.path, vw, spec.bw ?? 0, spec.bh ?? 0);
     if ( spec.path[0] ) { spec.x = spec.path[0].x; spec.y = spec.path[0].y; }
   }
   // a travelling PRE word leaves (its exit, about a fifth of a second) so it is gone PRE_GAP before the main word's frame
@@ -453,138 +504,122 @@ function pageWord(p, w, t, waited = 0) {
     const mw = p.pg.words.find((q) => q.role === "main");
     if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220;
     // (a ride that hands over to the next one - the meteor's far whine to its roar - leaves when its own way ends)
-    if ( p.pg.words.some((q) => q !== w && q.role === "pre" && q.ride && q.t > w.t) ) spec.stopAt = Math.min(spec.stopAt ?? Infinity, t + (w.ms ?? 0) + 60);
+    if ( p.pg.words.some((q) => q !== w0 && q.role === "pre" && q.ride && q.t > w0.t) ) spec.stopAt = Math.min(spec.stopAt ?? Infinity, spec.t + (w.ms ?? 0) + 60);
   } else if ( w.role === "pre" ) {
-    // (EFFECTS2: a standing PRE word - the meteor's rumble - yields when the main word lands: live it stood under the blast for a second
-    // and a half and crowded the wave and the first debris)
+    // (EFFECTS2: a standing PRE word - the meteor's rumble - yields when the main word lands)
     const mw = p.pg.words.find((q) => q.role === "main");
     if ( mw ) spec.stopAt = toPerf(mw.t) + 40;
   }
-  // the wave rides out the free way on this screen: away from the main word as placed here, off the panels, inside the view
+  const life = lifeMs(spec), upNow = () => ledger.boxes(spec.ts, spec.ts + life, spec.key);
+  // the wave rides out the free way of the TABLE picture: away from the main word as placed there, off the shared pins and the table's
+  // words up, inside the reference view; its whole reach (the engine's measure) held there and off the pins along its whole way
   if ( w.wave ) {
-    const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)],
-      ui: uiBoxes(), v, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
-    // (THUNDERFIT: the pins weigh in the way's choice (live the wave rode across the scene's skull pin); the way is chosen by a penalty only - live it ran past the left edge and under the controls column: it is held whole
-    // inside the view and off the panels, its reach counted)
-    const zm = canvas.stage?.scale?.x || 1;
-    spec.path = FIT.rideFit(wr.ride, v, [...uiBoxes(), ...pinBoxes(v), ...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)], spec.bw ?? G, spec.bh ?? G * 0.4, FIT.REACH.other, FIT.EDGE / zm);
+    const avoid = [...(env.mainBox ? [env.mainBox] : []), ...upNow(), ...env.pins];
+    const wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid, ui: [], v: vw, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
+    spec.path = FIT.rideFit(wr.ride, vw, avoid, spec.bw ?? G, spec.bh ?? G * 0.4, spec.rk ?? FIT.REACH.other, FIT.EDGE / z);
     spec.x = spec.path[0].x; spec.y = spec.path[0].y;
-    // (a pressure front: the word travels upright - leaning along a downward way it read as a fallen column - and is gone soon after
-    // the front breaks up, live it stood at the reach for two seconds and took the debris words' places)
-    spec.orient = "none"; spec.stopAt = t + w.wave.rim + 180;
+    // (a pressure front: the word travels upright and is gone soon after the front breaks up)
+    spec.orient = "none"; spec.stopAt = spec.t + w.wave.rim + 180;
   }
-  // (owner's answer 4: a sound whose source this player cannot see - under the fog, out of vision - is shown generally on the
-  // screen, never at the hidden place)
-  if ( w.screen ) { playScreen(spec, w.screen); return; }
-  if ( !hereVisible(w.at?.x ?? w.x, w.at?.y ?? w.y) ) { playScreen(spec); return; }
-  // (a word at its shooter - a rocket's launch at the tube - whose shooter this client cannot see (a hidden token) is unlocated too, even
-  // where the ground is in view: it must not point at the hidden token)
-  if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(spec); return; }
-  let placed = placeFit([spec], placeCtx());
-  // (a debris / catch word covered by the story's bigger words still on screen takes the next landing in view instead of being dropped)
-  for ( const s of alts ) {
-    if ( placed.length ) break;
-    const r2 = w.r ?? G * 0.4;
-    const s2 = { ...spec, x: s.x, y: s.y, subject: { x0: s.x - r2, y0: s.y - r2, x1: s.x + r2, y1: s.y + r2 } };
-    placed = placeFit([s2], placeCtx());
-    if ( placed.length ) p.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
-  }
-  // (still covered - a meteor's main word and wave fill the crater's surroundings at a close zoom: live, four debris words dropped) -
-  // it waits a moment for the bigger words to clear and tries again: the debris keeps coming down, the story still resolves
-  if ( !placed.length && w0.cands && waited < PG.FALL_WAIT_MS ) {
-    p.used.delete(spot0);
-    const g0 = gen; setTimeout(() => { if ( g0 === gen ) pageWord(p, w0, performance.now() + 60, waited + 250); }, 250);
-    return;
+  const ctxAt = (ts) => tableCtx(env.c, z, ts, ts + life, spec.key);
+  // the debris / catch word covered by the story's bigger words takes the next landing the reference view holds; still covered, it
+  // waits on the TABLE's timeline (a quarter second at a time, up to FALL_WAIT_MS) for the bigger words to clear: the debris keeps coming
+  // down, the story still resolves - the same wait on every seat (before: on this seat's words up)
+  const spots = [{ x: spec.x, y: spec.y }, ...alts];
+  let placed = [];
+  for ( let dt = 0; dt <= (w0.cands ? PG.FALL_WAIT_MS : 0) && !placed.length; dt += 250 ) {
+    for ( const s of spots ) {
+      const s2 = s === spots[0] && dt === 0 ? spec : { ...spec, x: s.x, y: s.y, t: spec.t + dt, ts: spec.ts + dt,
+        ...(s === spots[0] ? {} : { subject: { x0: s.x - r, y0: s.y - r, x1: s.x + r, y1: s.y + r }, sx: s.x, sy: s.y }) };
+      placed = placeFit([s2], ctxAt(s2.ts));
+      if ( placed.length ) { if ( s !== spots[0] ) env.used.add(`${Math.round(s.x)},${Math.round(s.y)}`); break; }
+    }
   }
   if ( !placed.length ) {
-    stats.dropped++;
-    // (why: the penalties of its least bad place, for checks)
-    const why = C.place([{ ...spec, role: "main" }], placeCtx())[0]?.pen;
-    lastPlaced.push({ text: spec.text, role: spec.role, key: w.key, dropped: true, why: why && { ui: +why.pui.toFixed(2), tok: +why.tok.toFixed(2), pin: +(why.pin ?? 0).toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } });
+    const why = C.place([{ ...spec, role: "main" }], ctxAt(spec.ts))[0]?.pen;
+    return { dropped: "room", text: spec.text, key: w0.key, why: why && { tok: +why.tok.toFixed(2), pin: +(why.pin ?? 0).toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } };
   }
-  if ( w.role === "main" && placed[0] ) p.mainBox = placed[0].box;
-  for ( const q of placed ) { play(q); lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box, ...(q.fitK !== undefined ? { fitK: q.fitK } : {}), clean: FIT.isClean(q.pen) }); }
-  if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
+  const q = placed[0];
+  ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: q.role === "main" });
+  return q;
 }
+/** One word of a page, at its moment, on THIS seat: the table's word, shown by the seat rule (its view, its panels, what it may see). */
+function pageWord(p, w) {
+  if ( mode() === "off" || !canvas?.ready ) return;
+  if ( !L ) { engine(); return; }
+  const tb = tablePage(p);
+  if ( mode() === "big" && w.role !== "main" ) return;
+  const grp = SZ.groupOfPageWord(w, p.grp);
+  if ( stepFor(grp) === 0 ) return;
+  const q = tb?.get(w.key);
+  if ( !q ) return;
+  if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
+  // (this seat's own need: its performance mode keeps fewer words up - never the main word)
+  const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
+  if ( w.role !== "main" && alive.size >= caps.alive ) { stats.dropped++; seatSkip(q, "perf"); return; }
+  // (owner's answer 4: a sound whose source this seat cannot see - under the fog, out of vision, a hidden shooter - is shown generally
+  // on the screen, never at the hidden place; a flash beyond this seat's view sounds at the edge toward it)
+  if ( q.screenAt ) { playScreen(q, q.screenAt); return; }
+  if ( !hereVisible(q.sx ?? q.x, q.sy ?? q.y) ) { playScreen(q); return; }
+  if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(q); return; }
+  play(q);
+  lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box, ...(q.fitK !== undefined ? { fitK: q.fitK } : {}), clean: FIT.isClean(q.pen) });
+  trimPlaced();
+}
+const trimPlaced = () => { if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24); };
 /** Can this client see the scene point (x, y)? The GM always; a player under the fog of war or out of vision does not. */
 function hereVisible(x, y) {
   if ( game.user?.isGM || !canvas?.visibility?.tokenVision ) return true;
   try { return !!canvas.visibility.testVisibility({ x, y }, { tolerance: grid() * 0.5 }); } catch { return true; }
 }
-/** A spot on this client's screen free of its panels (client px) for a word `bw` x `bh` client px, the upper middle first: an
-    unlocated sound (its source hidden or unknown) is shown there. */
-function screenSpot(bw, bh, key = "") {
-  uiBoxes();
-  const ui = uiCache.rects ?? [], W = innerWidth, H = innerHeight;
-  const F = [[0.5, 0.2], [0.36, 0.24], [0.64, 0.24], [0.5, 0.32], [0.28, 0.4], [0.72, 0.4], [0.5, 0.7]];
-  const k = Math.floor(C.h01(key) * 3), order = [...F.slice(k), ...F.slice(0, k)];
-  let best = null;
-  for ( const [fx, fy] of order ) {
-    const x = fx * W, y = fy * H, b = { x0: x - bw / 2, y0: y - bh / 2, x1: x + bw / 2, y1: y + bh / 2 };
-    const hit = ui.reduce((s, u) => s + Math.max(0, Math.min(b.x1, u.x1) - Math.max(b.x0, u.x0)) * Math.max(0, Math.min(b.y1, u.y1) - Math.max(b.y0, u.y0)), 0);
-    if ( !best || hit < best.hit ) best = { x, y, hit };
-    if ( !hit ) break;
-  }
-  return { x: best.x, y: best.y };
-}
-/** Play a word unlocated (EFFECTS1, owner's answers 2 and 4; engine request KINDS1-1 for a real "screen" placement): in screen space
-    over the map (under the bars), not riding, not pointing at anything. */
+/** MAPSFXSEAT: a spot of the REFERENCE window free of its shared panel zones (sfx-seat refScreenSpot; the word's seed turns the order) */
+const refScreenSpot = (bw, bh, key = "") => SEAT.refScreenSpot(bw, bh, Math.floor(C.h01(key) * 3));
+/**
+ * Play a word unlocated (EFFECTS1, owner's answers 2 and 4; engine request KINDS1-1 for a real "screen" placement): in screen space over
+ * the map (under the bars), not riding, not pointing at anything. MAPSFXSEAT: laid out ONCE in the reference window (its size from the
+ * reference height, its spot off the shared panel zones, fitted by its real box and reach: screenPlace), then drawn centred in this
+ * seat's window and moved (or, only when its whole reach is bigger than this window, made smaller) by the seat rule - before, each seat
+ * sized it by its own height and shrank it to fit around its own panels: the GM's thunder word was smaller than a player's.
+ */
 function playScreen(spec, fixed = null) {
-  const zoom = canvas.stage?.scale?.x || 1;
+  if ( !L ) return;
   const grp = grpOf(spec), step = stepFor(grp);
   let o = optsOf(spec, true);
   delete o.path; delete o.from; delete o.area;
-  Object.assign(o, { space: "screen", layer: "hud", at: null });
-  // (a ranked word on the screen: its share of the screen height in CSS px)
-  if ( Number.isFinite(spec.rank) ) Object.assign(o, { size: EV.rankSize(spec.rank, innerHeight, spec.shrink ?? 1), fit: "screen" });
-  // (SFXSIZE: the group's size step - a ranked screen word is not clamped by the engine, so it is stepped and held here: at a bigger
-  // step under the engine's ceiling for its loudest word, and its spot is found for the stepped box)
-  let bw = (spec.bw ?? 200) * zoom, bh = (spec.bh ?? 80) * zoom;
-  if ( Number.isFinite(spec.rank) && step !== SZ.SIZE_DEFAULT ) {
-    const s0 = o.size, sk = (() => { try { return L?.sizeOf?.(spec.text, o)?.sizeK ?? 1; } catch { return 1; } })();
-    o.size = SZ.screenSizeAt(s0, step, step > SZ.SIZE_DEFAULT ? (() => { try { return loudCap(spec.text, o); } catch { return 0; } })() : 0, sk);
-    // (today's box estimate at the stepped size: a word held at today's size keeps today's spot)
-    const f = o.size / s0;
-    if ( f !== 1 ) { bw *= f; bh *= f; }
-  } else if ( !Number.isFinite(spec.rank) ) o = SZ.sizeOpts(o, step);
-  // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
-  const fw = bw * 0.5 + 16, fh = bh * 0.75 + 16;
-  let at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot(bw, bh, spec.seed);
-  // (THUNDERFIT: the spot above came from the box of the WORLD word, clamped by the engine, while this word is drawn on the screen at a
-  // share of the view height with no width ceiling: live, the close strike's word ran off both sides and under the panels at today's
-  // size. Its real box now: the word fits the view, then takes today's spot when it is clean there, else the nearest clean one)
-  const fit = screenPlace(spec.text, o, at, fixed);
-  if ( fit ) { at = { x: fit.x, y: fit.y }; if ( fit.k < 1 ) { if ( Number.isFinite(o.size) ) o.size *= fit.k; else o.scale = (Number.isFinite(o.scale) && o.scale > 0 ? o.scale : 1) * fit.k; } }
-  o.at = at;
+  Object.assign(o, { space: "screen", layer: "hud", at: null, keepInView: false });
+  const plan = planInfo(spec.text, o);
+  if ( !engineSizeFor ) return;
+  // (a ranked word: its rank's share of the reference height, at the group's size step - at a bigger step under the engine's ceiling for
+  // its loudest word on the reference screen; another word: the engine's own size on the reference screen at the step)
+  if ( Number.isFinite(spec.rank) ) o.size = SEAT.tableScreenSize(engineSizeFor, L.sizeModel, { ...o, size: EV.rankSize(spec.rank, SEAT.REF_VH, spec.shrink ?? 1) }, plan, step);
+  else { const so = SZ.sizeOpts(o, step); o.size = SEAT.refSize(engineSizeFor, so, plan, { space: "screen" }).size; }
+  o.fit = "screen"; delete o.scale;
+  const ref = screenPlace(spec.text, o, fixed, spec.seed);
+  if ( !ref ) return;
+  o.size *= ref.k;
   const g0 = gen, go = () => {
     if ( g0 !== gen || !L || mode() === "off" || stepFor(grp) === 0 ) return;
-    if ( C.tooLate(spec, performance.now()) ) { stats.late++; return; }
-    try { const h = L.play(spec.text, o); if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; } } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); }
+    if ( lifeOver(spec) ) { stats.late++; return; }
+    // (this seat: the reference window centred in its own, then the seat rule: shifted off its panels and pins, smaller only to fit)
+    uiBoxes();
+    const ss = SEAT.seatScreen(ref, { W: innerWidth, H: innerHeight, panels: [...(uiCache.rects ?? []), ...pinRects()], scale: L.prefs?.scale ?? 1 }), f = ss.fit;
+    const oo = { ...o, at: ss.at, size: o.size * ss.k, startAt: spec.t, reduced: reducedMotion() };
+    try {
+      const h = L.play(spec.text, oo);
+      if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; logCall(spec, { o: oo, fit: f, table: { size: o.size, at: { x: ref.x, y: ref.y } }, space: "screen" }); }
+    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); }
   };
   const wait = spec.t - performance.now();
   if ( wait > 4 ) later(`ws|${spec.seed}|${spec.t}`, wait, go); else go();
-  lastPlaced.push({ text: spec.text, role: spec.role, voice: spec.voice, screen: at, ...(fit ? { k: +fit.k.toFixed(3), box: fit.box, clean: fit.hit <= 0 } : {}) });
+  lastPlaced.push({ text: spec.text, role: spec.role, voice: spec.voice, screen: { x: ref.x, y: ref.y }, k: +ref.k.toFixed(3), box: ref.box, clean: ref.hit <= 0 });
+  trimPlaced();
 }
-/** THUNDERFIT: where and how big an unlocated word stands on this seat's screen, by its REAL box (the engine's hold box at the size it
-    is drawn at, with room for its entrance): first as big as today but never wider or taller than the view (FIT.viewFit: a share of the
-    view, the same share on every seat with the same view), then today's spot `today` when it is clean there (inside the view, off every
-    panel), else the nearest clean spot to where it should sound (the edge toward the strike: `fixed`), else a little smaller where it
-    fits (sfx-fit screenFit). -> { x, y, k (size share), hit, box } in CSS px, or null when the engine cannot tell its box. */
-function screenPlace(text, o, today, fixed) {
-  const hd = holdOf(text, o); if ( !hd ) return null;
-  let z = null; try { z = L.sizeOf(text, o); } catch { return null; }
-  const b = FIT.wordBox(hd, (z?.size ?? o.size ?? 0) * hd.sk);
-  if ( !(b.bw > 0) ) return null;
-  const sb = document.getElementById("sidebar")?.getBoundingClientRect?.();
-  const W = innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0), H = innerHeight;
-  // (its entrance reaches beyond the box - a slam's contact pose by a third: the engine keeps that reach in the view, so the fit does)
-  const rk = FIT.reachOf(o.in), kv = FIT.viewFit(b.bw * rk, b.bh * rk, W, H);
-  uiBoxes();
-  const want = fixed ? { x: fixed.fx * innerWidth, y: fixed.fy * innerHeight } : today;
-  // (the map's pins are in the way too: live, the strike's word stood on the scene's skull pin)
-  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, rk, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: [...(uiCache.rects ?? []), ...pinRects()] });
-  const k = kv * r.k, w2 = b.bw * k / 2, h2 = b.bh * k / 2;
-  return { x: r.x, y: r.y, k, hit: r.hit, box: { x0: Math.round(r.x - w2), y0: Math.round(r.y - h2), x1: Math.round(r.x + w2), y1: Math.round(r.y + h2) } };
+/** THUNDERFIT + MAPSFXSEAT: where and how big an unlocated word stands in the REFERENCE window, by its REAL box and reach (the engine's
+    own measure, L.measure): sfx-seat screenLayout. -> { x, y, k, cap, hit, box, reach } (reference-window CSS px) | null */
+function screenPlace(text, o, fixed, key = "") {
+  const md = measureOf(text, { ...o, at: { x: 0, y: 0 } }), hd = md ?? holdOf(text, o);
+  if ( !hd ) return null;
+  return SEAT.screenLayout({ hold: hd, reach: md?.reach ?? null, cap: (o.size ?? 0) * hd.sk, fixed, turn: Math.floor(C.h01(key) * 3), stageIn: o.in });
 }
 
 /** Is the shooter at scene point `from` (radius `fr`) visible to this client? A token there that this client cannot see: no. */
@@ -603,7 +638,8 @@ function screenReport(walk, t0, kinds, key) {
   if ( mode() !== "all" || !walk?.length || stepFor("destruction") === 0 ) return;
   const go = () => {
     if ( !L ) return;
-    const kind = C.kindOf("muzzle", known, null, kinds), at = screenSpot(innerWidth * 0.22, innerHeight * 0.1, key);
+    const kind = C.kindOf("muzzle", known, null, kinds), rs = refScreenSpot(SEAT.REF_VW * 0.22, SEAT.REF_VH * 0.1, key), off = SEAT.screenOffset(innerWidth, innerHeight);
+    const at = { x: rs.x + off.x, y: rs.y + off.y };
     try {
       L.stream({ kind, lang: lang(), space: "screen", layer: "hud", at: () => at, dir: -90, beats: C.streamBeats(walk), startAt: t0, magnitude: 0.6,
         seed: `${canvas.scene?.id ?? ""}|${key}`, loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...streamStep("destruction", { space: "screen", magnitude: 0.6 }) });
@@ -653,18 +689,22 @@ function reconcileBurn() {
   const want = new Map();
   const on = mode() === "all" && Fire.shownHere?.() && canvas?.ready && stepFor("fire") > 0;
   if ( on && L?.sustain ) {
-    const now = sharedNow(), pn = performance.now(), G = grid(), v = view(), caps = C.CAPS[perfMode()] ?? C.CAPS.high;
-    const fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now) && shownAt.has(s.id) && pn - shownAt.get(s.id) >= BURN_AFTER);
+    const now = sharedNow(), G = grid(), caps = C.CAPS[perfMode()] ?? C.CAPS.high;
+    // (MAPSFXSEAT: the table's fires - burning since their shared catch moment + BURN_AFTER, on every seat alike; before, from when its
+    // flames first showed HERE, so a busy seat started a fire's sound seconds later, with other spots and phrases)
+    const fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now) && Number(s.g ?? s.q ?? 0) + BURN_AFTER <= now);
     const geo = Fire.geo(), P = Fire.params0();
     const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, P), levelNow: (s, t) => FM.levelNow(s, Number.isFinite(t) ? t : undefined) }))
       .sort((a, b) => b.prio - a.prio);
     let live = 0;
     const spots = [];
     for ( const p of plans ) {
-      const inView = p.points.some((q) => q.x > v.x0 - G && q.x < v.x1 + G && q.y > v.y0 - G && q.y < v.y1 + G);
-      const isLive = p.live && inView && live < caps.live;
-      // (a smaller fire whose phrases would sit on a bigger one's: heard in the bigger one's phrases, not lettered on top of them)
-      const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (L?.prefs?.scale ?? 1);
+      // (the TABLE's live fires: the biggest ones, the same on every seat - not the biggest in this seat's view; this seat's performance
+      // mode keeps fewer of them live, the rest burn quietly: its own need)
+      const isLive = p.live && live < Math.min(caps.live, C.CAPS.high.live);
+      // (a smaller fire whose phrases would sit on a bigger one's: heard in the bigger one's phrases, not lettered on top of them; the
+      // table's phrase size - this seat's own lettering size setting moves its phrases off its panels only)
+      const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25;
       // (THUNDERFIT: the spots of ONE fire crowd each other too when its phrases are big for the way its path runs on this screen - a far
       // zoom, a bigger size step: live their phrases stood on each other; the first spot stays, a spot on an earlier one is heard in it)
       const idx = C.burnSpots(all, em), pts = idx.map((i) => all[i]);
@@ -692,7 +732,8 @@ function burnOffsets(p, live, idx = null) {
   try {
     // (off the panels, and off the event words still up: a debris word that landed where the fire then catches)
     // (THUNDERFIT: and off the map's pins - live, a burning fire's phrases stood on the scene's skull pin)
-    const v = view(), ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
+    // (MAPSFXSEAT: the seat rule's shift - off THIS seat's panels and pins; and off the table's words up, the same words on every seat)
+    const v = view(), ui = [...uiBoxes(), ...ledger.boxes(sharedNow(), sharedNow() + 1000), ...pinBoxes(v)], em = burnSize(p, live) * 1.25 * (L?.prefs?.scale ?? 1);
     const keep = new Set(idx ?? p.points.map((_, i) => i));
     return p.points.map((_, i) => { const q = p.at(i, sharedNow()), inV = q.x > v.x0 && q.x < v.x1 && q.y > v.y0 && q.y < v.y1;
       // (a spot off this screen stays where it is: its words are not pulled into view; a spot not lettered stays too)
@@ -704,12 +745,12 @@ function burnOffsets(p, live, idx = null) {
       return d; });
   } catch { return []; }
 }
-/** The cap height (scene px) of a burning fire's words: a share of the screen height at this zoom (live: 3.5..6 %, by the fire's
-    level; ambient: 3 %), never more than the engine's own size for it - its phrases sit over the flames for as long as they burn,
-    so they stay a size under the event words (the engine's ceiling share, ceilK, does not reach continuous sounds: REQUESTS lmap) */
+/** The cap height (scene px) of a burning fire's words: a share of the REFERENCE view's height at the reference zoom (MAPSFXSEAT: the
+    same size on every seat; live: 3.5..6 %, by the fire's level; ambient: 3 %) - its phrases sit over the flames for as long as they
+    burn, so they stay a size under the event words (the engine's ceiling share, ceilK, does not reach continuous sounds: REQUESTS lmap) */
 function burnSize(p, live) {
-  const zoom = canvas.stage?.scale?.x || 1, lv = p.level(sharedNow());
-  const px = innerHeight * (live ? 0.035 + 0.03 * Math.min(1, lv / 0.9) : 0.03);
+  const zoom = SEAT.refZoom(grid(), 0), lv = p.level(sharedNow());
+  const px = SEAT.REF_VH * (live ? 0.035 + 0.03 * Math.min(1, lv / 0.9) : 0.03);
   // (SFXSIZE: at the fire group's size step; the phrase spacing and the panel shifts use this size too)
   return SZ.sizeAt(Math.max(4, px / zoom), stepFor("fire"));
 }
@@ -775,8 +816,38 @@ function pinRects() {
     return pinBoxes(view()).map((b) => { const a = st.toGlobal({ x: b.x0, y: b.y0 }), c = st.toGlobal({ x: b.x1, y: b.y1 }); return { x0: rc.left + a.x, y0: rc.top + a.y, x1: rc.left + c.x, y1: rc.top + c.y }; });
   } catch { return []; }
 }
-/** the placement's view of this seat now: the view, its panels, tokens, pins and the words up */
-const placeCtx = () => { const v = view(); return { view: v, ui: uiBoxes(), tokens: tokenBoxes(v), pins: pinBoxes(v), alive: [...alive].map((a) => a.box) }; };
+/** MAPSFXSEAT: the TABLE's placement context of a moment (shared): the reference view round `c` at zoom `z` (sfx-seat refView: no
+    seat's own panels - Foundry's bars are already off it), the tokens nobody hides, the pins every player may see, and the words the
+    table picture holds during [t0, t1] (the ledger), never what this seat happens to have drawn */
+function tableCtx(c, z, t0, t1, skip = null) {
+  const v = SEAT.refView(c, z);
+  return { view: v, ui: [], tokens: sharedTokens(v), pins: sharedPins(v), alive: ledger.boxes(t0, t1, skip) };
+}
+/** the tokens every seat counts (sfx-seat sharedTokenBox: a document nobody hides, its box from the document), near view `v` */
+function sharedTokens(v) {
+  const G = grid(), out = [];
+  for ( const d of canvas.scene?.tokens ?? [] ) {
+    const b = SEAT.sharedTokenBox(d, G); if ( !b ) continue;
+    if ( v && (b.x1 < v.x0 || b.x0 > v.x1 || b.y1 < v.y0 || b.y0 > v.y1) ) continue;
+    out.push(b);
+  }
+  return out;
+}
+/** the note pins every seat counts (sfx-seat sharedPin: a note every player may see; its pin's box from the scene's pin size), near `v` */
+function sharedPins(v) {
+  const out = [], players = (game.users?.contents ?? [...(game.users ?? [])]).filter((u) => !u.isGM);
+  for ( const n of canvas.notes?.placeables ?? [] ) {
+    try {
+      const d = n.document; if ( !d ) continue;
+      if ( !SEAT.sharedPin(players, (u) => { const e = d.page ?? d.entry; return e ? e.testUserPermission(u, "LIMITED") : true; }) ) continue;
+      const S = n._mmPin?.S || (Number(d.iconSize) || 40) * 1.3, x = d.x, y = d.y;
+      const b = { x0: x - 0.45 * S, y0: y - 1.05 * S, x1: x + 0.45 * S, y1: y + 0.08 * S };
+      if ( v && (b.x1 < v.x0 || b.x0 > v.x1 || b.y1 < v.y0 || b.y0 > v.y1) ) continue;
+      out.push(b);
+    } catch { /* a note being redrawn */ }
+  }
+  return out;
+}
 /**
  * THUNDERFIT: the placement of words of which some stand at a BIGGER step than today's (sfx-core place, then the ladder): at their
  * stepped size first; when that leaves a word dropped or the main word not clean (off the view, under a panel, on a token or a pin, on
@@ -818,40 +889,51 @@ function flush() {
   if ( !due.length || mode() === "off" || !canvas?.ready ) return;
   if ( !L ) { pending.push(...due); engine(); return; }      // (engine() flushes again once it is loaded, this scene only)
   const t0 = performance.now();
+  // MAPSFXSEAT: the events of a moment in the chunks a seat on time gathers them in (its first event's moment + the gathering): a seat
+  // whose events came late (busy applying the destruction) used to gather two moments into one cluster - other words than its neighbour
+  due.sort((a, b) => (C.dueAt(a) - C.dueAt(b)) || (String(a.key) < String(b.key) ? -1 : 1));
+  while ( due.length ) {
+    const d0 = C.dueAt(due[0]), n = due.findIndex((e) => C.dueAt(e) > d0 + C.GATHER_MS + 20);
+    flushMoment(due.splice(0, n < 0 ? due.length : n));
+  }
+  stats.ms += performance.now() - t0;
+}
+/** The words of one moment: planned on the TABLE (shared: the reference view, the shared obstacles, the table's words up), then shown on
+    this seat by its own needs (lettering "big only", its performance mode's room) and the seat rule (play). */
+function flushMoment(due) {
+  const now = performance.now();
   const pm = perfMode(), caps = C.CAPS[pm] ?? C.CAPS.high, G = grid(), big = mode() === "big";
-  const v = view(), tokens = tokenBoxes(v), ui = uiBoxes(), pins = pinBoxes(v);
+  // (the table plans with every satellite the best seat keeps: CAPS.high; a seat in a lower performance mode keeps fewer)
   const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
   stats.clusters += groups.length;
   const seed = canvas.scene?.id ?? "";
   recent = recent.filter((r) => now - r.t < Math.max(C.ECHO_MS, C.OUT_GAP_MS));
-  // (words placed but not started yet - a flush ahead of their moment - count as on screen: `alive` holds a word only once it plays, and
-  // live a Detonate's second word, flushed while the first still waited for its moment, was drawn over it)
-  soon = soon.filter((q) => q.until > now);
-  const thisFlush = soon.map((q) => q.box);
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
     if ( !g.main.det && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
-    const specs = C.planCluster(g, { grid: G, sec: caps.sec, seed, big, known });
-    for ( const w of specs ) if ( w.role === "main" ) w.obj = g.main.obj;
+    const specs = C.planCluster(g, { grid: G, sec: C.CAPS.high.sec, seed, big: false, known });
+    // (the reference view of the moment: centred on the cluster, at the zoom that holds its reach)
+    const zr = g.span, z = SEAT.refZoom(G, zr), c = { x: g.x, y: g.y };
+    for ( const w of specs ) { if ( w.role === "main" ) w.obj = g.main.obj; w.z = z; w.zr = zr; w.ts = toShared(w.t); w.key = `${w.seed}|${w.role}`; }
     // the engine writes each word (its vocabulary: the kind, how loud, how long; seeded, the same on every client); the words of one
     // moment differ from each other (avoid), nothing else of this client's history changes them
     const taken = [];
-    for ( const w of specs ) { write(w, taken); measure(w); }
-    const room = caps.alive - alive.size;
-    // (the words of this flush's earlier clusters count as on screen: they start a beat later, so `alive` does not hold them yet - live,
-    // a Detonate's second word was drawn over its first)
-    const placed = C.capWords(placeFit(specs.filter((w) => w.text || w.stream), { view: v, ui, tokens, pins, alive: [...[...alive].map((a) => a.box), ...thisFlush] }), room);
-    for ( const w of placed ) if ( w.box ) {
-      const b = w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
-      thisFlush.push(b); soon.push({ box: b, until: (w.t ?? now) + 60 });
-    }
+    for ( const w of specs ) { write(w, taken); w.alive = ledger.count(w.ts, w.ts + lifeMs(w)); measure(w); }
+    const t0 = Math.min(...specs.map((w) => w.ts)), t1 = Math.max(...specs.map((w) => w.ts + lifeMs(w)));
+    const placed = placeFit(specs.filter((w) => w.text || w.stream), tableCtx(c, z, t0, t1, null));
+    for ( const w of placed ) if ( w.box ) ledger.add({ key: w.key, box: lifeBox(w), t0: w.ts, t1: w.ts + lifeMs(w), main: w.role === "main" });
     stats.dropped += specs.length - placed.length;
-    for ( const w of placed ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
-    if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24);
     const main = placed.find((w) => w.role === "main");
     if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
+    // this seat's own needs: "big only" keeps the main words of big sounds (planCluster's own rule), a lower performance mode fewer
+    // satellites and fewer words up
+    let mine = big ? placed.filter((w) => w.role === "main" && (w.loud ?? 1) >= 0.2 + 0.8 * 0.34 - 1e-9) : placed;
+    const secs = mine.filter((w) => w.role === "sec").sort((a, b) => a.t - b.t).slice(0, caps.sec);
+    mine = C.capWords([...mine.filter((w) => w.role !== "sec"), ...secs], caps.alive - alive.size);
+    for ( const w of placed ) if ( !mine.includes(w) ) seatSkip(w, big ? "big" : "perf");
+    for ( const w of mine ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
+    trimPlaced();
   }
-  stats.ms += performance.now() - t0;
 }
 /** The engine's word for a spec (its vocabulary), different from the other words of the same moment. */
 function write(w, taken) {
@@ -866,46 +948,49 @@ function write(w, taken) {
     taken.push(word.text, word.template);
   } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); }
 }
-/** The options a word plays with (and is measured with): at its group's size step (SFXSIZE; `raw`: before the step). */
+/** The options a word plays with (and is measured with): its TABLE size (MAPSFXSEAT: the engine's own size model fed the reference view,
+    drawn with fit "world") at its group's size step (SFXSIZE; `raw`: before the step and the table size). */
 function optsOf(w, raw = false) {
   const o = baseOpts(w);
   if ( raw ) return o;
   const step = stepFor(grpOf(w));
-  // (a word at another step than today's: stepped from the size the engine draws it at today and drawn at that size - fit "world", no
-  // second clamp - because the engine's clamp would hold a word at its ceiling whatever its natural size; sizeOpts only when the engine
-  // cannot tell the size)
-  if ( step !== SZ.SIZE_DEFAULT && step !== 0 && w.text ) { const b = steppedWorld(w.text, o, step, w.fitK); if ( b ) return b; }
+  // (a word sized another way - exact or pixel lettering - or an engine that cannot tell its size: the step's options as before)
+  if ( step !== 0 && w.text ) { const b = tableSized(w, o, step); if ( b ) return b; }
   return SZ.sizeOpts(o, step);
 }
-/** SFXSIZE: the engine's own ceiling (cap height on screen, CSS px) for the loudest word of this text with these options on this
-    screen - height, width over the word's measured shape, a crowd's share: the engine is asked for a far too big word of magnitude
-    LOUD_MAG with its whole ceiling, which it holds at its hard stop (hardHi x ceiling) */
-function loudCap(text, o) {
-  const zoom = o.space === "world" ? (canvas.stage?.scale?.x || 1) : 1;
-  const q = L?.sizeOf?.(text, { ...o, fit: "legible", size: (20 * innerHeight) / zoom, scale: 1, ceilK: 1, magnitude: SZ.LOUD_MAG });
-  return q?.px > 0 ? q.px / (L.sizeModel?.hardHi ?? 1.15) : 0;
-}
-/** SFXSIZE: a world word's options at a step other than today's (null: the engine cannot tell its size, or the word is sized another
-    way - exact or pixel lettering) */
-function steppedWorld(text, o, step, fitK = 1) {
+/**
+ * MAPSFXSEAT: a world word's TABLE options: its size in scene px from the engine's own size model (scripts/letters/size.mjs sizeFor) fed
+ * the REFERENCE view instead of this seat's (sfx-seat tableSize: REF_VW x REF_VH at the moment's reference zoom, the table's words up
+ * from the ledger), at the group's step (a smaller step under the engine's legibility floor there, a bigger one under its loudest ceiling
+ * there, `fitK` the ladder's share), then drawn at exactly that size (fit "world": no second clamp by this seat's window, zoom or words
+ * up) and not pulled into this seat's view by the engine (keepInView false: the seat rule moves it). On a seat whose window, zoom and
+ * words up are the reference's, this is the size the engine drew today (dev/sfx-seat.test.mjs STEP2).
+ */
+function tableSized(w, o, step) {
   try {
-    if ( o.fit === "exact" || o.pixel || !L?.sizeModel ) return null;
-    const z = L?.sizeOf?.(text, o);
-    if ( !(z?.px > 0) ) return null;
-    const sk = z.sizeK ?? 1, zoom = canvas.stage?.scale?.x || 1;
-    let px = SZ.steppedPx(z.px, step, step > SZ.SIZE_DEFAULT ? { cap: loudCap(text, o) } : { floor: SZ.floorPx(innerHeight, sk, L.sizeModel) });
-    // (THUNDERFIT: a bigger word that found no clean place takes a share of its extra size: placeFit's ladder, down to today's)
-    if ( step > SZ.SIZE_DEFAULT && Number.isFinite(fitK) && fitK < 1 ) px = z.px + (px - z.px) * Math.max(0, fitK);
-    return { ...o, fit: "world", size: px / (sk * zoom * (Number.isFinite(o.scale) && o.scale > 0 ? o.scale : 1)) };
+    if ( o.fit === "exact" || o.pixel || !L?.sizeModel || !engineSizeFor ) return null;
+    const z = w.z ?? SEAT.refZoom(grid(), w.zr ?? 0);
+    const ts = SEAT.tableSize(engineSizeFor, L.sizeModel, o, planInfo(w.text, o), { z, alive: w.alive ?? 0, grid: grid(), step, fitK: w.fitK });
+    if ( !(ts?.size > 0) ) return null;
+    const out = { ...o, fit: "world", size: ts.size, keepInView: false };
+    delete out.scale;
+    return out;
   } catch { return null; }
+}
+/** the engine's plan facts the size model reads (its mood factor sizeK, its hold box's width), from its own planner */
+function planInfo(text, o) {
+  const hd = holdOf(text, o);
+  return hd ? { sizeK: hd.sk, hold: { w: hd.w } } : { sizeK: 1, hold: { w: 3 } };
 }
 function baseOpts(w) {
   const G = grid(), red = reducedMotion();
   const st = w.stage ?? {};
+  const z = w.z ?? SEAT.refZoom(G, w.zr ?? 0);
   const o = { ...(w.word?.play ?? {}), space: "world", at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed, rotation: w.rotation, reduced: red,
     ceilK: C.CEIL_K[w.role] ?? C.CEIL_K.sec,
-    // (a story's word sized by its rank: the rank is the hierarchy, the engine's ceiling share does not cut it again)
-    ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, innerHeight / (canvas.stage?.scale?.x || 1), w.shrink ?? 1), ceilK: 1 } : {}),
+    // (a story's word sized by its rank as a share of the REFERENCE view height at the moment's reference zoom: the rank is the
+    // hierarchy, the engine's ceiling share does not cut it again)
+    ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, SEAT.REF_VH / z, w.shrink ?? 1), ceilK: 1 } : {}),
     ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
   // what was hit makes the sound: its material (the engine's look follows it: rock and timber in stone colours, metal in steel); the
@@ -913,61 +998,134 @@ function baseOpts(w) {
   if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };
   // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
   if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
-  // steam drifts up off what was put out
-  if ( w.drift && !red ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
+  // steam drifts up off what was put out (the table's motion: a seat's reduced motion changes only how it is drawn, not where)
+  if ( w.drift ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
   // a thing that travels: its word rides along with it
-  if ( w.path && !red ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
+  if ( w.path ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
   return o;
 }
 /** THUNDERFIT: the engine's hold box of a word with these options: { w, h } in units of its drawn cap height, and its mood factor sizeK.
     L.planFor (the engine's tools: the plan this seat would draw, the table's style and filters on), else the engine's own planner;
-    null when neither answers (the placement then falls back to an estimate from the text's length: FIT.estHold). */
+    null when neither answers (the placement then falls back to an estimate from the text's length: FIT.estHold). Remembered per word and
+    look (a page plans many words in one frame). */
 function holdOf(text, o) {
+  const key = `${text}|${o.seed ?? ""}|${o.space ?? ""}|${o.in ?? ""}|${o.holdKind ?? ""}|${o.out ?? ""}|${o.character?.material ?? ""}`;
+  if ( holdMemo.has(key) ) return holdMemo.get(key);
+  let r = null;
   try {
-    const pf = L?.planFor?.(text, o), hb = pf?.plan?._holdBox;
-    if ( hb?.w > 0 ) return { w: hb.w, h: hb.h, sk: pf.plan.sizeK ?? 1 };
+    const pf = L?.planFor?.(text, { ...o, reduced: false }), hb = pf?.plan?._holdBox;
+    if ( hb?.w > 0 ) r = { w: hb.w, h: hb.h, sk: pf.plan.sizeK ?? 1 };
   } catch { /* the planner below */ }
+  if ( !r ) try {
+    if ( L?._plan && L?._settle ) { const plan = L._plan(String(text), { ...o, reduced: false }); L._settle(plan); r = plan._holdBox?.w > 0 ? { w: plan._holdBox.w, h: plan._holdBox.h, sk: plan.sizeK ?? 1 } : null; }
+  } catch { r = null; }
+  holdMemo.set(key, r); if ( holdMemo.size > 400 ) holdMemo.delete(holdMemo.keys().next().value);
+  return r;
+}
+/** MAPSFXSEAT: the engine's own measure of a word (L.measure, LETR 1.9.11: the box it will really draw and the whole reach of its entrance
+    and hold), in units of its cap height (so no seat's own size setting is in it), with the table's motion (reduced false). null on an
+    engine without L.measure. */
+function measureOf(text, o) {
   try {
-    if ( !L?._plan || !L?._settle ) return null;
-    const plan = L._plan(String(text), o); L._settle(plan);
-    return plan._holdBox?.w > 0 ? { w: plan._holdBox.w, h: plan._holdBox.h, sk: plan.sizeK ?? 1 } : null;
+    const m = L?.measure?.(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 } });
+    if ( !(m?.unit > 0) || !(m.hold?.w > 0) ) return null;
+    const u = m.unit;
+    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u } };
   } catch { return null; }
 }
-/** The word's box (scene px) as the engine will draw its hold picture now (its size model + its layout): placement keeps it free. */
+/** The word's TABLE box (scene px) as the engine will draw its hold picture at its table size, and its reach (the engine's own measure):
+    the table's placement keeps the box free, the seat rule keeps the reach in this seat's view. */
 function measure(w) {
   if ( !w.text ) return;
   try {
     const o = optsOf(w);
-    const z = L.sizeOf(w.text, o);
-    const hd = holdOf(w.text, o), hb = hd ?? FIT.estHold(w.chars ?? [...w.text].length), sk = hd?.sk ?? z?.sizeK ?? 1;
-    // (the engine's size already holds the table's size setting - its tools' `_k`: counted once; before, it was multiplied in twice)
-    const u = (z?.size ?? G0()) * sk;
+    const md = measureOf(w.text, o), hd = md ?? holdOf(w.text, o), hb = hd ?? FIT.estHold(w.chars ?? [...w.text].length), sk = hd?.sk ?? 1;
+    // (the table size, counted once; this seat's own size setting - the engine's `_k` - is the seat's, not the table's)
+    const u = (o.size ?? L.sizeOf(w.text, o)?.size ?? G0()) * sk;
     w.size = u;
     const b = FIT.wordBox(hb, u);
     w.bw = b.bw; w.bh = b.bh;
-    if ( w.drift && !reducedMotion() ) { w.rise = grid() * DRIFT[1]; w.riseX = grid() * DRIFT[0]; }
+    // (the reach the engine itself reports for THIS word, instead of a factor per entrance that goes stale with the engine's motion)
+    w.reachU = md?.reach ?? null; w.rk = md ? FIT.reachFactor(hb, md.reach) : FIT.reachOf(o.in);
+    if ( w.drift ) { w.rise = grid() * DRIFT[1]; w.riseX = grid() * DRIFT[0]; }
   } catch { /* the estimate stands */ }
 }
 const G0 = () => grid() * 0.5;
+/** a word's life on the table (ms): its sound, its hold, its exit (sfx-seat lifeOf) */
+const lifeMs = (w) => SEAT.lifeOf(w, 0).t1;
+/** is a word's whole life on the table over (a seat that got it late joins it mid-life, at the same point as every other seat; only a
+    word whose life is over is not drawn) */
+const lifeOver = (w) => performance.now() > w.t + lifeMs(w) - 250;
+/** the box a word holds on the table for its life: its box, a cave-in's sinking (half its height lower), a ride's whole way */
+function lifeBox(w) {
+  let b = w.box ?? C.boxOf(w);
+  if ( w.voice === "cavein" ) b = { ...b, y1: b.y1 + (b.y1 - b.y0) * 0.5 };
+  if ( w.path?.length > 1 ) for ( const q of w.path ) b = unionBox(b, C.boxOf(w, q.x, q.y));
+  return b;
+}
+const moveBox = (b, dx, dy) => ({ x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy });
+const unionBox = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
+const scaleBox = (b, f, cx, cy) => (f === 1 ? b : { x0: cx + (b.x0 - cx) * f, y0: cy + (b.y0 - cy) * f, x1: cx + (b.x1 - cx) * f, y1: cy + (b.y1 - cy) * f });
+
+/**
+ * MAPSFXSEAT, THE SEAT RULE: how THIS seat draws a word of the table picture (sfx-seat seatFit), and nothing else changes - its text,
+ * its seed, its instant and its table place and size are the table's. Only: off this seat's view (place and reach): not drawn; under the
+ * readable floor at this zoom: drawn at it; its whole reach bigger than this view: smaller to fit; cut by the view's edge or under this
+ * seat's own panels: the smallest shift that shows it whole. This seat's own lettering size setting (the engine's) scales it first, and
+ * its reduced motion changes how it moves - both this seat's needs. -> { o (the play options), fit, box (this seat's box) } | null (off).
+ */
+function seatCall(w) {
+  const o = optsOf(w), at = o.at ?? { x: w.x, y: w.y };
+  const sc = L.prefs?.scale ?? 1, u = (w.size ?? 0) * sc;
+  let box = scaleBox(w.box ?? C.boxOf(w, at.x, at.y), sc, at.x, at.y);
+  let reach = w.reachU ? unionBox(box, { x0: at.x - w.reachU.l * u, y0: at.y - w.reachU.u * u, x1: at.x + w.reachU.r * u, y1: at.y + w.reachU.d * u }) : scaleBox(box, w.rk ?? 1, at.x, at.y);
+  // (a word that rides: its whole way is its reach - the seat moves the whole way at once)
+  const pts = o.path?.points ?? (o.path?.from ? [o.path.from, o.path.to] : null);
+  if ( pts ) for ( const q of pts ) reach = unionBox(reach, moveBox(reach, q.x - at.x, q.y - at.y));
+  const f = SEAT.seatFit({ box, reach, view: view(), panels: uiBoxes(), zoom: canvas.stage?.scale?.x || 1, cap: u, subject: w.subject ?? null });
+  if ( f.rule === "off" ) return { o: null, fit: f, box };
+  const sh = (q) => ({ ...q, x: q.x + f.dx, y: q.y + f.dy });
+  const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
+  if ( f.k !== 1 && Number.isFinite(o.size) ) oo.size = o.size * f.k;
+  if ( o.path?.points ) oo.path = { ...o.path, points: o.path.points.map(sh) };
+  else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
+  // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
+  if ( oo.reduced && oo.path ) delete oo.path;
+  return { o: oo, fit: f, box: scaleBox(moveBox(box, f.dx, f.dy), f.k, at.x + f.dx, at.y + f.dy), table: { size: o.size, at } };
+}
+/** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
+function logCall(w, call) {
+  const r = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : v ?? null), P = (q) => (q ? { x: r(q.x), y: r(q.y) } : null);
+  seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, space: call.space ?? "world", seed: w.seed,
+    ts: Math.round(w.ts ?? toShared(w.t)), size: r(call.table?.size), at: P(call.table?.at), drawn: r(call.o?.size), seatAt: P(call.o?.at),
+    rule: call.fit?.rule ?? "ok", rules: call.fit?.rules ?? [], k: r(call.fit?.k ?? 1), played: Math.round(toShared(performance.now())) });
+  if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
+}
+/** a table word this seat does not draw, by one of its own needs (logged like a call) */
+function seatSkip(w, why) {
+  seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, ts: Math.round(w.ts ?? toShared(w.t)), rule: why, skipped: true });
+  if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
+}
 
 function play(w) {
   const g0 = gen;
   const go = () => {
     if ( g0 !== gen || !L || mode() === "off" || !canvas?.ready || stepFor(grpOf(w)) === 0 ) return;
-    if ( C.tooLate(w, performance.now()) ) { stats.late++; return; }
+    if ( lifeOver(w) ) { stats.late++; seatSkip(w, "late"); return; }
     // a fire's catch / flare word whose fire went out (or was taken back) meanwhile: not lettered (FXLM 4)
     if ( w.obj && !C.fireEventLive({ obj: w.obj, voice: w.voice }, Fire.allStrokes?.()?.get(w.obj), sharedNow()) ) { stats.stale++; return; }
-    let h;
+    let h, call = null;
     try {
-      h = w.stream ? playStream(w) : L.play(w.text, optsOf(w));
+      if ( w.stream ) h = playStream(w);
+      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, "off"); return; } h = L.play(w.text, call.o); }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;
+    if ( call ) logCall(w, call);
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
-    // (EFFECTS2: a cave-in's word sinks as it holds - live, the debris word after it was placed just under its box and drawn inside its
-    // letters - so what it covers here reaches half its height lower; REQUESTS EFFECTS2-4)
-    const bx = w.box && w.voice === "cavein" ? { ...w.box, y1: w.box.y1 + (w.box.y1 - w.box.y0) * 0.5 } : w.box;
+    // (EFFECTS2: a cave-in's word sinks as it holds, so what it covers reaches half its height lower; REQUESTS EFFECTS2-4)
+    const b0 = call?.box ?? w.box, bx = b0 && w.voice === "cavein" ? { ...b0, y1: b0.y1 + (b0.y1 - b0.y0) * 0.5 } : b0;
     const rec = { box: bx, h, obj: w.obj, voice: w.voice };
     alive.add(rec);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
@@ -1010,7 +1168,7 @@ function teardown(full = true) {
   detonating = null; ploughs.clear(); soon = []; flashSeen.clear(); clearTimeout(stormTimer); stormTimer = 0;
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
-  burns.clear();
+  burns.clear(); ledger.clear(); pageWaits.clear(); holdMemo.clear();
   uiCache = { t: -1e9, rects: [], boxes: [] };
 }
 function refresh() {
@@ -1058,7 +1216,11 @@ export const sfxApi = {
   /** Play events now (scene px): `api.sfx.test([{ voice: "crash", x, y, r: 300 }])`. */
   test: (events) => { const t = performance.now() + 30; for ( const [i, e] of events.entries() ) add({ key: `test|${Date.now()}|${i}`, t, ...e }); },
   /** The interface panels this client keeps words off (client px), and the fire sounds burning. */
-  ui: () => uiCache.rects, placed: () => lastPlaced.slice(), burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length })),
+  ui: () => uiCache.rects, placed: () => lastPlaced.slice(), burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length, idx: b.idx })),
+  /** MAPSFXSEAT: this seat's log of every lettering call (the table's word - text, seed, size, place, shared moment - and the seat rule it
+      was drawn by); `clear` empties it. The table picture's words (the ledger: key, box, life on the shared clock). */
+  log: ({ clear = false } = {}) => { const l = seatLog.slice(); if ( clear ) seatLog = []; return l; },
+  table: () => ledger.list.map((q) => ({ ...q })),
   core: C
 };
 
