@@ -273,14 +273,14 @@ export const SHARED = {
 export const shareKey = (w) => clean(String(w)).replace(/[!?…\x27.,:+\s-]/g, "").replace(/(\p{L})\1+/gu, "$1");
 export const BANK = {
   pl: {
-    punch:    B("TWAP|TWOP", "BAM|TWAK|BDAM", "TWAKK|KA-BAMM|KA-BDAMM"),
+    punch:    B("TWAP|TWOP", "BAM|TWUP|BDAM", "TWAPP|KA-BAMM|KA-BDAMM"),   // ENGWORDS: TWAK is THWACK in Polish letters (the English bank writes THWAP)
     smash:    B("WRAM|KRUMCZ", "WRAMM|SKRUUM", "SKRUUMM|KA-WRAMM|KRA-WRAMM"),
     slap:     B("PLAP|FLAP", "SPAK|SWAK|FLAPP", "SPAKK|SZWAKK"),
-    thud:     B("DUF|TUMF", "TUMP|GDUMP|GDUUMF", "GDUMMP|KA-DUMP"),
+    thud:     B("DUF|TUMF", "DUUM|TUUMF|GDUUMF", "GDRUUMF|KA-DUUM"),   // ENGWORDS: the owner's landing DUUM (KA-DUMP, GDUMP, TUMP read as the English DUMP / THUMP)
     stomp:    B("DROMP|GDROMP", "DROMP-DROMP|GDROMP-GDROMP|DUM-DUM", "DROMP-DROMP-DROMP|GDROMP-GDROMP-GDROMP", "DROMP-DROMP-DROMP"),
     clang:    B("KLANK|KTANG", "SZKLANG|TRANNG", "SZKLAANNG|TRAANNG|KA-KLANNK"),
-    slash:    B("SZIK|SWIK", "FSZSZT|SZLIKT", "SZRAKT|SWISZK"),
-    bite:     B("KLOMP|SZNAP", "GNAMP|KRONCZ|SZKLOMP", "KRONNCZ|GNARRMP"),
+    slash:    B("SZIK|SWIK", "FSZSZT|SZLIKT", "SZRAKT|SZNIKKT"),   // ENGWORDS: SWISZK reads as the English SWISH + K
+    bite:     B("KLOMP|CZNAP", "GNAMP|KRONCZ|SZKLOMP", "KRONNCZ|GNARRMP"),
     crack:    B("SKRIK|KRIKT", "KRAK|SKRAK", "KRRAKK|SKRRAKT|KA-KRAKK"),
     shatter:  B("TSIK|KSZIN", "KSZINK|SKRISZ", "SKRAASZ|KSZRAKK"),
     crash:    B("BRAKUM|GRUMSZ", "BRAKUUM|GRUUMSZ", "KA-BRAKUUM|KRA-GRUUMSZ"),
@@ -297,18 +297,18 @@ export const BANK = {
     ricochet: B("TSIJUU|PTIJU", "PTIIJUU|SPANNG", "SPAANNG|PTIIIJUUU"),
     whoosh:   B("FSZ|FISZ", "FWUUSZ|FSZUUSZ|WUUSZ", "FWUUUSZ|SZFUUUSZ"),
     zoom:     B("ZWISZ|WZIU", "ZWUUM|WZUUUM|WZIUUM", "ZWUUUMM|WZUUUMM"),
-    bounce:   B("BOIP|PONK", "BOINNG|SPROINNG", "BOJOJOINNG|SPROJOINNG"),
+    bounce:   B("BOIP|PONK", "BOJOINNG|SPROINNG", "BOJOJOINNG|SPROJOINNG"),
     teleport: B("WZIP|FZIP", "WZORP|ZWAP|FWAMF", "WZAMFF|ZWAPP"),
     wind:     B("FSZSZ|HWUU", "SZWUUU|HWUUSZ", "SZWUUUSZ|HWUUUUSZ"),
     fire:     B("FUF|FOF", "FWUUM|FWOOM", "FWUUUMM|FAWUUUSZ"),
     crackle:  B("KRIT-KRAT|TSYK-TSAK", "KRIT-KRAT-KRIT|TSYK-TSAK-TSYK", "KRITTA-KRAT-KRIT|TSYKKA-TSAK", "KRIT-KRAT-TSYK"),
     hiss:     B("FSS|FSST", "PSSS|TSSS", "PFSSST|TSSSST"),
-    splash:   B("PLUP|BLUP|PLOP|GLUP", "PLUMP|BLUMP|SPLUMP", "SPLOOSZ|SPLASZ|KA-SPLOOSZ", "GLUB-BLUB-BULP|PLUP-BLUP-PLOP"),
+    splash:   B("PLUP|BLUP|PLOP|GLUP", "PLUMP|BLUMP|SPLUMP", "SPLOOSZ|GLOOSZ|KA-SPLOOSZ", "GLUB-BLUB-BULP|PLUP-BLUP-PLOP"),
     squish:   B("SZLIP|SZLUP", "SZLORP|SPLORCZ|GLORP", "SZKLORCZ|SPLORRCZ"),
     drip:     B("PLIP-PLIP|PLAP-PLAP", "PLIP-PLIP-PLIP|PLAP-PLIP-PLAP", "PLIP-PLIP-PLIP-PLIP|PLAP-PLAP-PLIP-PLAP", "PLIP-PLIP-PLIP"),
     powerup:  B("WMM|ZMM", "WZMMM|BZMMM", "ZWUUUMM|WZAAMM"),
     psychic:  B("MMNN|HMNN", "WNNNN|MNNNNG", "WNNNNNG|ZNNNNG"),
-    chime:    B("TLING|DZING", "DZINNG|TLINNG|TINNG", "DZIIINNG|TLIIINNG"),
+    chime:    B("TLING|DZING", "DZINNG|TLINNG|DZWINNG", "DZIIINNG|TLIIINNG"),
     fizzle:   B("PFFT…|FZZT…", "PFSZT…|FSST…", "PFFFT|FZZZT"),
     whiff:    B("FIFF…|FWISZ…", "SWUUF…|FWUFF…", "FWUUUF|SWUUUF"),
     click:    B("TYK|KTYK", "CZYK|KTYKK", "CZYKK|KTYKT"),
@@ -319,14 +319,14 @@ export const BANK = {
     pain:     B("NNGH|HNN|OCH", "AAGH|AARGH|HNNGH", "GRAAAGH|AAARGH"),
     effort:   B("HNH|NNH", "HRRGH|GNNH", "NNNRRAAH|HNNNRRGH"),
     relief:   B("HFF…|FUH…", "PFFF…|FUUUH…", "HFAAH…|PFUUUH…"),
-    sigh:     B("HAH…|HOCH…", "HUCH…|HUUH…", "HAACH…|HUUUCH…"),
-    cheer:    B("JEEH|UUH", "JEEEA|WUUUH", "JEEEEAA|WUUUUUH"),
+    sigh:     B("FHUU…|HOCH…", "HUCH…|HUUHF…", "HAACH…|HUUUCH…"),
+    cheer:    B("JEEH|WUUA", "JEEEA|WUUUH", "JEEEEAA|WUUUUUH"),
     laugh:    B("HA-HA-HA|CHE-CHE", "HA-HA-HA-HA|CHE-CHE-CHE|HI-HI-HI", "BUA-HA-HA-HA|MUA-HA-HA-HA", "HA-HA-HA"),
     shush:    B("SZSZ|PSZT", "SZSZT|PSZSZT", "SZSZSZT|PSSSSSZT"),
     heartbeat:B("BA-DUM|DU-DUM", "BA-DUM-BA-DUM|DU-DUM-DU-DUM", "BA-DUM-BA-DUM-BA-DUM|DU-DUM-DU-DUM-DU-DUM", "BA-DUM"),
     bark:     B("WAF-WAF|HRAU", "WAF-WAF-WAF|HRAU-HRAU|WRAF-WRAF", "WRRAF-WRRAF|WRRAF-WRRAF-WRRAF", "WAF-WAF-WAF"),
     snarl:    B("GRRH|WRRR", "HRRRRR|GRRYYH", "GRRRRRH|HRRRRAGH"),
-    meow:     B("MRAOU|MIII", "MNIAOU|MRRAOU", "WRRAAAOU|MRRRAAAOU"),
+    meow:     B("MRAOU|MNIII", "MNIAOU|MRRAOU", "WRRAAAOU|MRRRAAAOU"),
     purr:     B("MRRR|WRRR", "HRRRM|MRRRMM", "MRRRRRMM|WRRRRRMM"),
     cathiss:  B("HSSS|KHH", "CHHSSS|FFFT", "KHSSSSZ|FFFSSST"),
     squeak:   B("IIK|PII", "IIK-IIK|SKWII|PII-PII", "IIK-IIK-IIK|SKWII-SKWII", "IIK-IIK-IIK"),
@@ -382,7 +382,7 @@ export const BANK = {
     shatter:  B("TSIK|TSHINK", "KSHINK|SKRISH", "SHKRAASH|KSHRAKK"),
     crash:    B("GROOSH|KRUMF", "KROOSH|BRAKOOSH", "KA-KROOSH|KRA-KROOSH|BRAKKOOSH"),
     crumble:  B("KRUSK|SKRUK", "KRRUNCH|GRRUSK", "GRRAKK|SKRRUNCH"),
-    rumble:   B("RRMM|GRMM", "GRROMM|KRROMM", "GRRRROMM|KRRROOMM"),
+    rumble:   B("RRMM|GRMM", "HRROMM|KRROMM", "HRRRROMM|KRRROOMM"),   // ENGWORDS: GRROMM reads as the Polish GROM (a thunderclap: a word that names a sound)
     creak:    B("KREE|SKREE", "SKREEK|KRREE", "SKRREEK|KRRREE"),
     scrape:   B("SKRRT|KRRT", "SHRRRK|SKRRAT", "SHKRRRAKK|SKRRRAT"),
     boom:     B("BOOM|FOOM", "TWOOM|BADOOM|BTHOOM", "KA-BOOM|BATOOWW|KA-TWOOMM"),
@@ -390,7 +390,7 @@ export const BANK = {
     thunder:  B("BRRMM|KRMMM", "KRAKOOM|KRAGOOM", "KRA-KA-GRRAWOOM|KRA-KA-KRRAWOOM"),   // WORDS3: no BOOM (fire blasts only), no landing THOOM, no cave-in BTHOOM
     zap:      B("BZT|FZT", "ZAP|BZZT|KZZT", "BZZAKT|KZZRAKK|ZZAPP"),
     beam:     B("VZZM|ZZMM", "VZZZMM|ZZAMM", "VZZAAMM|VZZAAMM"),
-    gunfire:  B("DRRT-DRRT|BUDDA-BUDDA", "DRRT-DRRT-DRRT|BUDDA-BUDDA-BUDDA|BRAKKA-BRAKKA", "BRAKKA-BRAKKA-BRAKKA|DRRT-DRRT-DRRT-DRRT", "DRRT-DRRT-DRRT|BUDDA-BUDDA"),
+    gunfire:  B("DRRT-DRRT|DAKKA-DAKKA", "DRRT-DRRT-DRRT|DAKKA-DAKKA-DAKKA|BRAKKA-BRAKKA", "BRAKKA-BRAKKA-BRAKKA|DRRT-DRRT-DRRT-DRRT", "DRRT-DRRT-DRRT|DAKKA-DAKKA"),   // ENGWORDS: BUDDA reads as the Polish BUDDA / BUDA
     ricochet: B("PTWING|PTIK", "PTWEE|PEEYOW", "PTWEEOOW|PTEEYOOW"),
     whoosh:   B("FSHH|VWISH", "FWOOSH|FWAASH", "FWOOOSHH|FSHWOOSH"),
     zoom:     B("VSHOOM|VSHEEN", "ZWAAM|VSHOOM", "ZWAAAMM|VSHOOOM"),
@@ -437,7 +437,7 @@ export const BANK = {
     drill:    B("VZZZ|VRRZ", "VZZRRRR|VRRZZZT|ZZRRRR", "VZZRRRRT|BZZRRRRT"),
     hammer:   B("KTOK-KTOK|KTANG-KTANG", "KTOK-KTOK-KTOK|KTANG-KTANG-KTANG", "KTANG-KTOK-KTANG|KTOK-KTOK-KTOK-KTOK", "KTOK-KTOK-KTOK"),
     pistol:   B("PAK|POK", "BANG|BLAM", "BLAMM|BANNG"),
-    rifle:    B("KTAK|PTAK", "KPANG|KTAKK", "KTRAKK|PTRAKK"),
+    rifle:    B("KTAK|KPAK", "KPANG|KTAKK", "KTRAKK|PTRAKK"),
     shotgun:  B("BWAMF|BWOMF", "BRAWOOM|BWAAMMF", "CHK-CHK-BRAWOOM|CHK-CHK-BWAMMF"),
     minigun:  B("VRRRR|ZRRRR", "BRRRRT|VRRRRT", "DRRRRRRT|BRRRRRRRT"),
     laserpistol:B("ZAT|TZAT|TSAT", "ZARK|TZAK|FZAT", "SKZARK|KTZAK|ZZARKT", "ZAT-ZAT-ZAT"),
@@ -454,7 +454,7 @@ export const BANK = {
     firetruck:B("BWAAMP-HWAAA|BWAAP-BWAAP", "BWAAMP-HWAAA-BWAAMP|BWAAP-BWAAP-BWAAP", "HWAAA-BWAAMP-HWAAA|BWAAAP-BWAAAP", "BWAAMP-HWAAA"),
     hail:     B("PAK-PAK|TSIK-TSIK", "PAK-PAK-PAK|TSIK-TSIK-TSIK|TAKATAKATAKA", "PAKK-KRAK-PAKK|TAKATAKATAKATAKA", "PAK-PAK-PAK"),
     rain:     B("SHHHH|PSHHH", "KSSHHH|SHHHHHH", "KSSSHHHH|SHHHHHHH"),
-    storm:    B("BRRMM|KRMMM", "KRAKOOM|KRAGOOM", "KRA-KA-BWROOMM|KRA-KA-GRROOMM"),
+    storm:    B("BRRMM|KRMMM", "KRAKOOM|KRAGOOM", "KRA-KA-BWROOMM|KRA-KA-HRROOMM"),
     tornado:  B("HWRROO|VRROO", "VRROOOOSH|HWRROOOO", "SHWRRROOOOMM|VRRROOOOSHH"),
     /* KINDS1 (2026-11-13) */
     shockwave:B("FHOMF|VWOMF", "VWOOOMMF|FHOOOMMF", "VWOOOOMMFF|FHWOOOOMMFF"),
@@ -503,13 +503,13 @@ export function intensityOf(x) { if ( Number.isFinite(x) ) return Math.max(1, Ma
 export const VARIANTS = {
   en: {
     impact: {
-      stone:  B("PTAK|TKAK", "KRAKT|PTAKT", "KRAKK-KRRK|KRAKKT"),
+      stone:  B("KPAK|TKAK", "KRAKT|KPAKT", "KRAKK-KRRK|KRAKKT"),   // ENGWORDS: PTAK is the Polish word for a bird
       wood:   B("THOK|TWOK", "KTOKK|GDOKK", "KTOKK-KRRK|GDOKK-KRAK"),
       metal:  B("TNNK|KTANG", "KTANNG|TSANNG", "SKRANNGG|KTRANNG"),
       earth:  B("PFUT|TFUMF", "PFUMF|KFUMF", "GWUMFF|BWUMFF"),
       water:  B("TSIPP|PSIP", "PSHLIP|TSHLUP", "SHPLOOMP|PSHLOOMP"),
       glass:  B("TKSS|TSIK", "PTISSK|KTISSK", "KTISSHK|SKRISSHK"),
-      flesh:  B("THK|TWUK", "SHTUK|TWUKK", "THUKSH|SHWUKKSH"),
+      flesh:  B("THK|TWUK", "SHWUK|TWUKK", "THUKSH|SHWUKKSH"),   // ENGWORDS: SHTUK reads as the Polish SZTUK
       shield: B("BWOMM|VWOMM", "VWONNG|ZWONNG", "VWONNGG|ZWAONNGG")
     },
     debris: {
@@ -1005,6 +1005,95 @@ export function sayable(word, lang = "en") {
 }
 /** the same refusal, with its reason, for sheets and checks: { part, why: "word" | "near" } or null */
 export function refusal(word, lang, o = {}) { return check(word, lang, o); }
+/* ---------- BOTH deny lists over BOTH languages (ENGWORDS, 2026-11-15) ----------
+   A sound word is read by people who know both languages: a Polish table reads English words (DUMP, BOING, TING, HUH) in a Polish
+   bank, and Polish words (PTAK = a bird, GROM = a thunderclap, BUDA) hide in English banks. refusal() above judges a word only in its
+   own language; crossRefusal() reads it with the OTHER language's deny list too: the literal spelling, and the Polish SZ read as the
+   English SH (and back), the one respelling a reader of both makes by himself (SPLASZ = SPLASH, SHTUK = SZTUK). The other language's
+   near-word rule runs too, so every new cross reading is read by a person before it ships.
+   Passes: a syllable that is the word's OWN language's ICONIC or ALLOW word (the owner's picks: KA-KROOSH, KLANG), the reader's
+   ICONIC and (in voice kinds) VOICE words, and CROSS below: readings a reviewer read and kept, each with its reason (the owner rules
+   on this list like on ICONIC). Keys are the part as the reader sees it (repeated letters collapsed, what refusal() names). */
+export const CROSS = {
+  pl: {
+    TLING: "the bell's tl-ing, the Polish spelling of the English TLEENG; one letter from the English TING only",
+    SPROING: "the comic spring sound (SPROINNG), not the English SPRING",
+    KRIKT: "a built crack (KR + I + KT), reads as no English word",
+    SKRIK: "a built crack, the English CRICK is not seen in it",
+    KRINK: "metal tearing, the English CLINK is not seen in it",
+    KRIT: "the crackle's tick (KRIT-KRAT), the English CLIT is not seen in it",
+    KTOK: "a knock on wood, not the English KOOK",
+    PTANG: "a hard ring on metal, not the English PANG",
+    SPANG: "the ricochet's ring, not the English PANG",
+    SPAK: "the slap's crack, not the English SPANK",
+    PONK: "a soft bounce, not the English PLONK",
+    DROMP: "the heavy step's DR + OM + P, not the English DROP",
+    BLUMP: "a heavy drop into water (the water family), not the English BUMP",
+    BULP: "a bubble (GLUB-BLUB-BULP), not the English BURP",
+    FISZ: "a short swish (FSZ, FISZ), not the English FIZZ",
+    PSHT: "the hush PSZT, the Polish spelling of the English master's own PSHT",
+    SHLIP: "a wet slip (SZLIP), not the English SHIP",
+    SHRIP: "a splinter (SZRIP), not the English SHIP",
+    SHRAK: "a scrape (SZRAK), not the English SHACK",
+    SHFUSH: "a rush of air (SZFUUUSZ), not the English SHUSH",
+    SKRASH: "a shattering (SKRAASZ), the English CRASH needs a C and no S",
+    SKRUM: "a heavy smash (SKRUUM), not the English SCRAM",
+    SKZAM: "a heavy blaster shot, not the English SCAM",
+    PFST: "a hiss (PFSSST), not the English PSST",
+    PLAPSH: "a wet slap on water, not the English PLASH",
+    PLUMSH: "a wet thump, not the English PLUSH",
+    KLENK: "an old car's rattle (KLENK-KLONK), not the English CLINK",
+    KLONK: "an old car's rattle (KLENK-KLONK), not the English CLINK",
+    HWUSH: "the wind (HWUUSZ), not the English HUSH",
+    PSZT: "the hush PSZT as written: SZ is one sound in Polish (the English master writes PSHT), not the English PSST",
+    SHWAK: "a slap (SZWAKK), the English WHACK needs WH",
+    SHWIT: "a thrown thing's whistle (SZWIT), the English SHIT is not seen in it",
+    SHWUSH: "the wind (SZWUUUSZ), not the English SHUSH",
+    SZING: "a blade's ring read as written (SZ is one sound), the English master's own SHING; not the English ZING"
+  },
+  en: {
+    KROM: "the owner's fixed pick KROOM for a blast without fire (and the rumble that shares it); one vowel from the Polish KROM only",
+    PAK: "the comic's small shot and the hail's patter; the Polish noun PAK (pack ice) is too rare to be read",
+    PR: "a cat's purr (PRRR); the Polish PRR is the same imitation",
+    BRAKA: "the gun's BRAKKA, not the Polish BRAK",
+    GRAK: "a crack's G-R-A-K, not the Polish GRA",
+    GRONCH: "a crunching bite, not the Polish GROCH",
+    KLENG: "a bell's ring (KLEENG), not the Polish KLANG",
+    KRUSK: "a crumble (KRUSK), not the Polish KRUK",
+    SKRUK: "a crumble (SKRUK), not the Polish KRUK",
+    PTISK: "glass hit by a bullet (PTISSK), not the Polish PISK",
+    PTRAK: "the rifle's crack (PTRAKK), not the Polish PTAK",
+    SKLANG: "metal ringing (SKLAANNG), not the Polish KLANG",
+    SKRAT: "a scrape (SKRRAT), not the Polish SKRA",
+    GWROM: "an inferno's roar (GWRROOM), not the Polish GROM",
+    GHROM: "an inferno's roar (GHRROOM), not the Polish GROM",
+    BWROM: "a storm's roar (KRA-KA-BWROOMM), not the Polish BROM",
+    KROMF: "a dull blast without fire (KROMF), the owner's KROOM family",
+    DAKA: "the heavy machine gun's DAKKA, not the Polish DRAKA"
+  }
+};
+const READ_AS = { pl: (s) => s.replace(/SZ/g, "SH"), en: (s) => s.replace(/SH/g, "SZ") };
+/** the word read with the OTHER language's deny list: { part, why: "word" | "near", like, reader } or null (see CROSS above) */
+export function crossRefusal(word, lang, o = {}) {
+  const L = lang === "pl" ? "pl" : "en", R = L === "pl" ? "en" : "pl", TL = tables(L), TR = tables(R);
+  const parts = sylls(word);
+  if ( !parts.length ) return null;
+  const group = o.group ?? KINDS[o.kind]?.group;
+  const mine = (x) => { const c = one(fold(x, L)); return TL.icon.has(c) || TL.allow.has(c); };
+  const theirs = (x) => { const c = one(fold(x, R)); return TR.icon.has(c) || (group === "voice" && TR.voice.has(c)); };
+  const kept = (part) => Object.hasOwn(CROSS[L], part);
+  for ( const read of [(s) => s, READ_AS[L]] ) {
+    const seen = parts.map(read);
+    if ( seen.length > 1 && !parts.every(mine) && !seen.every(theirs) ) {
+      const r = refuse(seen.join(""), R, TR); if ( r && !kept(one(seen.join(""))) ) return { part: seen.map(one).join("-"), ...r, reader: R };
+    }
+    for ( let i = 0; i < parts.length; i++ ) {
+      if ( mine(parts[i]) || theirs(seen[i]) ) continue;
+      const r = refuse(seen[i], R, TR); if ( r && !kept(one(seen[i])) ) return { part: one(seen[i]), ...r, reader: R };
+    }
+  }
+  return null;
+}
 /** is every character of the word lettered by every font? (beyond this pure set, check.mjs proves it per font) */
 export const renderable = (t) => { const w = clean(t).replace(/\+/g, ""); return w.length > 0 && w.length <= MAX_LEN + 8 && RENDERABLE.test(w); };
 
