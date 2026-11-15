@@ -28,7 +28,8 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
 const failed = [];
 const group = async (id, fn) => { try { await fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sfx = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
+// (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
+const sfx = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8") + fs.readFileSync(path.join(root, "scripts/sfx/sfx-table.mjs"), "utf8");
 const seatSrc = fs.readFileSync(path.join(root, "scripts/sfx/sfx-seat.mjs"), "utf8");
 const V = !!process.env.THUNDERFIT_VERBOSE;
 const area = (b) => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
@@ -100,7 +101,7 @@ await group("STEP2", () => {
     if ( C0.burnCrowded(pts, taken, em) === C.burnCrowded(pts, taken, em) ) bs++;
   }
   ok(bs === 400, "burnCrowded with plain spots = the base commit");
-  ok(/const b = FIT\.wordBox\(hb, u\);\n\s*w\.bw = b\.bw; w\.bh = b\.bh;/.test(sfx) && /const md = measureOf\(w\.text, o\), hd = md \?\? holdOf\(w\.text, o\), hb = hd \?\? FIT\.estHold/.test(sfx), "measure boxes a word as before (the engine's hold box: L.measure, else L.planFor)");
+  ok(/const b = FIT\.wordBox\(hb, u\);\n\s*w\.bw = b\.bw; w\.bh = b\.bh;/.test(sfx) && /const md = measureOf\(w\.text, o, d\), hd = md \?\? holdOf\(w\.text, o, d\), hb = hd \?\? FIT\.estHold/.test(sfx), "measure boxes a word as before (the engine's hold box: L.measure, else L.planFor)");
 });
 await group("PINS", () => {
   let avoided = 0, freeExists = 0, satOnPin = 0, mains = 0;
@@ -121,7 +122,7 @@ await group("PINS", () => {
   ok(satOnPin === 0, "a side word is never laid over a pin (it is dropped or moved)");
   ok(freeExists > 100 && avoided === freeExists, `a main word with a clean place keeps off the pins: ${avoided} of ${freeExists} (${mains} placed)`);
   // (MAPSFXSEAT: the TABLE placement gets the pins every seat counts; an unlocated word keeps off this seat's own pins on its screen)
-  ok(/return \{ view: v, ui: \[\], tokens: sharedTokens\(v\), pins: sharedPins\(v\), alive: ledger\.boxes\(t0, t1, skip\) \};/.test(sfx) && /panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "every placement of the runtime gets the pins");
+  ok(/return \{ view: v, ui: \[\], tokens: d\.tokens\?\.\(v\) \?\? \[\], pins: d\.pins\?\.\(v\) \?\? \[\], alive: d\.ledger\.boxes\(t0, t1, skip\) \};/.test(sfx) && /tokens: sharedTokens, pins: sharedPins,/.test(sfx) && /panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "every placement of the runtime gets the pins");
   ok(/if \( !n\.visible \|\| n\.destroyed \) continue;/.test(sfx) && /if \( !SEAT\.sharedPin\(players, /.test(sfx), "a pin a seat does not see is no obstacle (nothing of a hidden note shows in a player's placement: the table counts only pins every player may see)");
 });
 
@@ -146,7 +147,7 @@ await group("LADDER", () => {
   ok(neverSmaller, "never under today's size");
   ok(cleanAt3 === cleanAny, `where today's size has a clean place for the main word, step 3 finds one too: ${cleanAt3} of ${cleanAny}`);
   ok(dropsAfter <= dropsBefore && dropsAfter < dropsBefore, `fewer side words dropped at step 3: ${dropsBefore} -> ${dropsAfter} of the scenarios' words`);
-  ok(/function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place, grows: \(w\) => !!w\.text && !w\.stream && !w\.path && stepFor\(grpOf\(w\)\) > SZ\.SIZE_DEFAULT,/.test(sfx), "only a word at a BIGGER step than today's climbs down the ladder");
+  ok(/function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place, grows: \(w\) => !!w\.text && !w\.stream && !w\.path && d\.step\(grpOf\(w\)\) > SZ\.SIZE_DEFAULT,/.test(sfx), "only a word at a BIGGER step than today's climbs down the ladder");
   ok(/px = s > SZ\.SIZE_DEFAULT && Number\.isFinite\(fitK\) && fitK < 1 \? px \+ \(st - px\) \* Math\.max\(0, fitK\) : st;/.test(seatSrc), "the ladder's share is a share of the EXTRA size (0 = the table's step-2 size; sfx-seat tableSize)");
   if ( V ) console.log("LADDER", { tried, cleanAt3, cleanAny, dropsBefore, dropsAfter });
 });
@@ -248,7 +249,7 @@ await group("REACH", async () => {
     if ( (e.l + e.r) / b.bw > FIT.reachOf(inn) + 1e-6 || (e.u + e.d) / b.bh > FIT.reachOf(inn) + 1e-6 ) stale++;
     h.stop({ quick: true }); await E.tick(40);
   }
-  ok(/w\.reachU = md\?\.reach \?\? null; w\.rk = md \? FIT\.reachFactor\(hb, md\.reach\) : FIT\.reachOf\(o\.in\);/.test(sfx) && /const m = L\?\.measure\?\.\(text, \{ \.\.\.o, reduced: false/.test(sfx), "the runtime takes every world word's reach from L.measure (the factor only on an engine without it)");
+  ok(/w\.reachU = md\?\.reach \?\? null; w\.rk = md \? FIT\.reachFactor\(hb, md\.reach\) : FIT\.reachOf\(o\.in\);/.test(sfx) && /const m = d\.L\?\.measure\?\.\(text, \{ \.\.\.o, reduced: false/.test(sfx), "the runtime takes every world word's reach from L.measure (the factor only on an engine without it)");
   ok(/const rk = reach \? FIT\.reachFactor\(hold, reach\) : FIT\.reachOf\(stageIn\)/.test(seatSrc), "and every unlocated word's");
   if ( V ) console.log("REACH", { cases, overTheOldFactor: stale });
 });

@@ -37,25 +37,23 @@ import * as EV from "./sfx-events.mjs";
 import * as SZ from "./sfx-size.mjs";
 import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
+import * as T from "./sfx-table.mjs";
 import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
 
 const MAX_AHEAD = 120000;      // events further ahead than this (a preset timed minutes ahead) are not scheduled
-const BURN_AFTER = 1500;
-// MAPSFXSEAT: a fire's catch word is lettered this long after the fire's shared moment on every seat (a seat on time shows the flames by
-// then: their field is computed in a worker); before, each seat waited for its OWN flames (question MAPSFXSEAT-2)
-const CATCH_SHOW_MS = 400;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
+const BURN_AFTER = 1500;       // ms after a fire shows before its continuous sound starts (the catch word has the stage first)
+const CATCH_SHOW_MS = T.CATCH_SHOW_MS;   // MAPSFXSEAT: a catch word sounds this long after its fire's shared moment (question MAPSFXSEAT-2)
 const UI_MS = 400;             // the interface rectangles are measured at most this often
-const DRIFT = [0.15, 0.9];     // steam's way up off what was put out (grid squares: sideways, up)
 // a live fire's lasting word: the engine's sustain treatments WITHOUT "echo" (EFFECTS1, live: the echo copies sat stacked on
 // the word itself, FOOOFF three times over one fire)
 const BURN_TREATMENTS = ["breath", "stretch", "split", "shed", "accent"];
 
-let L = null, loading = null, gen = 0;
+let L = null, loading = null, gen = 0;      // gen: the scene's generation (a scene change makes every waiting callback stale)
 // MAPSFXSEAT: the size model of the engine copy this page RUNS (its own scripts/letters/size.mjs, from the copy the registry chose: maybe
 // plus-ultra's) - the table sizes are its model fed the reference view (engine request MAPSFXSEAT-E3: L.sizeOf with an explicit view)
-let engineSizeFor = null;      // gen: the scene's generation (a scene change makes every waiting callback stale)
+let engineSizeFor = null;
 let known = null;              // the engine's sound kinds
 let pending = [], gatherTimer = 0;
 const sched = new Map();       // key -> { id, obj, voice }: timers of events and words scheduled ahead
@@ -101,7 +99,7 @@ export const mode = () => (get("sfxLettersWorld", true) === false ? "off" : get(
 const lang = () => { const c = get("sfxWords", "auto"); return C.langOf(c !== "auto" ? c : get("sfxWordsWorld", "auto"), game.i18n?.lang); };
 // SFXSIZE: the size step of a group's lettering (sfx-size.mjs; world settings, the GM's for the table: every seat letters the same)
 export const stepFor = (g) => SZ.stepOf(get(SZ.SIZE_SETTING[g], SZ.SIZE_DEFAULT));
-const grpOf = (w) => w.grp ?? SZ.groupOfVoice(w.voice);
+const grpOf = T.grpOf;
 
 function registerSettings() {
   const T = (k) => `MOINENMAPS.Sfx.${k}`;
@@ -439,109 +437,11 @@ function groundAt(rec) {
     return SEAT.groundOfPixels(mapPixels(1, box), box.w);
   } catch { return null; }
 }
-/**
- * MAPSFXSEAT: the TABLE picture of a page, planned once from what every seat shares: every word written in page order (its ground known
- * from the map), sized on the reference view, measured by the engine, placed off the shared obstacles and the words the table already
- * holds, timed on the shared clock. A seat then shows each word by the seat rule only (pageWord -> play / playScreen).
- */
+/** MAPSFXSEAT: the TABLE picture of a page, planned once from what every seat shares (sfx-table planPage); a seat then shows each word
+    by the seat rule only (pageWord -> play / playScreen). */
 function tablePage(p) {
   if ( p.table || !L ) return p.table ?? null;
-  p.table = new Map();
-  const G = grid(), lg = lang(), sid = canvas.scene?.id ?? "";
-  const words = p.pg.words, main = words.find((q) => q.role === "main") ?? words[0];
-  if ( !main ) return p.table;
-  // (the reference view: centred on the page's main sound, at the zoom that holds its subject)
-  const c = { x: main.x, y: main.y }, zr = main.r ?? G * 0.5, z = SEAT.refZoom(G, zr), vw = SEAT.refView(c, z);
-  const env = { c, z, zr, vw, used: new Set(), mainBox: null, pins: sharedPins(vw) };
-  p.texts ??= new Set();
-  for ( const w of words ) {
-    const sd = `${sid}|${w.seed}`;
-    const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
-    if ( wo.material == null ) delete wo.material;
-    // the word is written BEFORE any spot is picked (every seat writes the same words in the same order, whatever it shows), and never
-    // repeats a word of its own page: one bomb's debris words were seen saying the same thing twice (EFFECTS1)
-    let word;
-    try { word = PG.unrepeated((s) => L.word(w.kind, { ...wo, seed: s, lang: lg }), sd, p.texts); }
-    catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); continue; }
-    if ( !word?.text ) continue;
-    p.texts.add(word.text);
-    const q = tableWord(p, w, word, sd, env);
-    p.table.set(w.key, q);
-    if ( w.role === "main" && q?.box ) env.mainBox = q.box;
-  }
-  return p.table;
-}
-/** One word of a page on the TABLE: its spot (a landing or a fire the reference view holds), its size, its box, its way, its place. */
-function tableWord(p, w0, word, sd, env) {
-  const G = grid(), { vw, z, zr } = env;
-  let w = w0, alts = [];
-  if ( w.cands ) {
-    const ss = PG.pickSpots(w, vw, env.used, Number(p.rec.t0), 6), s = ss[0];
-    if ( !s ) return { dropped: "spot", text: word.text, key: w0.key };
-    alts = ss.slice(1);
-    env.used.add(`${Math.round(s.x)},${Math.round(s.y)}`);
-    w = { ...w, x: s.x, y: s.y };
-  }
-  const role = w.role === "main" ? "main" : w.role === "pre" ? "pre" : "sec";
-  const r = w.r ?? G * 0.4, grp = SZ.groupOfPageWord(w0, p.grp), lag = w0.gate ? CATCH_SHOW_MS : 0;
-  const spec = { role, grp, voice: w.kind, kind: w.kind, word, text: word.text, chars: [...word.text].length, x: w.x, y: w.y, t: toPerf(w.t + lag), ts: w.t + lag, ms: w.ms ?? 700, seed: sd,
-    key: `${p.rec.id}|${w0.key}`, page: p.rec.id, z, zr, sx: w.at?.x ?? w.x, sy: w.at?.y ?? w.y,
-    // (EFFECTS2: a story's words are sized by rank as a share of the REFERENCE view: readable, a lower rank never bigger)
-    rank: w.rank, shrink: w.shrink ?? 1,
-    magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
-    cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
-    ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
-  if ( w.screen ) return { ...spec, screenAt: w.screen };
-  spec.alive = ledger.count(spec.ts, spec.ts + lifeMs(spec));
-  measure(spec);
-  // (a ride from beyond the reference view's edge comes in AT the edge, whole; one going past it - the plough's grind - stops at it)
-  if ( w.ride && spec.path ) {
-    spec.path = PG.rideInView(spec.path, vw, spec.bw ?? 0, spec.bh ?? 0);
-    if ( spec.path[0] ) { spec.x = spec.path[0].x; spec.y = spec.path[0].y; }
-  }
-  // a travelling PRE word leaves (its exit, about a fifth of a second) so it is gone PRE_GAP before the main word's frame
-  if ( w.role === "pre" && w.ride ) {
-    const mw = p.pg.words.find((q) => q.role === "main");
-    if ( mw ) spec.stopAt = toPerf(mw.t) - PG.PRE_GAP - 220;
-    // (a ride that hands over to the next one - the meteor's far whine to its roar - leaves when its own way ends)
-    if ( p.pg.words.some((q) => q !== w0 && q.role === "pre" && q.ride && q.t > w0.t) ) spec.stopAt = Math.min(spec.stopAt ?? Infinity, spec.t + (w.ms ?? 0) + 60);
-  } else if ( w.role === "pre" ) {
-    // (EFFECTS2: a standing PRE word - the meteor's rumble - yields when the main word lands)
-    const mw = p.pg.words.find((q) => q.role === "main");
-    if ( mw ) spec.stopAt = toPerf(mw.t) + 40;
-  }
-  const life = lifeMs(spec), upNow = () => ledger.boxes(spec.ts, spec.ts + life, spec.key);
-  // the wave rides out the free way of the TABLE picture: away from the main word as placed there, off the shared pins and the table's
-  // words up, inside the reference view; its whole reach (the engine's measure) held there and off the pins along its whole way
-  if ( w.wave ) {
-    const avoid = [...(env.mainBox ? [env.mainBox] : []), ...upNow(), ...env.pins];
-    const wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid, ui: [], v: vw, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
-    spec.path = FIT.rideFit(wr.ride, vw, avoid, spec.bw ?? G, spec.bh ?? G * 0.4, spec.rk ?? FIT.REACH.other, FIT.EDGE / z);
-    spec.x = spec.path[0].x; spec.y = spec.path[0].y;
-    // (a pressure front: the word travels upright and is gone soon after the front breaks up)
-    spec.orient = "none"; spec.stopAt = spec.t + w.wave.rim + 180;
-  }
-  const ctxAt = (ts) => tableCtx(env.c, z, ts, ts + life, spec.key);
-  // the debris / catch word covered by the story's bigger words takes the next landing the reference view holds; still covered, it
-  // waits on the TABLE's timeline (a quarter second at a time, up to FALL_WAIT_MS) for the bigger words to clear: the debris keeps coming
-  // down, the story still resolves - the same wait on every seat (before: on this seat's words up)
-  const spots = [{ x: spec.x, y: spec.y }, ...alts];
-  let placed = [];
-  for ( let dt = 0; dt <= (w0.cands ? PG.FALL_WAIT_MS : 0) && !placed.length; dt += 250 ) {
-    for ( const s of spots ) {
-      const s2 = s === spots[0] && dt === 0 ? spec : { ...spec, x: s.x, y: s.y, t: spec.t + dt, ts: spec.ts + dt,
-        ...(s === spots[0] ? {} : { subject: { x0: s.x - r, y0: s.y - r, x1: s.x + r, y1: s.y + r }, sx: s.x, sy: s.y }) };
-      placed = placeFit([s2], ctxAt(s2.ts));
-      if ( placed.length ) { if ( s !== spots[0] ) env.used.add(`${Math.round(s.x)},${Math.round(s.y)}`); break; }
-    }
-  }
-  if ( !placed.length ) {
-    const why = C.place([{ ...spec, role: "main" }], ctxAt(spec.ts))[0]?.pen;
-    return { dropped: "room", text: spec.text, key: w0.key, why: why && { tok: +why.tok.toFixed(2), pin: +(why.pin ?? 0).toFixed(2), wrd: +why.wrd.toFixed(2), off: +why.off.toFixed(2) } };
-  }
-  const q = placed[0];
-  ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: q.role === "main" });
-  return q;
+  return (p.table = T.planPage(p, tdeps()));
 }
 /** One word of a page, at its moment, on THIS seat: the table's word, shown by the seat rule (its view, its panels, what it may see). */
 function pageWord(p, w) {
@@ -816,13 +716,6 @@ function pinRects() {
     return pinBoxes(view()).map((b) => { const a = st.toGlobal({ x: b.x0, y: b.y0 }), c = st.toGlobal({ x: b.x1, y: b.y1 }); return { x0: rc.left + a.x, y0: rc.top + a.y, x1: rc.left + c.x, y1: rc.top + c.y }; });
   } catch { return []; }
 }
-/** MAPSFXSEAT: the TABLE's placement context of a moment (shared): the reference view round `c` at zoom `z` (sfx-seat refView: no
-    seat's own panels - Foundry's bars are already off it), the tokens nobody hides, the pins every player may see, and the words the
-    table picture holds during [t0, t1] (the ledger), never what this seat happens to have drawn */
-function tableCtx(c, z, t0, t1, skip = null) {
-  const v = SEAT.refView(c, z);
-  return { view: v, ui: [], tokens: sharedTokens(v), pins: sharedPins(v), alive: ledger.boxes(t0, t1, skip) };
-}
 /** the tokens every seat counts (sfx-seat sharedTokenBox: a document nobody hides, its box from the document), near view `v` */
 function sharedTokens(v) {
   const G = grid(), out = [];
@@ -847,18 +740,6 @@ function sharedPins(v) {
     } catch { /* a note being redrawn */ }
   }
   return out;
-}
-/**
- * THUNDERFIT: the placement of words of which some stand at a BIGGER step than today's (sfx-core place, then the ladder): at their
- * stepped size first; when that leaves a word dropped or the main word not clean (off the view, under a panel, on a token or a pin, on
- * another word, over its subject beyond its allowance) the bigger words try smaller sizes down to today's (FIT.LADDER) and the first
- * size where every word stands clean is taken, else the one that keeps most words with the main word cleanest, the bigger first. Live
- * 2026-11-15: at step 3 a blast's main word covered its own marker and the pins and its side words were dropped for want of room. At
- * today's step (and at a smaller one) this is sfx-core place itself.
- */
-function placeFit(specs, ctx) {
-  return FIT.ladderPlace(specs, ctx, { place: C.place, grows: (w) => !!w.text && !w.stream && !w.path && stepFor(grpOf(w)) > SZ.SIZE_DEFAULT,
-    resize: (w, f) => { const q = { ...w, fitK: f }; measure(q); return q; } });
 }
 /** The interface panels over the canvas on this client (Foundry's and any module's), in scene px. */
 function uiBoxes() {
@@ -902,29 +783,12 @@ function flush() {
     this seat by its own needs (lettering "big only", its performance mode's room) and the seat rule (play). */
 function flushMoment(due) {
   const now = performance.now();
-  const pm = perfMode(), caps = C.CAPS[pm] ?? C.CAPS.high, G = grid(), big = mode() === "big";
-  // (the table plans with every satellite the best seat keeps: CAPS.high; a seat in a lower performance mode keeps fewer)
-  const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
-  stats.clusters += groups.length;
-  const seed = canvas.scene?.id ?? "";
+  const caps = C.CAPS[perfMode()] ?? C.CAPS.high, big = mode() === "big";
   recent = recent.filter((r) => now - r.t < Math.max(C.ECHO_MS, C.OUT_GAP_MS));
-  for ( const g of groups ) {
-    // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
-    if ( !g.main.det && C.isEcho(g, recent, G) ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
-    const specs = C.planCluster(g, { grid: G, sec: C.CAPS.high.sec, seed, big: false, known });
-    // (the reference view of the moment: centred on the cluster, at the zoom that holds its reach)
-    const zr = g.span, z = SEAT.refZoom(G, zr), c = { x: g.x, y: g.y };
-    for ( const w of specs ) { if ( w.role === "main" ) w.obj = g.main.obj; w.z = z; w.zr = zr; w.ts = toShared(w.t); w.key = `${w.seed}|${w.role}`; }
-    // the engine writes each word (its vocabulary: the kind, how loud, how long; seeded, the same on every client); the words of one
-    // moment differ from each other (avoid), nothing else of this client's history changes them
-    const taken = [];
-    for ( const w of specs ) { write(w, taken); w.alive = ledger.count(w.ts, w.ts + lifeMs(w)); measure(w); }
-    const t0 = Math.min(...specs.map((w) => w.ts)), t1 = Math.max(...specs.map((w) => w.ts + lifeMs(w)));
-    const placed = placeFit(specs.filter((w) => w.text || w.stream), tableCtx(c, z, t0, t1, null));
-    for ( const w of placed ) if ( w.box ) ledger.add({ key: w.key, box: lifeBox(w), t0: w.ts, t1: w.ts + lifeMs(w), main: w.role === "main" });
-    stats.dropped += specs.length - placed.length;
-    const main = placed.find((w) => w.role === "main");
-    if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
+  for ( const { g, placed, echo, specs } of T.planMoment(due, tdeps(), recent) ) {
+    stats.clusters++;
+    if ( echo ) { stats.echoes = (stats.echoes ?? 0) + 1; continue; }
+    stats.dropped += specs - placed.length;
     // this seat's own needs: "big only" keeps the main words of big sounds (planCluster's own rule), a lower performance mode fewer
     // satellites and fewer words up
     let mine = big ? placed.filter((w) => w.role === "main" && (w.loud ?? 1) >= 0.2 + 0.8 * 0.34 - 1e-9) : placed;
@@ -935,137 +799,21 @@ function flushMoment(due) {
     trimPlaced();
   }
 }
-/** The engine's word for a spec (its vocabulary), different from the other words of the same moment. */
-function write(w, taken) {
-  if ( w.stream ) return;
-  try {
-    const o = { seed: w.seed, lang: lang(), loud: w.textLoud ?? w.loud, duration: w.ms, avoid: taken.slice() };
-    // (engine 1.7.1 vocabulary: what was hit, the size of the pieces, the fire's stage; a cave-in's own spelling)
-    const { kind = w.kind, ...wo } = C.wordOpts({ voice: w.voice, kind: w.kind, loud: o.loud, emat: w.emat, mat: w.mat, lang: o.lang, level: w.level });
-    const word = L.word(kind, { ...o, ...wo });
-    if ( !word?.text ) return;
-    w.word = word; w.text = word.text; w.chars = [...word.text].length;
-    taken.push(word.text, word.template);
-  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: no word for ${w.kind}`, err); }
+/** MAPSFXSEAT: what the table's planning (sfx-table) may know: only what every seat shares (the engine, the running copy's size model,
+    the scene, the world's word set, the table's settings, the ledger, the shared obstacles, the shared clock) - nothing of this seat's view */
+function tdeps() {
+  return { L, sizeFor: engineSizeFor, grid: grid(), sceneId: canvas.scene?.id ?? "", lang: lang(), known, ledger, toPerf, toShared, layer: layerOpts(),
+    step: stepFor, memo: holdMemo, tokens: sharedTokens, pins: sharedPins, warn: (m, err) => console.warn(`${MODULE_ID} | sfx: ${m}`, err) };
 }
-/** The options a word plays with (and is measured with): its TABLE size (MAPSFXSEAT: the engine's own size model fed the reference view,
-    drawn with fit "world") at its group's size step (SFXSIZE; `raw`: before the step and the table size). */
-function optsOf(w, raw = false) {
-  const o = baseOpts(w);
-  if ( raw ) return o;
-  const step = stepFor(grpOf(w));
-  // (a word sized another way - exact or pixel lettering - or an engine that cannot tell its size: the step's options as before)
-  if ( step !== 0 && w.text ) { const b = tableSized(w, o, step); if ( b ) return b; }
-  return SZ.sizeOpts(o, step);
-}
-/**
- * MAPSFXSEAT: a world word's TABLE options: its size in scene px from the engine's own size model (scripts/letters/size.mjs sizeFor) fed
- * the REFERENCE view instead of this seat's (sfx-seat tableSize: REF_VW x REF_VH at the moment's reference zoom, the table's words up
- * from the ledger), at the group's step (a smaller step under the engine's legibility floor there, a bigger one under its loudest ceiling
- * there, `fitK` the ladder's share), then drawn at exactly that size (fit "world": no second clamp by this seat's window, zoom or words
- * up) and not pulled into this seat's view by the engine (keepInView false: the seat rule moves it). On a seat whose window, zoom and
- * words up are the reference's, this is the size the engine drew today (dev/sfx-seat.test.mjs STEP2).
- */
-function tableSized(w, o, step) {
-  try {
-    if ( o.fit === "exact" || o.pixel || !L?.sizeModel || !engineSizeFor ) return null;
-    const z = w.z ?? SEAT.refZoom(grid(), w.zr ?? 0);
-    const ts = SEAT.tableSize(engineSizeFor, L.sizeModel, o, planInfo(w.text, o), { z, alive: w.alive ?? 0, grid: grid(), step, fitK: w.fitK });
-    if ( !(ts?.size > 0) ) return null;
-    const out = { ...o, fit: "world", size: ts.size, keepInView: false };
-    delete out.scale;
-    return out;
-  } catch { return null; }
-}
-/** the engine's plan facts the size model reads (its mood factor sizeK, its hold box's width), from its own planner */
-function planInfo(text, o) {
-  const hd = holdOf(text, o);
-  return hd ? { sizeK: hd.sk, hold: { w: hd.w } } : { sizeK: 1, hold: { w: 3 } };
-}
-function baseOpts(w) {
-  const G = grid(), red = reducedMotion();
-  const st = w.stage ?? {};
-  const z = w.z ?? SEAT.refZoom(G, w.zr ?? 0);
-  const o = { ...(w.word?.play ?? {}), space: "world", at: { x: w.x, y: w.y }, area: w.area, magnitude: w.magnitude, seed: w.seed, rotation: w.rotation, reduced: red,
-    ceilK: C.CEIL_K[w.role] ?? C.CEIL_K.sec,
-    // (a story's word sized by its rank as a share of the REFERENCE view height at the moment's reference zoom: the rank is the
-    // hierarchy, the engine's ceiling share does not cut it again)
-    ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, SEAT.REF_VH / z, w.shrink ?? 1), ceilK: 1 } : {}),
-    ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...layerOpts() };
-  for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
-  // what was hit makes the sound: its material (the engine's look follows it: rock and timber in stone colours, metal in steel); the
-  // word's own character stays, only its material changes (a partial character would replace the whole one)
-  if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };
-  // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
-  if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
-  // steam drifts up off what was put out (the table's motion: a seat's reduced motion changes only how it is drawn, not where)
-  if ( w.drift ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
-  // a thing that travels: its word rides along with it
-  if ( w.path ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
-  return o;
-}
-/** THUNDERFIT: the engine's hold box of a word with these options: { w, h } in units of its drawn cap height, and its mood factor sizeK.
-    L.planFor (the engine's tools: the plan this seat would draw, the table's style and filters on), else the engine's own planner;
-    null when neither answers (the placement then falls back to an estimate from the text's length: FIT.estHold). Remembered per word and
-    look (a page plans many words in one frame). */
-function holdOf(text, o) {
-  const key = `${text}|${o.seed ?? ""}|${o.space ?? ""}|${o.in ?? ""}|${o.holdKind ?? ""}|${o.out ?? ""}|${o.character?.material ?? ""}`;
-  if ( holdMemo.has(key) ) return holdMemo.get(key);
-  let r = null;
-  try {
-    const pf = L?.planFor?.(text, { ...o, reduced: false }), hb = pf?.plan?._holdBox;
-    if ( hb?.w > 0 ) r = { w: hb.w, h: hb.h, sk: pf.plan.sizeK ?? 1 };
-  } catch { /* the planner below */ }
-  if ( !r ) try {
-    if ( L?._plan && L?._settle ) { const plan = L._plan(String(text), { ...o, reduced: false }); L._settle(plan); r = plan._holdBox?.w > 0 ? { w: plan._holdBox.w, h: plan._holdBox.h, sk: plan.sizeK ?? 1 } : null; }
-  } catch { r = null; }
-  holdMemo.set(key, r); if ( holdMemo.size > 400 ) holdMemo.delete(holdMemo.keys().next().value);
-  return r;
-}
-/** MAPSFXSEAT: the engine's own measure of a word (L.measure, LETR 1.9.11: the box it will really draw and the whole reach of its entrance
-    and hold), in units of its cap height (so no seat's own size setting is in it), with the table's motion (reduced false). null on an
-    engine without L.measure. */
-function measureOf(text, o) {
-  try {
-    const m = L?.measure?.(text, { ...o, reduced: false, at: o.at ?? { x: 0, y: 0 } });
-    if ( !(m?.unit > 0) || !(m.hold?.w > 0) ) return null;
-    const u = m.unit;
-    return { w: m.hold.w / u, h: m.hold.h / u, sk: m.sizeK ?? 1, reach: { l: m.reach.l / u, r: m.reach.r / u, u: m.reach.u / u, d: m.reach.d / u } };
-  } catch { return null; }
-}
-/** The word's TABLE box (scene px) as the engine will draw its hold picture at its table size, and its reach (the engine's own measure):
-    the table's placement keeps the box free, the seat rule keeps the reach in this seat's view. */
-function measure(w) {
-  if ( !w.text ) return;
-  try {
-    const o = optsOf(w);
-    const md = measureOf(w.text, o), hd = md ?? holdOf(w.text, o), hb = hd ?? FIT.estHold(w.chars ?? [...w.text].length), sk = hd?.sk ?? 1;
-    // (the table size, counted once; this seat's own size setting - the engine's `_k` - is the seat's, not the table's)
-    const u = (o.size ?? L.sizeOf(w.text, o)?.size ?? G0()) * sk;
-    w.size = u;
-    const b = FIT.wordBox(hb, u);
-    w.bw = b.bw; w.bh = b.bh;
-    // (the reach the engine itself reports for THIS word, instead of a factor per entrance that goes stale with the engine's motion)
-    w.reachU = md?.reach ?? null; w.rk = md ? FIT.reachFactor(hb, md.reach) : FIT.reachOf(o.in);
-    if ( w.drift ) { w.rise = grid() * DRIFT[1]; w.riseX = grid() * DRIFT[0]; }
-  } catch { /* the estimate stands */ }
-}
-const G0 = () => grid() * 0.5;
-/** a word's life on the table (ms): its sound, its hold, its exit (sfx-seat lifeOf) */
-const lifeMs = (w) => SEAT.lifeOf(w, 0).t1;
+/** The options a word plays with: its TABLE options (sfx-table optsOf; `raw`: before its step and table size) */
+const optsOf = (w, raw = false) => T.optsOf(w, tdeps(), raw);
+const planInfo = (text, o) => T.planInfo(text, o, tdeps());
+const holdOf = (text, o) => T.holdOf(text, o, tdeps());
+const measureOf = (text, o) => T.measureOf(text, o, tdeps());
+const { lifeMs, lifeBox, moveBox, unionBox, scaleBox } = T;
 /** is a word's whole life on the table over (a seat that got it late joins it mid-life, at the same point as every other seat; only a
     word whose life is over is not drawn) */
 const lifeOver = (w) => performance.now() > w.t + lifeMs(w) - 250;
-/** the box a word holds on the table for its life: its box, a cave-in's sinking (half its height lower), a ride's whole way */
-function lifeBox(w) {
-  let b = w.box ?? C.boxOf(w);
-  if ( w.voice === "cavein" ) b = { ...b, y1: b.y1 + (b.y1 - b.y0) * 0.5 };
-  if ( w.path?.length > 1 ) for ( const q of w.path ) b = unionBox(b, C.boxOf(w, q.x, q.y));
-  return b;
-}
-const moveBox = (b, dx, dy) => ({ x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy });
-const unionBox = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
-const scaleBox = (b, f, cx, cy) => (f === 1 ? b : { x0: cx + (b.x0 - cx) * f, y0: cy + (b.y0 - cy) * f, x1: cx + (b.x1 - cx) * f, y1: cy + (b.y1 - cy) * f });
 
 /**
  * MAPSFXSEAT, THE SEAT RULE: how THIS seat draws a word of the table picture (sfx-seat seatFit), and nothing else changes - its text,

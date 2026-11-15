@@ -161,7 +161,8 @@ for ( const l of ["en", "pl"] ) {
   const j = JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
   for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layers.ground", "layers.tokens", "layers.weather", "layers.overlay", "layers.top"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
 }
-const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+// (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
+const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
 ok(/LAYER_IDS = \["ground", "tokens", "weather", "overlay", "top"\]/.test(sfx) && sfx.includes('register(MODULE_ID, "sfxLayer"') && /\.\.\.layerOpts\(\)/.test(sfx), "the display layer is a setting over the engine's world layers, passed with every word");
 ok(sfx.includes("area: w.area, magnitude: w.magnitude") && !/\bsize: w\.size\b/.test(sfx), "words pass their area and magnitude (the engine's size model), not a fixed size");
 ok(/L\.word\(kind, \{ \.\.\.o, \.\.\.wo \}\)/.test(sfx) && /C\.wordOpts\(/.test(sfx) && /\.\.\.\(w\.word\?\.play \?\? \{\}\)/.test(sfx), "the engine's vocabulary writes each word, and its play options (mood, sound, accent, character) go with it");

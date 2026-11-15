@@ -25,7 +25,8 @@ const failed = [];
 /* each finding's group runs on its own: on an old build every failing group is named (not only the first) */
 const group = (id, fn) => { try { fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const V = createVocab(), KINDS = new Set(V.list("en").map((k) => k.id)), G = 100;
-const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+// (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
+const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
 const ov = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 const ar = (b) => (b.x1 - b.x0) * (b.y1 - b.y0);
 
@@ -58,7 +59,7 @@ group("F2", () => {
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
   // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /SEAT\.seatFit\(\{ box, reach, view: view\(\), panels: uiBoxes\(\)/.test(sfx) && /function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift)");
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /SEAT\.seatFit\(\{ box, reach, view: view\(\), panels: uiBoxes\(\)/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift)");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
@@ -70,7 +71,7 @@ group("F2", () => {
   const steam = { role: "main", voice: "out", x: 2600, y: 400, bw: 300, bh: 80, rise: 90 * 2, t: 0, subject: { x0: 2580, y0: 380, x1: 2620, y1: 420 }, cover: 0.4 };
   const ps = C.place([steam], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] })[0];
   ok(ps && ps.box.y0 <= ps.y - 40 - 180 + 1 && ui.every((b) => ov(ps.box, b) === 0), "F2 a word that rises (steam) keeps its whole way up off the panels");
-  ok(/w\.rise = grid\(\) \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
+  ok(/w\.rise = d\.grid \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
   ok(C.CEIL_K.main < 1 && C.CEIL_K.sec < C.CEIL_K.main && /ceilK: C\.CEIL_K\[w\.role\]/.test(sfx), "F2 the map's words take a share of the engine's size ceiling (a main word leaves room around it)");
   ok(sizeFor({ space: "world", grid: 100, zoom: 1, vw: 1600, vh: 900, area: 900, magnitude: 1.5, aspect: 6, ceilK: C.CEIL_K.main }).px * 6 < 1600 * 0.45, "F2 ... the biggest main word stays under about two fifths of the width");
   ok(/el\.id === "pause"/.test(sfx), "F2 the game-paused banner is not a panel (it would push every word off the middle)");

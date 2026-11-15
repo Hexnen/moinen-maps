@@ -148,7 +148,7 @@ group("BRUSH", () => {
 
 // WIRE: the runtime hears a Detonate whole, a plough's record, the lightning; ranked words sized by rank
 group("WIRE", () => {
-  const sfx = src("sfx/sfx.mjs"), disp = src("destruction/display.mjs"), des = src("destruction/destruction.mjs"), bus = src("sfx/bus.mjs");
+  const sfx = (src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs")), disp = src("destruction/display.mjs"), des = src("destruction/destruction.mjs"), bus = src("sfx/bus.mjs");
   ok(/detonate:\s*null/.test(bus), "the bus has a detonate hook");
   ok(/detonate\(start\)\s*\{[^}]*sfxBus\.detonate\?\.\(this,\s*start\)/.test(disp), "display.detonate tells the sfx first");
   ok(/ploughOf:\s*\(id\)/.test(des), "the carry hooks give a plough's record");
@@ -161,7 +161,7 @@ group("WIRE", () => {
   // (live, meteor film 1: four debris words dropped under the main word and the wave; the rumble stood under the blast)
   ok(/PG\.pickSpots\(w, vw, env\.used/.test(sfx) && /const spots = \[\{ x: spec\.x, y: spec\.y \}, \.\.\.alts\];/.test(sfx), "a covered debris word tries the next landing in view (MAPSFXSEAT: the table's reference view)");
   ok(/for \( let dt = 0; dt <= \(w0\.cands \? PG\.FALL_WAIT_MS : 0\) && !placed\.length; dt \+= 250 \)/.test(sfx) && P.FALL_WAIT_MS >= 500 && P.FALL_WAIT_MS <= 1500, "a still covered debris word waits for room a moment, then is dropped (MAPSFXSEAT: on the table's timeline)");
-  ok(/else if \( w\.role === "pre" \) \{[\s\S]{0,400}spec\.stopAt = toPerf\(mw\.t\) \+ 40/.test(sfx), "a standing pre word yields when the main word lands");
+  ok(/else if \( w\.role === "pre" \) \{[\s\S]{0,400}spec\.stopAt = d\.toPerf\(mw\.t\) \+ 40/.test(sfx), "a standing pre word yields when the main word lands");
 });
 
 group("RIDEVIEW", () => {
@@ -170,15 +170,15 @@ group("RIDEVIEW", () => {
   ok(r[0].y >= 45 && r[0].x === 500 && r[0].ms === 0, "a ride from above the screen starts at its top edge, whole");
   ok(r[1].y === 100 && r[2].y === 300, "the way inside the view is kept");
   ok(P.rideInView([{ x: -50, y: 300 }], v, 200, 60)[0].x >= 110, "the same at a side edge");
-  ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, vw/.test(src("sfx/sfx.mjs")), "every story ride (pre, the plough's grind) is kept in view where it plays");
-  ok(/if \( w\.from && !shooterSeen\(\[w\.from\.x, w\.from\.y\]\) \) \{ playScreen\(q\); return; \}/.test(src("sfx/sfx.mjs")), "a launch word of a hidden shooter is unlocated");
-  ok(/\.sort\(\(a, b\) => d\(a\) - d\(b\)\)\[0\];/.test(src("sfx/sfx.mjs")), "the shooter is the nearest token at the muzzle");
+  ok(/if \( w\.ride && spec\.path \) \{\s*spec\.path = PG\.rideInView\(spec\.path, vw/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "every story ride (pre, the plough's grind) is kept in view where it plays");
+  ok(/if \( w\.from && !shooterSeen\(\[w\.from\.x, w\.from\.y\]\) \) \{ playScreen\(q\); return; \}/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "a launch word of a hidden shooter is unlocated");
+  ok(/\.sort\(\(a, b\) => d\(a\) - d\(b\)\)\[0\];/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "the shooter is the nearest token at the muzzle");
   // (THUNDERFIT: `let` - the spot is then refitted by the word's real box, screenPlace; dev/sfx-fit.test.mjs checks that it stays whole)
   // (MAPSFXSEAT: laid out in the reference window, then the seat rule keeps it whole on this seat's screen)
-  ok(/const today = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* W, fw\)/.test(src("sfx/sfx-seat.mjs")) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(src("sfx/sfx.mjs")) && /const ss = SEAT\.seatScreen\(ref, /.test(src("sfx/sfx.mjs")), "an edge word is held whole on the screen");
+  ok(/const today = fixed \? \{ x: Math\.min\(Math\.max\(fixed\.fx \* W, fw\)/.test(src("sfx/sfx-seat.mjs")) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))) && /const ss = SEAT\.seatScreen\(ref, /.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "an edge word is held whole on the screen");
   // (MAPSFXSEAT: every cluster's words go into the table's ledger as they are planned; the next cluster is placed off the ledger's boxes)
-  ok(/alive: ledger\.boxes\(t0, t1, skip\)/.test(src("sfx/sfx.mjs")) && /for \( const w of placed \) if \( w\.box \) ledger\.add\(/.test(src("sfx/sfx.mjs")), "clusters of one flush avoid each other's words");
-  ok(/if \( w\.voice === "cavein" \) b = \{ \.\.\.b, y1: b\.y1 \+ \(b\.y1 - b\.y0\) \* 0\.5 \};/.test(src("sfx/sfx.mjs")), "a cave-in word covers where it sinks to");
+  ok(/alive: d\.ledger\.boxes\(t0, t1, skip\)/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))) && /for \( const w of placed \) if \( w\.box \) d\.ledger\.add\(/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "clusters of one flush avoid each other's words");
+  ok(/if \( w\.voice === "cavein" \) b = \{ \.\.\.b, y1: b\.y1 \+ \(b\.y1 - b\.y0\) \* 0\.5 \};/.test((src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs"))), "a cave-in word covers where it sinks to");
 });
 
 group("SPOTS", () => {
