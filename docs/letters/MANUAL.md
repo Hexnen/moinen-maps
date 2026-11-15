@@ -230,6 +230,64 @@ reused, so measuring costs nothing extra. `L.planFor` (tools, after `setup`) sti
 Many words at once: 12 words measured and played in one frame cost ~20-33 ms (node; 1.9.10: 68-77 ms with sizeOf + planFor + play);
 spread a crowd over two frames if it must stay under 16 ms.
 
+**One picture for the whole table: plan on shared data, then apply a seat rule** (moinen-maps MAPSFXSEAT, 2026-11-15) [V node +
+lane]. A map event (blast, fire, thunder) letters on every seat, and every seat must show the SAME words, at the same size, the same
+place on the map and the same instant, and the same again on replay. Every choice made from this seat's own state breaks that. Live,
+before the fix, each of these did:
+- the seat's view height, zoom, panels or the count of words already alive feeding the size (a GM with panels drew a smaller word);
+- placing around the seat's own view, panels and tokens (a hidden token the GM sees pushed his word elsewhere);
+- planning on what arrived so far (a page planned before its burst stroke arrived, the ground read from the first entry to land);
+- dropping a word that arrives late (a busy seat skipped it: the player got no blast words) or waiting on something only this seat
+  sees (the fire catch waited for its flames to show here);
+- gathering events by when they arrived, not when they are due (a late seat merged two moments into one).
+What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/sfx-seat.test.mjs`):
+- **plan once, from shared data only**: a reference window (1600 x 900 minus a fixed panel reserve), a reference zoom from the event's
+  own size (`refZoom`: about six squares tall, at least the event), tokens whose documents are not hidden, pins every player may see,
+  a ledger of the table's own words with lives on the shared clock, the shared clock itself. Size with the engine's size model fed
+  that reference view (`sizeFor` from the running copy's `size.mjs`, request E3 below) and play with `fit: "world"`,
+  `keepInView: false`: the size is then a world size, the same on every seat;
+- **measure in cap heights**: `L.measure` divided by its unit, so this seat's `scale` setting cancels out of the placement;
+- **play at the shared instant**: `startAt` = the moment on the perf clock, even in the past: a late seat joins mid-life instead of
+  dropping the word; drop only when its life is over;
+- **gather by due time**: chunk events from the earliest due instant, as a seat on time would;
+- **then the seat layout** (MAPSFXSEAT2, `seatLayout`; it replaced the first rule, see below). The table says WHICH words, WHEN, and
+  WHERE each stands against the thing it letters (its side, its gap); the seat says HOW BIG and moves only what it must:
+  - *size*: the engine's own size of the word for THIS window and zoom at step 2 (the table's options and words up; a ranked word's
+    request the larger of the table's and this view's share), then the step's share of it (step 3 x1.4, step 1 x0.7 over the floor).
+    A seat whose window and zoom are the reference's draws the table size (STEP2); a seat zoomed closer never draws a weaker word than
+    it drew before the table picture;
+  - *place*: each word scaled about its point nearest its subject (it keeps its side and its gap), kept there when its INK (the hold
+    box from `L.measure` plus the rim's ~0.08 cap) is off every pin and token, its box whole in the view, at most `SOFT_OK` (6 %) of its
+    ink under this seat's panels / the words up with it (an edge under a panel is read; a word made smaller is weaker). Else moved the
+    least: away from the thing and along it on its own side ("shift"), then the first side of the table's own order every seat shares
+    ("side": two seats that both must leave agree), farther away but clean;
+  - *where nothing clean holds it at its size*: smaller, the largest clean size on any side ("small"; its own side first at a size,
+    then the shared order: "side"), down to the legibility floor x 1.15 (clean before big). The roomiest side is the one seats short of
+    room share: live, "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it;
+    largest-on-any-side puts both under the pin, the GM's at 196 (MAPSFXSEAT2-6); a step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under
+    step 2 ("full"); a step-1 word stays under 1 / 1.15 of what a step-2 word gets on this view ("yield": a seat short of room still
+    draws step 1 < step 2); nothing clean at all: the least covered spot at its step's own size, never on a pin ("tight"); a rider (a
+    bomb's fall) keeps the table's way ("ride"); off this view (place, subject and way): not drawn ("off"). The table may put a word
+    on another side at another step (the blast's word below the bomb at step 1, above it at steps 2 and 3): the step order is kept by
+    these rules, not by the table;
+  - *the pin a map word avoids* is the note's whole drawn box (sharedPins + pinBoxes: on The Warehouse 328 x 411 world px for a 0.6
+    square icon), not the icon's size; and a player asking for zoom 0.9 there gets Foundry's largest zoom for the scene, 0.7314;
+  - its own needs stay per seat: the engine's `scale` setting, reduced motion (no path), the performance mode's caps, "big only";
+  - *cost*: the spots are searched nearest first (a heap, a stop at the first clean one no nearer spot can beat, at most 160 per size,
+    obstacles bucketed on a grid), the sizes by a stride of four with the three between refined, and a word with no clean spot even at
+    its smallest size skips straight to the least covered spot. A plain blast page (recorded panels, one pin) costs 0.9 / 1.3 / 2.1 ms
+    per seat at steps 2 / 3 / 1, as before (0.4 / 1.5 / 2.3); a crowded view (40 tokens over the whole view, 6 pins) 7.7 / 11.1 / 10.8
+    ms, once per page (the first rule 0.6 / 1.1 / 1.8 ms, but it covered pins and drew words smaller).
+- **what the first rule got wrong** (MAPSFXSEAT, live 2026-11-15): it scaled the whole page as ONE group about the event to fit a
+  closer seat's view (`seatGroup`, k 0.6 GM / 0.4 player), then shrank it five more times by 0.9 off its panels, then stepped a word
+  off a pin (`groupNudge`). A seat zoomed closer drew every word weaker (the blast's main word 203 -> 159 GM, 120 -> 111 player), step
+  3 drew smaller than step 2 (bigger words, more to shrink), the group shift put the main word on the bomb's pin on one seat and on
+  the other side of it on the other. Sizing by the seat and placing word by word against shared rules fixed all three; the table
+  picture (words, side, instant) stays one.
+Unlocated words (thunder) are laid out once in the reference window, then centred into this window and laid out the same way (this
+window's own size at step 2 then the step's share, off its panels, its pins and the screen words still up on it).
+A seat-rule log (`api.sfx.log()` in the map: `cap`, `rules`, `clean`, `box` per call) lets two seats be compared call by call.
+
 **On the map, let the rim do the contrast (RIMUNDER 1.9.12).** An `invincible` world word gets an ink rim under its lettering by
 default (section 13); do not add your own light outline (`look.outline: "sticker"` covers the duplicate block) or a backdrop for
 contrast. Pass nothing to get it; `look: { rim: "none" }` only where a picture must stay exactly as before; `look: { rim: "paper" }`
@@ -429,6 +487,36 @@ never reached the size model (`sizeCtx` passed none) and STILL does not: callers
 ranked words `ceilK: 1`) draw exactly what they drew (432 role/size/zoom calls and the SFXSIZE bomb capture replayed on 1.9.10 and
 1.9.11: identical sizes and plans). To make the share real, rename it to `ceil` in the call, and expect smaller words where the
 clamp held them.
+
+**The table's size, not the seat's** (moinen-maps MAPSFXSEAT, 2026-11-15) [V node + lane]: the engine sizes a word for the view it
+runs in, so the same call gives different sizes on a 1366 x 768 laptop at zoom 1.35 and a 1920 x 1080 GM screen at zoom 0.62 with
+panels. When every seat must show one picture, compute the size once from a reference view (`sizeFor(sizeModel, { ...opts, vw, vh,
+zoom, alive })` on 1600 x 900, a reference zoom, the table's alive count) and pass it with `fit: "world"`. Proof that nothing changes
+where nothing was wrong: on a seat equal to the reference (1600 x 900, the reference zoom, nothing alive) the table size equals
+`L.sizeOf` exactly (`dev/sfx-seat.test.mjs` STEP2). MAPSFXSEAT2: the table size plans the picture; each seat DRAWS the size the
+engine gives its own window and zoom at step 2, then the step's share (section 5, the seat layout): a common world size made every
+seat zoomed closer than the reference draw weaker words, and step 3 fitted to a small view drew smaller than step 2.
+**A bigger step needs no loud ceiling once a layout holds it** (MAPSFXSEAT2): step 3 under the engine's loudest ceiling (sfx-size
+`bigPx`) is no bigger for a word already at it (a blast's main word: 282.5 -> 284.2 live); with a layout that keeps it whole and clean
+on each view, step 3 = 1.4 x step 2 and the view decides how much of that it can show.
+**The reach is measured, not a factor**: since 1.9.10 a held word moves while it stands, so the entrance factors of "A caller's fit"
+below went stale (a debris pop reached 1.14 x 1.18 of its box, over its 1.15). Take the reach from `L.measure` and fit
+`max(1, reach width / box width, reach height / box height)`; keep a factor only for an engine without `L.measure`.
+
+**A caller's fit: place a word by the box the engine will draw** (moinen-maps THUNDERFIT, 2026-11-15) [V node + lane, C]: a placement
+that boxes a word by a share of its text length (`0.8 x chars + 0.6` cap heights) is wrong by up to 2 x for the invincible style (League
+Gothic is narrow): live the close strike's KRA-KA-GRRRRRAWOOM!! got a box twice its real width at one moment and ran off the window and
+under the panels at another, because the screen word was drawn at its rank's share of the view height (`fit: "screen"`, unclamped)
+while its spot was clamped by the box of the WORLD word (engine-clamped). What works:
+- the real box: `L.planFor(text, opts).plan` (installed by the tools at setup; absent in node and if the tools did not install: then
+  `L._plan` + `L._settle`), `plan._holdBox` {w, h} in drawn cap heights (the engine's size x `plan.sizeK`), times `L.sizeOf(text,
+  opts).size x sizeK` = the drawn cap height (`size` already includes the `scale` setting: do not multiply by `L.prefs.scale` again);
+- room for the entrance: the engine keeps the word's REACH in the view (`keepInView`, reach = the track's reach + 0.18 units), and the
+  reach is wider than the hold box: measured over the map's words, the reach of a slam's contact pose is up to 1.33 x the box (hold box
+  x 1.08 + 0.3 cap wide, x 1.12 + 0.25 cap tall), a rise up to 1.37 x its height, the others up to 1.13 x. A word fitted by its box
+  alone next to the view edge is pushed back by the engine onto what it was placed off: fit the box x that reach factor into the view;
+- a `fit: "screen"` word has no width ceiling: make it smaller yourself when its reach is wider than the view (or the free stretch
+  between the panels), and only then.
 
 ## 7. Layers and who sees a word
 Status: stable. [R] for the draw order, [V] for the ids.
@@ -1139,6 +1227,16 @@ Status: stable list; edit as items close.
   (a moving letter may come closer than the gap for a drawing). The tucked lead-in's hyphen still overlaps the first body letter by
   design (P7); a body that starts with L would put that hyphen into the L's stem at the top (not seen in the vocabulary; question
   KERNEX-1). [V node]
+- `L.sustain` seats (fire, crowd lines): the next phrase's seat is spaced by 1.15 x the CURRENT phrase's cap size (`em = cur.size`,
+  without the mood's `sizeK`), while a phrase's drawn box is about 1.85 em tall: a phrase entering overlaps the one leaving by 30-49 %
+  of its height at every size (moinen-maps THUNDERFIT, node sim over the fire's phrases). Callers cannot fix it (`spread` moves only x,
+  `maxWidth` is not passed to the phrases). Engine request THUNDERFIT-E1: space the seats by the drawn phrase box
+  (`size x sizeK x holdBox.h` + a gap). [V node]
+- One picture on every seat (moinen-maps MAPSFXSEAT): three things a caller cannot do through the engine's API today. Request E2:
+  `L.sustain({ startAt })`, so a late seat joins a lasting sound mid-phrase like `L.play` (today the burn's sustain starts when the
+  seat gets the event). Request E3: `L.sizeOf` / `L.measure` with an explicit view `{ vw, vh, zoom, alive }`, so a caller sizes for a
+  reference view without importing `size.mjs` of the running copy (the map does that through `MoinenLetters.copies`). Request E4:
+  streams (`L.stream`) honour a caller's reference size per syllable instead of the seat's view. [C]
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -1230,6 +1328,15 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (ENGREG, 1.9.11, `tactics-zones-engreg`): which copy runs and `L.build` / `L.seats()` (2), measuring before placing
   with `L.measure` and the cost of planning many words at once (5), `ceil` (6), the table's clock `L.clock` (8), API index (20),
   stage table; `check-engreg.mjs` (16).
+- 2026-11-15 (THUNDERFIT, moinen-maps caller `tactics-zones-thunderfit`, no engine change): "A caller's fit" (6: the real box from
+  `L.planFor`, the reach factors, unclamped screen words); the sustain seat overlap (18, request THUNDERFIT-E1).
+- 2026-11-15 (MAPSFXSEAT, moinen-maps caller `tactics-zones-mapsfxseat`, no engine change): one picture for the whole table
+  (5: plan on shared data, measured reach, `startAt` join, gather by due time, the seat rule off/read/fit/shift), the table's size
+  and the measured reach (6); requests E2-E4 (18).
+- 2026-11-15 (MAPSFXSEAT2, moinen-maps caller `tactics-zones-mapsfxseat2`, no engine change): the seat layout replaces the group
+  rule (5: size by the seat at step 2 then the step's share, place by the table's side moved the least, ink = hold + rim, never on a
+  pin, "small" / "side" / "full" / "yield" / "edge", the pin's drawn box, what the first rule got wrong, cost); size by the seat and
+  no loud ceiling under a layout (6).
 - 2026-11-15 (ENGWORDS, 1.9.13, `tactics-zones-engwords`): both deny lists over both languages and the replaced words (9), the
   derived both-languages row (14), API index (20), stage table.
 - 2026-11-15 (SUSTAINGAP, 1.9.15, `tactics-zones-sustaingap`): sustain run layout and its cause (12), stream lanes (10), the run's

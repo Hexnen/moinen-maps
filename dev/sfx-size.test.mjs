@@ -19,7 +19,9 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
 const failed = [];
 const group = (id, fn) => { try { fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const src = (p) => fs.readFileSync(new URL(`../scripts/${p}`, import.meta.url), "utf8");
-const sfx = src("sfx/sfx.mjs");
+// (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
+const sfx = src("sfx/sfx.mjs") + src("sfx/sfx-table.mjs");
+const SEAT_SRC = src("sfx/sfx-seat.mjs");
 
 /* ---- firing pages of the built-in presets (as dev/sfx-page.test.mjs builds them: the burst a fire-layer stroke with its debris) */
 const ENV = { grid: 100, rect: { x: 0, y: 0, width: 6000, height: 4000 }, now: 1_800_000_000_000, wind: { dir: 0, speed: 0.4 } };
@@ -186,10 +188,18 @@ group("WIRING", () => {
   ok(/stepFor\("weather"\) === 0 \) return again\(2000\)/.test(sfx), "weather at 0: the storm is not even read");
   ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;\n\s*sfxBus\.entry = noDestr \? null : onEntry;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx), "destruction at 0: off the display's hooks");
   ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), stepFor\("fire"\)\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
-  ok(/if \( raw \) return o;\n\s*const step = stepFor\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const z = L\.sizeOf\(w\.text, o\);/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w\);/.test(sfx.slice(sfx.indexOf("function measure"))),
+  ok(/if \( raw \) return o;\n\s*const step = d\.step\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const md = measureOf\(w\.text, o, d\)/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w, d\);/.test(sfx.slice(sfx.indexOf("function measure"))),
     "the stepped options are what the word plays AND is measured with (placement sees the stepped size)");
-  ok(/o\.size = SZ\.screenSizeAt\(s0, step, /.test(sfx) && /else if \( !Number\.isFinite\(spec\.rank\) \) o = SZ\.sizeOpts\(o, step\);/.test(sfx) && /screenSpot\(bw, bh, spec\.seed\)/.test(sfx), "an unlocated word steps too, its spot found for the stepped box");
-  ok(/if \( step !== SZ\.SIZE_DEFAULT && step !== 0 && w\.text \) \{ const b = steppedWorld\(w\.text, o, step\); if \( b \) return b; \}/.test(sfx) && /const z = L\?\.sizeOf\?\.\(text, o\);/.test(sfx) && /fit: "world", size: px \//.test(sfx), "a world word at another step is stepped from the size the engine draws it at today (its clamp would hold it)");
+  ok(/o\.size = SEAT\.tableScreenSize\(engineSizeFor, L\.sizeModel, \{ \.\.\.o, size: EV\.rankSize\(spec\.rank, SEAT\.REF_VH, spec\.shrink \?\? 1\) \}, plan, step\);/.test(sfx)
+    && /const so = SZ\.sizeOpts\(o, step\);/.test(sfx) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return stepPx\(o\.size \* sk, s, /.test(SEAT_SRC),
+    "an unlocated word steps too (MAPSFXSEAT: on the reference window, sfx-seat tableScreenSize = screenSizeAt), its spot found for the stepped box");
+  // (MAPSFXSEAT2: both step through sfx-seat stepPx - step 3 = STEP_K[3] x step 2 with no loud ceiling (the seat layout holds it to the
+  // view clean), step 1 its share over the legibility floor; was SZ.steppedPx / SZ.screenSizeAt under the loud ceiling)
+  // (THUNDERFIT: the 4th argument is the ladder's share of the extra size, placeFit; 1 = the whole stepped size)
+  // (MAPSFXSEAT: "today's size" is now the engine's size on the REFERENCE view - sfx-seat tableSize, the engine's own model fed that view -
+  // stepped the same way and drawn at that size, fit "world"; dev/sfx-seat.test.mjs proves it is L.sizeOf's on a reference seat)
+  ok(/if \( step !== 0 && w\.text \) \{ const b = tableSized\(w, o, step, d\); if \( b \) return b; \}/.test(sfx) && /const ts = SEAT\.tableSize\(d\.sizeFor, d\.L\.sizeModel, o, planInfo\(w\.text, o, d\), \{ z, alive: w\.alive \?\? 0, grid: d\.grid, step, fitK: w\.fitK \}\);/.test(sfx)
+    && /const out = \{ \.\.\.o, fit: "world", size: ts\.size, keepInView: false \};/.test(sfx) && /const st = stepPx\(px, s, /.test(SEAT_SRC), "a world word at another step is stepped from the size the engine draws it at (its clamp would hold it)");
   ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
   ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
   ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");

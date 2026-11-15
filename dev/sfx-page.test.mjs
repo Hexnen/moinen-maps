@@ -133,20 +133,20 @@ group("GUNS", () => {
 });
 // SOURCE: sfx.mjs plays the page (the firing hook) and leaves the owned strokes silent
 group("WIRE", () => {
-  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
   ok(/firingPage\(/.test(s), "sfx.mjs plans firing pages");
   ok(/owned/.test(s), "sfx.mjs keeps owned strokes silent");
   // a fire's lasting word never overlaps its own echo (leftover): no "echo" treatment on the burn sustain
   const bt = /const BURN_TREATMENTS = \[([^\]]*)\]/.exec(s);
   ok(bt && !/echo/.test(bt[1]) && /treatments: BURN_TREATMENTS/.test(s), "burn sustain: no echo treatment");
   // a PRE ride leaves before the main word; the wave rides the free way, upright
-  ok(/spec\.stopAt = toPerf\(mw\.t\) - PG\.PRE_GAP/.test(s), "pre ride stops before the main word");
+  ok(/spec\.stopAt = d\.toPerf\(mw\.t\) - PG\.PRE_GAP/.test(s), "pre ride stops before the main word");
   ok(/PG\.waveRide\(/.test(s), "the wave rides the free way");
 });
 // UNREPEATED: a page never says the same word twice (leftover: two debris words of one bomb, and the meteor's first two ejecta,
 // showed the same text); written in the page's order on every client
 group("UNREPEATED", () => {
-  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
   ok(/PG\.unrepeated\(/.test(s) && s.indexOf("PG.unrepeated(") < s.search(/PG\.pickSpots?\(/), "sfx.mjs writes each page word unrepeated, before its spot is picked");
   for ( const id of ["meteor", "bomb"] ) {
     const { pg } = page(id, {}, GEST.point);
@@ -191,12 +191,12 @@ group("BRUSH", () => {
 });
 // UNLOCATED: owner's answers 2 and 4 - a gun with no source token, or a source this client cannot see, is heard generally on screen
 group("UNLOCATED", () => {
-  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+  const s = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
   ok(/function screenReport\(/.test(s) && /space: "screen"/.test(s), "a screen report exists");
   ok(/!reported && hits\.length/.test(s), "no shooter: the report is shown on screen");
   ok(/!shooterSeen\(it\.from, it\.fr\)/.test(s), "hidden shooter: on screen, not at its place");
   // (EFFECTS2: the word's SOURCE point is tested - `at` when the word sits beside it, e.g. a plough's or a strike's)
-  ok(/if \( !hereVisible\(w\.at\?\.x \?\? w\.x, w\.at\?\.y \?\? w\.y\) \) \{ playScreen\(spec\)/.test(s), "page words under a player's fog: on screen");
+  ok(/if \( !hereVisible\(q\.sx \?\? q\.x, q\.sy \?\? q\.y\) \) \{ playScreen\(q\)/.test(s) && /sx: w\.at\?\.x \?\? w\.x, sy: w\.at\?\.y \?\? w\.y/.test(s), "page words under a player's fog: on screen");
 });
 // INVIEW: a debris word or the catch letters a landing / a fire this client can see (live at a close zoom every chosen landing was off
 // the screen and the debris words were all dropped)

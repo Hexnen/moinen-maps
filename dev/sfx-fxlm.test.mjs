@@ -25,7 +25,8 @@ const failed = [];
 /* each finding's group runs on its own: on an old build every failing group is named (not only the first) */
 const group = (id, fn) => { try { fn(); } catch ( err ) { failed.push(`${id}: ${String(err?.message ?? err).split(/\r?\n/)[0]}`); } };
 const V = createVocab(), KINDS = new Set(V.list("en").map((k) => k.id)), G = 100;
-const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8");
+// (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
+const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");
 const ov = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
 const ar = (b) => (b.x1 - b.x0) * (b.y1 - b.y0);
 
@@ -57,7 +58,9 @@ group("F2", () => {
   const sat = { ...w, role: "sec", x: 2800, y: 200, subject: null };       // a satellite with no free place but under the sidebar
   const p2 = C.place([w, { ...sat, bw: 2900, bh: 1700 }], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] });
   ok(!p2.some((q) => q.role === "sec"), "F2 a satellite that would sit under a panel is dropped");
-  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /place\(.*\{ view: v, ui, tokens/.test(sfx), "F2 the runtime measures this client's panels and places around them");
+  // (MAPSFXSEAT2: the seat rule is sfx-seat seatLayout over a page's / moment's words - was seatFit + seatGroup)
+  // (THUNDERFIT: the runtime places through placeFit, which is sfx-core place plus the bigger step's ladder; pins are obstacles too)
+  ok(/uiRects\(\[\.\.\.document\.body\.children\]/.test(sfx) && /const ui = uiBoxes\(\);/.test(sfx) && /SEAT\.seatLayout\(items, \{ view: vw, panels: ui, pins, tokens: sharedTokens\(vw\), zoom \}\)/.test(sfx) && /function placeFit\(specs, ctx, d\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place,/.test(sfx), "F2 the runtime measures this client's panels and keeps its words off them (MAPSFXSEAT: the seat rule's shift, a page / moment as one group)");
   // live take (FXLM smoke, 2026-11-13): a fire's continuous words hovered over the party portraits, the out hiss drifted up into the
   // challenge HUD, and a main word as wide as two thirds of the screen could not be placed off anything
   const fireBox = { x0: 60, y0: 560, x1: 360, y1: 700 };                    // over the portraits (scene px at zoom 0.5: 30..130, 280..600 client)
@@ -69,7 +72,7 @@ group("F2", () => {
   const steam = { role: "main", voice: "out", x: 2600, y: 400, bw: 300, bh: 80, rise: 90 * 2, t: 0, subject: { x0: 2580, y0: 380, x1: 2620, y1: 420 }, cover: 0.4 };
   const ps = C.place([steam], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] })[0];
   ok(ps && ps.box.y0 <= ps.y - 40 - 180 + 1 && ui.every((b) => ov(ps.box, b) === 0), "F2 a word that rises (steam) keeps its whole way up off the panels");
-  ok(/w\.rise = grid\(\) \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
+  ok(/w\.rise = d\.grid \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
   ok(C.CEIL_K.main < 1 && C.CEIL_K.sec < C.CEIL_K.main && /ceilK: C\.CEIL_K\[w\.role\]/.test(sfx), "F2 the map's words take a share of the engine's size ceiling (a main word leaves room around it)");
   ok(sizeFor({ space: "world", grid: 100, zoom: 1, vw: 1600, vh: 900, area: 900, magnitude: 1.5, aspect: 6, ceilK: C.CEIL_K.main }).px * 6 < 1600 * 0.45, "F2 ... the biggest main word stays under about two fifths of the width");
   ok(/el\.id === "pause"/.test(sfx), "F2 the game-paused banner is not a panel (it would push every word off the middle)");
@@ -104,7 +107,7 @@ group("F5", () => {
   const st = { id: "f", k: "fire", q: 10000, r: 60, lv: 2, p: [0, 0, 600, 0, 1200, 0] };
   const c = C.strokeEvents(st, null, 10000, 40000, { grid: G, late: 1500 }).find((e) => e.voice === "fire");
   ok(c.gate === "f", "F5 the catch word waits for its flames to show on this client");
-  ok(/fireShown/.test(fs.readFileSync(new URL("../scripts/fire/fire.mjs", import.meta.url), "utf8")) && /e\.t, at \+ 120/.test(sfx), "F5 ... told by the fire layer when it shows them");
+  ok(/fireShown/.test(fs.readFileSync(new URL("../scripts/fire/fire.mjs", import.meta.url), "utf8")) && /if \( e\.gate \) e = \{ \.\.\.e, t: e\.t \+ CATCH_SHOW_MS \};/.test(sfx), "F5 ... told by the fire layer when it shows them; MAPSFXSEAT: lettered at the moment a seat on time shows them, the same on every seat");
   const plan = C.burnPlan([st], { grid: G, catchMs: () => 4000, levelNow: (s, t) => (t > 20000 ? 3 : s.lv) });
   ok(plan.level(15000) < plan.level(25000), "F5 a burning fire's sound follows its level (a flare-up is louder)");
   const a0 = plan.at(0, 11000), a1 = plan.at(0, 12000);
@@ -172,7 +175,7 @@ group("F13", () => {
   const ws = [{ role: "pre", t: 0 }, { role: "main", t: 230 }, { role: "sec", t: 400 }, { role: "sec", t: 500 }];
   const one = C.capWords(ws, 1), two = C.capWords(ws, 2);
   ok(one.length === 1 && one[0].role === "main" && two.map((w) => w.role).join() === "pre,main", "F13 one place: the main word; two: the pre word and the main word, in time order");
-  ok(/capWords\(C\.place\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
+  ok(/mine = C\.capWords\(/.test(sfx) && !/\.slice\(0, room\)/.test(sfx), "F13 the runtime caps through capWords");
 });
 
 /* F14: no per-client word memory */
@@ -337,7 +340,9 @@ group("CROWD", () => {
   ok(pf.x === wave.x && pf.y === wave.y, "CROWD with nothing up it sets off where the wave starts");
   ok(C.burnCrowded([{ x: 100, y: 100 }], [{ x: 150, y: 120 }], 20) && !C.burnCrowded([{ x: 100, y: 100 }], [{ x: 400, y: 100 }], 20), "CROWD a fire's phrases next to a bigger fire's are left out; far apart both letter");
   ok(sfx.includes("C.burnCrowded(pts, spots, em)"), "CROWD the runtime leaves out crowded fire phrases");
-  ok(sfx.includes("ui = [...uiBoxes(), ...[...alive].map((a) => a.box).filter(Boolean)]"), "CROWD a burning fire's phrases keep off the event words still up");
+  // (THUNDERFIT added the map's pins after the words up: the same obstacles, plus the pins)
+  // (MAPSFXSEAT: the event words up are the TABLE's - the ledger, the same on every seat - not what this seat drew)
+  ok(sfx.includes("ui = [...uiBoxes(), ...ledger.boxes(sharedNow(), sharedNow() + 1000), ...pinBoxes(v)]"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */
