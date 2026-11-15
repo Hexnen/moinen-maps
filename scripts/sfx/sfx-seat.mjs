@@ -225,7 +225,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // (its sizes, the first that fits the view whole; a word bigger than the view: the size that fits)
     const fitCap = (B.x1 - B.x0) > 0 && (B.y1 - B.y0) > 0 ? u * Math.min(vw / (B.x1 - B.x0), vh / (B.y1 - B.y0)) : Infinity;
     let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0);
-    const min = Math.min(it.min > 0 ? it.min : sizes.at(-1), sizes.at(-1));
+    let min = Math.min(it.min > 0 ? it.min : sizes.at(-1), sizes.at(-1));
     // (no clean spot at any of its sizes on this view: smaller - the largest size that stands clean, never under `small` (this seat's
     // step-1 size: the legibility floor's side of it) - rule "small", question MAPSFXSEAT2-1: clean before as big as before)
     const small = it.small > 0 ? Math.min(it.small, min) : min;
@@ -247,7 +247,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
     const inkOf = (b) => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw = ((b.x1 - b.x0) * kx) / 2, hh = ((b.y1 - b.y0) * ky) / 2; return { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }; };
     // (nothing clean at any size: the least covered spot, at a size that still keeps its step - a step-3 word not under `full`)
-    const fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
+    let fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
     const offView = (b) => area(b) - inter(b, v);
     // (its side of the thing: the way the table put it from the subject's centre, along the axis it stands out most - above, below, left,
     // right; kept on every seat, left only where this seat has no clean spot on it)
@@ -267,7 +267,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       for ( let i = 0; i < around.length; i++ ) { const dd = Math.hypot(ox - around[i][0], oy - around[i][1]); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } }
       return k;
     };
-    let best = null, fallback = null, flipSmall = null;
+    let best = null, fallback = null, flipSmall = null, sideMin = it.side1 > 0 ? it.side1 : 0;
     const trySize = (cap) => {
       const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
       const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
@@ -312,10 +312,10 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         // (clean first; on its own side; off it, the earliest side of the shared order; then the nearest, the least covered)
         const score = c.base + (soft / Math.max(1, ia)) * 40;
         // (made smaller for want of room: on its own side while it can - the seats that must shrink it keep one picture -, another side
-        // only when its own has no clean spot down to `small`)
+        // only when its own has no clean spot down to this seat's step-1 size `sideMin`; under it either side, its own first by score)
         // (the larger size wins, then the lower score: the sizes under `min` are not tried in order, see below)
         const over = (o) => !o || cap > o.cap + 1e-9 || (Math.abs(cap - o.cap) <= 1e-9 && score < o.score - 1e-9);
-        if ( clean && fl && cap < min - 1e-9 ) { if ( over(flipSmall) ) flipSmall = { cap, f, d, q, score, fl, soft }; }
+        if ( clean && fl && cap < min - 1e-9 && cap >= sideMin - 1e-9 ) { if ( over(flipSmall) ) flipSmall = { cap, f, d, q, score, fl, soft }; }
         else if ( clean ) { if ( over(best) ) best = { cap, f, d, q, score, fl, soft }; continue; }
         else if ( cap >= fmin - 1e-9 ) {
           // (nothing clean at any size: the least covered at a size not under `fmin` - off pins and tokens first, then on its own side, then
@@ -329,8 +329,8 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         if ( sub && subX > 1e-6 ) { add({ dx: d.dx, dy: d.dy + (side.y || -1) * Math.min(bh, subX / Math.max(1, k.x1 - k.x0)) }); }
       }
     };
-    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") only on its
-    // own side. Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
+    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") on its own
+    // side down to its step-1 size, then the first clean side of the shared order there, then smaller on any side. Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
     // fits where a larger one did nearly always, and a view with no room at all tries a third of the sizes. The run under `min` is the
     // same on every step (`min` x 0.95^k), so its search finds the same size whichever step the word was asked at)
     const gallop = (list) => {
@@ -342,6 +342,28 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       }
       if ( hit > 0 ) for ( let j = Math.max(1, hit - 3); j < hit; j++ ) { const was = best; trySize(list[j]); if ( best !== was ) break; }
     };
+    const search = (list) => {
+      gallop(list.filter((c) => c >= min - 1e-9));
+      if ( !best ) gallop(list.filter((c) => c < min - 1e-9 && c >= sideMin - 1e-9));
+      if ( !best && !flipSmall ) gallop(list.filter((c) => c < min - 1e-9 && c < sideMin - 1e-9));
+    };
+    // (step 1 yields: where a step-2 word would have to shrink for room here (`probe`: its sizes on this seat), step 1 stays at most
+    // 1 / MIN_GAIN of what step 2 gets - a seat short of room keeps step 1 < step 2 as drawn, never under the legibility floor)
+    if ( it.probe?.length && !rules.includes("fit") ) {
+      const keep = [min, fmin, sideMin], pr = it.probe.filter((c) => c <= fitCap + 1e-9);
+      if ( pr.length ) {
+        min = fmin = pr[0]; sideMin = sizes[0];
+        search(pr);
+        const c2 = (best ?? flipSmall)?.cap ?? pr.at(-1);
+        best = flipSmall = fallback = null; [min, fmin, sideMin] = keep;
+        const lim = Math.max(c2 / MIN_GAIN, it.floor > 0 ? it.floor : 0);
+        if ( sizes[0] > lim + 1e-9 ) {
+          const s2 = sizes.filter((c) => c <= lim + 1e-9);
+          sizes = s2.length ? s2 : [lim]; min = Math.min(min, sizes.at(-1)); fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
+          rules.push("yield");
+        }
+      }
+    }
     // (a view with no clean spot even at its smallest size has none at any: only the least covered spot at the largest size and the
     // smallest that keeps its step (`fmin`) is sought)
     if ( sizes.length > 2 ) {
@@ -349,7 +371,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       const none = !best && !flipSmall;
       best = flipSmall = null;
       if ( none ) { const fs = sizes.filter((c) => c >= fmin - 1e-9); for ( const cap of new Set([fs[0], fs.at(-1)]) ) if ( cap > 0 ) trySize(cap); }
-      else { gallop(sizes.filter((c) => c >= min - 1e-9)); if ( !best ) gallop(sizes.filter((c) => c < min - 1e-9)); }
+      else search(sizes);
     } else for ( const cap of sizes ) { trySize(cap); if ( best ) break; }
     best ??= flipSmall;
     const pick = best ?? fallback ?? { cap: sizes[0], f: sizes[0] / u, d: { dx: 0, dy: 0 }, q: at(sizes[0] / u) };

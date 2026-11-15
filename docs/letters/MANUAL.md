@@ -260,16 +260,22 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     ink under this seat's panels / the words up with it (an edge under a panel is read; a word made smaller is weaker). Else moved the
     least: away from the thing and along it on its own side ("shift"), then the first side of the table's own order every seat shares
     ("side": two seats that both must leave agree), farther away but clean;
-  - *where nothing clean holds it at its size*: smaller, the largest clean size, never under this seat's step-1 size ("small"); a
-    step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under step 2 ("full"); nothing clean at
-    all: the least covered spot at its step's own size, never on a pin ("tight"); a rider (a bomb's fall) keeps the table's way
-    ("ride"); off this view (place, subject and way): not drawn ("off");
+  - *where nothing clean holds it at its size*: smaller, the largest clean size ("small") - on its own side down to this seat's
+    step-1 size, then the first clean side of the shared order at that size ("side"), then smaller on any side down to the legibility
+    floor x 1.15 (clean before big); a step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under
+    step 2 ("full"); a step-1 word stays under 1 / 1.15 of what a step-2 word gets on this view ("yield": a seat short of room still
+    draws step 1 < step 2); nothing clean at all: the least covered spot at its step's own size, never on a pin ("tight"); a rider (a
+    bomb's fall) keeps the table's way ("ride"); off this view (place, subject and way): not drawn ("off"). The table may put a word
+    on another side at another step (the blast's word below the bomb at step 1, above it at steps 2 and 3): the step order is kept by
+    these rules, not by the table;
+  - *the pin a map word avoids* is the note's whole drawn box (sharedPins + pinBoxes: on The Warehouse 328 x 411 world px for a 0.6
+    square icon), not the icon's size; and a player asking for zoom 0.9 there gets Foundry's largest zoom for the scene, 0.7314;
   - its own needs stay per seat: the engine's `scale` setting, reduced motion (no path), the performance mode's caps, "big only";
   - *cost*: the spots are searched nearest first (a heap, a stop at the first clean one no nearer spot can beat, at most 160 per size,
     obstacles bucketed on a grid), the sizes by a stride of four with the three between refined, and a word with no clean spot even at
-    its smallest size skips straight to the least covered spot. A plain blast page (recorded panels, one pin) costs ~1 ms per seat, as
-    before; a crowded view (40 tokens over the whole view, 6 pins) 4.6 ms at step 2 and 9.4 ms at step 3, once per page (the first rule
-    0.8 / 1.7 ms, but it covered pins and drew words smaller).
+    its smallest size skips straight to the least covered spot. A plain blast page (recorded panels, one pin) costs 0.9 / 1.3 / 2.1 ms
+    per seat at steps 2 / 3 / 1, as before (0.4 / 1.5 / 2.3); a crowded view (40 tokens over the whole view, 6 pins) 7.7 / 11.1 / 10.8
+    ms, once per page (the first rule 0.6 / 1.1 / 1.8 ms, but it covered pins and drew words smaller).
 - **what the first rule got wrong** (MAPSFXSEAT, live 2026-11-15): it scaled the whole page as ONE group about the event to fit a
   closer seat's view (`seatGroup`, k 0.6 GM / 0.4 player), then shrank it five more times by 0.9 off its panels, then stepped a word
   off a pin (`groupNudge`). A seat zoomed closer drew every word weaker (the blast's main word 203 -> 159 GM, 120 -> 111 player), step
@@ -1267,7 +1273,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   and the measured reach (6); requests E2-E4 (18).
 - 2026-11-15 (MAPSFXSEAT2, moinen-maps caller `tactics-zones-mapsfxseat2`, no engine change): the seat layout replaces the group
   rule (5: size by the seat at step 2 then the step's share, place by the table's side moved the least, ink = hold + rim, never on a
-  pin, "small" / "full" / "edge", what the first rule got wrong); size by the seat and no loud ceiling under a layout (6).
+  pin, "small" / "side" / "full" / "yield" / "edge", the pin's drawn box, what the first rule got wrong, cost); size by the seat and
+  no loud ceiling under a layout (6).
 - 2026-11-15 (ENGWORDS, 1.9.13, `tactics-zones-engwords`): both deny lists over both languages and the replaced words (9), the
   derived both-languages row (14), API index (20), stage table.
 - 2026-11-15: RIMUNDER (1.9.12, `tactics-zones-rimunder`): section 13 "Rim under the lettering on the map" (`look.rim`, defaults,

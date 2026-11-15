@@ -10,7 +10,7 @@
 //   LATE      a seat that gets the moment late gathers the same chunks and joins each word at the same point of its life (startAt)
 //   RULE      the seat layout (MAPSFXSEAT2 seatLayout): a word with room stays where the table put it; a panel over it: it moves the
 //             least; its side blocked: the first side of the shared order; never on a pin; off the view: not drawn; a rider keeps its way
-//   SEAT2     MAPSFXSEAT2 on the live take's blast (The Warehouse, G 350; the GM 1600x900 at 0.6, a player 1366x768 at 0.9, their recorded
+//   SEAT2     MAPSFXSEAT2 on the live take's blast (The Warehouse, G 350; the GM 1600x900 at 0.6, a player 1366x768 at 0.73, their recorded
 //             panels and the bomb's pin) and on a spread of windows and zooms, against the previous rule (base eab7e02: one group scale,
 //             one shift, a pin step): step order as drawn, not smaller than before, same side of the thing, nothing on a pin / panel / word
 //   GROUND    the ground classes from map pixels (the destruction bake's rule)
@@ -208,16 +208,17 @@ await group("RULE", async () => {
 
 /* ---------------------------------------------------------------- SEAT2 */
 // The live take (MAPSFXSEAT, 2026-11-15): the blast on The Warehouse (grid 350), the GM at 1600x900 zoom 0.6 and Test Gracz 1 at 1366x768
-// zoom 0.9, both centred 0.3 squares above the bomb, with the panels each seat measured (api.sfx.ui(), client px) and the bomb's note
-// pin. BEFORE = what the seat drew before the table picture (base 8800f47: the engine's legible size of the word's request on this window
+// asked for zoom 0.9 - Foundry holds it at this scene's largest zoom, 0.7314 (both takes' seat logs) -, both centred 0.3 squares above
+// the bomb, with the panels each seat measured (api.sfx.ui(), client px) and the bomb's note pin as the map's seat layout gets it
+// (sharedPins + pinBoxes, traced live 2026-11-15: 2111..2439 x 3468..3879). BEFORE = what the seat drew before the table picture (base 8800f47: the engine's legible size of the word's request on this window
 // and zoom - a ranked word's rank as a share of this view's height); PREV = the previous rule (base eab7e02: one group scale and shift).
 const REC_UI = {
   gm: [[1232,48,1542,159],[1232,165,1542,276],[16,792,216,884],[1236,826,1536,886],[0,534,196,612],[0,618,196,696],[0,702,196,780],[96,92,360,144],[104,16,274,48],[219,858,368,890],[95,500,226,528],[450,824,510,884],[518,824,578,884],[586,824,646,884],[654,824,714,884],[722,824,782,884],[790,824,850,884],[858,824,918,884],[926,824,986,884],[994,824,1054,884],[1062,824,1122,884],[1432,11,1540,39],[16,16,48,48],[16,56,48,88],[16,96,48,128],[16,136,48,168],[16,176,48,208],[16,216,48,248],[16,256,48,288],[16,296,48,328],[16,336,48,368],[16,376,48,408],[16,416,48,448],[16,456,48,488],[16,496,48,528],[56,16,88,48],[56,56,88,88],[56,96,88,128],[56,136,88,168],[56,176,88,208],[56,216,88,248],[56,256,88,288],[56,296,88,328],[1552,726,1584,758],[1552,758,1584,790],[1552,790,1584,822],[1552,822,1584,854],[1552,854,1584,886],[1552,16,1584,48],[1552,56,1584,88],[1552,96,1584,128],[1552,136,1584,168],[1552,176,1584,208],[1552,216,1584,248],[1552,256,1584,288],[1552,296,1584,328],[1552,336,1584,368],[1552,376,1584,408],[1552,416,1584,448],[1552,456,1584,488],[1552,496,1584,528],[1552,536,1584,568],[1552,576,1584,608],[234,500,264,528],[280,20,304,44],[418,827,442,851],[418,857,442,881],[1130,824,1154,848],[1130,860,1154,884],[1158,828,1182,852],[1158,856,1182,880],[1132,844,1152,864]],
   p1: [[998,48,1308,158],[998,164,1308,274],[16,660,216,752],[1002,694,1302,754],[0,380,100,458],[0,464,100,542],[0,548,100,626],[104,16,274,48],[0,346,130,374],[503,624,563,684],[571,624,631,684],[639,624,699,684],[707,624,767,684],[775,624,835,684],[503,692,563,752],[571,692,631,752],[639,692,699,752],[707,692,767,752],[775,692,835,752],[1198,11,1306,39],[16,16,48,48],[16,56,48,88],[16,96,48,128],[16,136,48,168],[16,176,48,208],[16,216,48,248],[56,16,88,48],[56,56,88,88],[56,96,88,128],[56,136,88,168],[56,176,88,208],[1318,594,1350,626],[1318,626,1350,658],[1318,658,1350,690],[1318,690,1350,722],[1318,722,1350,754],[1318,16,1350,48],[1318,56,1350,88],[1318,96,1350,128],[1318,136,1350,168],[1318,176,1350,208],[1318,216,1350,248],[1318,256,1350,288],[1318,296,1350,328],[1318,336,1350,368],[1318,376,1350,408],[1318,416,1350,448],[1318,456,1350,488],[1318,496,1350,528],[1318,536,1350,568],[138,346,168,374],[280,20,304,44],[471,661,495,685],[471,691,495,715],[843,658,867,682],[843,694,867,718],[871,662,895,686],[871,690,895,714],[845,678,865,698]]
 };
 const WG = 350, BOMB = { x: 2555, y: 3885 }, CAM = { x: 2555, y: 3780 }, PIN_S = 0.6 * WG;
-const PIN = { x0: 2275 - 0.45 * PIN_S, y0: 3850 - 1.05 * PIN_S, x1: 2275 + 0.45 * PIN_S, y1: 3850 + 0.08 * PIN_S };
-const REC = { gm: { W: 1600, H: 900, z: 0.6, ui: REC_UI.gm }, p1: { W: 1366, H: 768, z: 0.9, ui: REC_UI.p1 } };
+const PIN = { x0: 2111, y0: 3468, x1: 2439, y1: 3879 };
+const REC = { gm: { W: 1600, H: 900, z: 0.6, ui: REC_UI.gm }, p1: { W: 1366, H: 768, z: 0.7314285714285714, ui: REC_UI.p1 } };
 /** a GM's usual panels on a W x H window (as dev/sfx-fit.test.mjs) */
 const panelsOf = (W, H) => [[0, 0, 40, H], [45, 0.27 * H, 140, 0.44 * H], [W - 190, 0, W - 30, 0.16 * H], [W - 30, 0, W, H], [0.13 * W, H - 48, 0.75 * W, H], [W - 330, H - 60, W - 30, H]];
 const SPREAD = [];
@@ -291,7 +292,7 @@ await group("SEAT2", async () => {
       const a = n.map((r) => r.out.get(key)), b = p.map((r) => r.out.get(key));
       if ( a.every((q) => shown(q, n[0].view)) ) {
         cases++;
-        if ( !(a[0].cap < a[1].cap - 1e-6 && a[1].cap <= a[2].cap + 1e-6) ) { orderNew++; bad.push(`${S.W}x${S.H}@${S.z} ${a[1].w.text} ${a.map((q) => q.cap.toFixed(0) + ":" + q.rules.join("+")).join(" / ")}`); }
+        if ( !(a[0].cap < a[1].cap - 1e-6 && a[1].cap <= a[2].cap + 1e-6) ) { orderNew++; if ( process.env.SEAT_DBG ) for ( const q of a ) console.log("DBG", S.W, S.H, S.z, q.cap.toFixed(1), q.rules.join(","), "sizes", q.item.sizes.map((c) => c.toFixed(0)).join("/"), "min", q.item.min.toFixed(0), "small", q.item.small?.toFixed(0), "probe", (q.item.probe ?? []).slice(0, 6).map((c) => c.toFixed(0)).join("/"), "u", q.item.u.toFixed(0), "tbl", [q.item.box.x0, q.item.box.y0, q.item.box.x1, q.item.box.y1].map(Math.round).join(","), "box", [q.box.x0, q.box.y0, q.box.x1, q.box.y1].map(Math.round).join(",")); bad.push(`${S.W}x${S.H}@${S.z} ${a[1].w.text} ${a.map((q) => q.cap.toFixed(0) + ":" + q.rules.join("+")).join(" / ")}`); }
         // (visibly: step 3 at least MIN_GAIN x step 2 unless this view holds no clean spot that big - "full", "small", "fit")
         else if ( a[2].cap < a[1].cap * SEAT.MIN_GAIN - 1e-6 && !a[2].rules.some((r) => r === "full" || r === "small" || r === "fit") ) visNew++;
       }
@@ -324,14 +325,16 @@ await group("SEAT2", async () => {
       smallChecked++;
       const it = q.item, f = it.min / it.u, B = it.box, bw = (B.x1 - B.x0) * f, bh = (B.y1 - B.y0) * f, m = SEAT.SEAT_EDGE / S.z, v = n.view;
       const others = [...n.out.values()].filter((o2) => o2 !== q && (o2.item?.prio ?? 9) < it.prio && shown(o2, v)).map((o2) => o2.ink);
-      let room = false;
+      // (and its own subject covered no more than the layout allows: its kind's share or the table picture's own, + 0.02)
+      const sub = it.sub, cov = sub ? Math.max(it.cover ?? 0.3, on2(B, sub) / area2(sub)) + 0.02 : 0;
+      let room = false, at = null;
       for ( let cy = v.y0 + m + bh / 2; cy <= v.y1 - m - bh / 2 && !room; cy += bh / 12 ) for ( let cx = v.x0 + m + bw / 2; cx <= v.x1 - m - bw / 2 && !room; cx += bw / 24 ) {
         const k = inkBox({ x0: cx - bw / 2, y0: cy - bh / 2, x1: cx + bw / 2, y1: cy + bh / 2 }, it.ink);
-        if ( on2(k, PIN) > 0 ) continue;
+        if ( on2(k, PIN) > 0 || (sub && on2(k, sub) > cov * area2(sub) + 1e-6) ) continue;
         const soft = [...n.panels, ...others].reduce((s2, o2) => s2 + on2(k, o2), 0);
-        if ( soft <= SEAT.SOFT_OK * area2(k) * 0.9 ) room = true;
+        if ( soft <= SEAT.SOFT_OK * area2(k) * 0.9 ) { room = true; at = [Math.round(cx), Math.round(cy)]; }
       }
-      if ( room ) { lessNew++; rows.push(`  room: ${sn} ${q.w.text}`); }
+      if ( room ) { lessNew++; rows.push(`  room: ${sn} ${q.w.text} at ${at} (${Math.round(bw)} x ${Math.round(bh)})`); }
     }
   }
   if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));

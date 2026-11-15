@@ -130,9 +130,16 @@ export function capLadder(px2, step, floor, W = (px) => px) {
     if ( !sizes.length ) sizes.push(W(Math.min(pxS, px2 / SEAT.MIN_GAIN)));
     min = sizes.at(-1);
   } else { sizes.push(W(px2)); min = W(px2); }
-  // (the smallest a word of a bigger step may be drawn where nothing clean holds it: this seat's step-1 size)
-  const small = s < SZ.SIZE_DEFAULT ? min : W(Math.min(SEAT.stepPx(px2, 1, floor), px2 / SEAT.MIN_GAIN));
-  return { sizes, min, full, small, cap2: W(px2) };
+  // (the smallest a word of a bigger step may be drawn where nothing clean holds it: the legibility floor with room for step 1 under it -
+  // clean before big, MAPSFXSEAT2-1; step 1 then yields under it, `probe`)
+  const lo = floor * SEAT.MIN_GAIN, small = s < SZ.SIZE_DEFAULT ? min : W(Math.min(lo, px2));
+  // (step 1: the sizes a step-2 word of this seat would try here - its own, then smaller down to `small` -: where step 2 must shrink for
+  // room, step 1 stays under what it gets, so a seat short of room still draws step 1 < step 2: seatLayout rule "yield")
+  let probe = null;
+  if ( s < SZ.SIZE_DEFAULT && s > 0 ) { probe = [W(px2)]; for ( let px = px2 * 0.95; px > lo * 1.0001; px *= 0.95 ) probe.push(W(px)); if ( lo < px2 ) probe.push(W(lo)); }
+  // (where a bigger step's word keeps its own side while it shrinks: down to this seat's step-1 size)
+  const side1 = s < SZ.SIZE_DEFAULT ? 0 : W(Math.min(SEAT.stepPx(px2, 1, floor), px2 / SEAT.MIN_GAIN));
+  return { sizes, min, full, small, side1, probe, floor: W(floor), cap2: W(px2) };
 }
 /** MAPSFXSEAT2: the sizes THIS seat draws an unlocated (screen) word at, CSS px of cap height (its own size setting in): a ranked word its
     rank's share of THIS window's height, another the engine's own size on this window - as the map sized it before - then the step's share
@@ -153,7 +160,7 @@ export function seatItems(ws, d, seat) {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
-      cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH };
+      side1: c?.side1 ?? 0, probe: c?.probe ?? null, floor: c?.floor ?? 0, cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH };
   });
 }
 /** MAPSFXSEAT2: the share of a word's box (FIT.wordBox: its hold box with room for its entrance and outline) its INK covers - the hold
