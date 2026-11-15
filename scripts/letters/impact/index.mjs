@@ -9,7 +9,7 @@
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
 import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost } from "./plan.mjs";
-import { paintFrame, backClip } from "./draw.mjs";
+import { paintFrame, backClip, paintFigLayers } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
 const MAX_PIX = 2.2e6;        // backing pixels of one drawing (a 4K screen is painted at about 1080p: ink is flat, nobody sees it in 40 ms)
@@ -106,11 +106,11 @@ export function createImpact(L, tools = null) {
         const t = tokenObj(a);
         if ( !t || !globalThis.canvas?.ready || !seesToken(t, spec) ) return null;
         const s = subjectOf({ ...spec, subject: t });
-        return s.sil ? { role, cx: s.cx, cy: s.cy, sil: s.sil, flipX: s.flipX, flipY: s.flipY, id: t.id ?? t.document?.id ?? null } : null;
+        return s.sil ? { role, cx: s.cx, cy: s.cy, sil: s.sil, flipX: s.flipX, flipY: s.flipY, id: t.id ?? t.document?.id ?? null, ref: t } : null;
       }
       if ( a && typeof a.getBoundingClientRect === "function" ) {
         const r = a.getBoundingClientRect(), sil = silOf(a, null, r.width, r.height);
-        return sil ? { role, cx: r.left + r.width / 2, cy: r.top + r.height / 2, sil } : null;
+        return sil ? { role, cx: r.left + r.width / 2, cy: r.top + r.height / 2, sil, ref: a } : null;
       }
     } catch {}
     return null;
@@ -119,12 +119,51 @@ export function createImpact(L, tools = null) {
   function figsOf(spec, sub) {
     if ( spec.figures === false ) return [];
     const out = [];
-    if ( sub.sil ) out.push({ role: "target", cx: sub.cx, cy: sub.cy, sil: sub.sil, flipX: !!sub.flipX, flipY: !!sub.flipY, id: (() => { const t = isTokenRef(spec.subject ?? spec.at) ? tokenObj(spec.subject ?? spec.at) : null; return t ? t.id ?? t.document?.id ?? null : null; })() });
+    if ( sub.sil ) { const a = spec.subject ?? spec.at, t = isTokenRef(a) ? tokenObj(a) : null;
+      out.push({ role: "target", cx: sub.cx, cy: sub.cy, sil: sub.sil, flipX: !!sub.flipX, flipY: !!sub.flipY, id: t ? t.id ?? t.document?.id ?? null : null, ref: t ?? (typeof a?.getBoundingClientRect === "function" ? a : null) }); }
     const seen = new Set(out.map((g) => g.id).filter(Boolean));
     const add = (a, role) => { if ( out.length >= FIGS_MAX ) return; const g = figOf(a, spec, role); if ( g && !(g.id && seen.has(g.id)) ) { out.push(g); if ( g.id ) seen.add(g.id); } };
     if ( spec.from ) add(spec.from, "from");
     for ( const a of (Array.isArray(spec.also) ? spec.also : spec.also ? [spec.also] : []) ) add(a, "also");
+    for ( const g of out ) g.base = trackOf(g);
     return out;
+  }
+  /* IMPACT4: where a figure's token is NOW on this screen (its picture as last rendered: a reaction pose, a knock-back, a fall, the frame's
+     shove move it), so its figure follows it through the impact instead of standing where the blow found it. Tokens: the mesh's world
+     transform (the pose the renderer drew; one frame old at most; frozen while the hit-stop holds the ticker); elements: their box.
+     -> { x, y, rot, sx, sy } | null */
+  function trackOf(g) {
+    try {
+      const a = g.ref;
+      if ( !a ) return null;
+      if ( a.mesh !== undefined ) {
+        const m = a.mesh; if ( !m || m.destroyed || a.destroyed ) return null;
+        const wt = m.worldTransform, v = canvas.app.view, r = v.getBoundingClientRect(), kx = r.width / (v.clientWidth || r.width || 1), ky = r.height / (v.clientHeight || r.height || 1);
+        if ( !wt || !Number.isFinite(wt.tx) ) return null;
+        return { x: r.left + kx * wt.tx, y: r.top + ky * wt.ty, rot: Math.atan2(wt.b, wt.a), sx: Math.hypot(wt.a, wt.b), sy: Math.hypot(wt.c, wt.d) };
+      }
+      if ( typeof a.getBoundingClientRect === "function" ) {
+        const r = a.getBoundingClientRect(); let rot = 0;
+        try { const t = globalThis.getComputedStyle?.(a)?.transform; if ( t && t !== "none" && typeof DOMMatrix === "function" ) { const m = new DOMMatrix(t); rot = Math.atan2(m.b, m.a); } } catch {}
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2, rot, sx: a.offsetWidth || r.width || 1, sy: a.offsetHeight || r.height || 1 };
+      }
+    } catch {}
+    return null;
+  }
+  /* the shown drawing's figure canvases follow their tokens (a CSS transform about each figure's centre; nothing repainted) */
+  function followFigs(h) {
+    const f = h.plan.frames[h.idx];
+    if ( !f?.figEls?.length ) return;
+    for ( const L0 of f.figEls ) {
+      const g = L0.g, b = g.base, c = b ? trackOf(g) : null;
+      let tf = "";
+      if ( b && c ) {
+        const dx = c.x - b.x, dy = c.y - b.y, dr = c.rot - b.rot, kx = c.sx / (b.sx || 1), ky = c.sy / (b.sy || 1);
+        if ( Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3 || Math.abs(dr) > 0.002 || Math.abs(kx - 1) > 0.004 || Math.abs(ky - 1) > 0.004 )
+          tf = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) rotate(${dr.toFixed(4)}rad) scale(${kx.toFixed(4)},${ky.toFixed(4)})`;
+      }
+      if ( L0.el.style.transform !== tf ) L0.el.style.transform = tf;
+    }
   }
   function envOf(spec, plan, sub) {
     const W = innerWidth, H = innerHeight, m = Math.min(W, H) * 0.04;
@@ -140,7 +179,7 @@ export function createImpact(L, tools = null) {
         if ( p && Number.isFinite(p.x) && Math.hypot(sub.cx - p.x, sub.cy - p.y) > 1 ) dir = Math.atan2(sub.cy - p.y, sub.cx - p.x);
       } catch {}
     }
-    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false,
+    const e = { W, H, cx, cy, R, dir, mag: plan.magnitude, step: plan.step, kind: plan.kind, tone: plan.tone, sil: sub.sil, redOk: false, figLayers: plan.mode === "full",   // IMPACT4: figure layers follow their tokens; the gentle panel keeps its figures inside its clip
       figs: figsOf(spec, sub), rimTone: plan.rimTone,   /* IMPACT3: the figures that take part on this seat (the ones it may see) */   /* ENGTABLE: the guard is always on (red stays rationed) */
       /* the gentle panel: round the subject, sized from it (FIN-ENGINE FXIT-E2: a far-zoom token gets a panel of a few token widths) */
       local: plan.mode === "full" ? null : { r: Math.min(localRadius(W, H), Math.max(R * 2.6, R > 0 ? Math.min(Math.min(W, H) * 0.2, Math.max(R * 6, Math.min(W, H) * 0.06)) : Math.min(W, H) * 0.2)) },
@@ -400,6 +439,10 @@ export function createImpact(L, tools = null) {
     f.clipPts = clip;
     f.clip = clip ? `polygon(${Array.from({ length: clip.length / 2 }, (_, k) => `${clip[k * 2].toFixed(1)}px ${clip[k * 2 + 1].toFixed(1)}px`).join(",")})` : "";
     h.wrap?.appendChild(c);
+    /* IMPACT4: the figures of this drawing, each on its own canvas that follows its token */
+    try {
+      f.figEls = paintFigLayers(e, f, q).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); h.wrap?.appendChild(el); return { el, g: L0.g }; });
+    } catch ( err ) { f.figEls = []; console.warn("LETR | impact figures failed", err); }
     const ms = now() - t0;
     stats.painted++; stats.paintMs += ms; if ( ms > stats.paintMax ) stats.paintMax = ms;
     h.paintMs += ms;
@@ -409,7 +452,8 @@ export function createImpact(L, tools = null) {
     paint(h, i);
     if ( f.cv.parentNode !== h.wrap ) h.wrap.appendChild(f.cv);
     f.cv.style.display = "block";
-    if ( old?.cv && old !== f ) { old.cv.remove(); old.cv.width = 0; old.cv.height = 0; old.cv = null; }
+    for ( const L0 of f.figEls ?? [] ) { if ( L0.el.parentNode !== h.wrap ) h.wrap.appendChild(L0.el); L0.el.style.display = "block"; }
+    if ( old?.cv && old !== f ) { old.cv.remove(); old.cv.width = 0; old.cv.height = 0; old.cv = null; dropFigs(old); }
     h.idx = i;
     const b = h.back.style;
     let back = f.back ? BACK[f.back] : "";
@@ -425,6 +469,7 @@ export function createImpact(L, tools = null) {
     const ms = now() - t0; if ( ms > stats.showMax ) stats.showMax = ms;
     if ( !h.isReady ) { h.isReady = true; h._ready(true); }
   }
+  function dropFigs(f) { for ( const L0 of f.figEls ?? [] ) { L0.el.remove?.(); L0.el.width = 0; L0.el.height = 0; } f.figEls = null; }
   function finish(h, why) {
     if ( !h.alive ) return;
     h.alive = false;
@@ -435,7 +480,7 @@ export function createImpact(L, tools = null) {
     if ( h.dog ) clearTimeout(h.dog);
     try { setPunch(h, null); } catch {}
     setStop(false);
-    for ( const f of h.plan.frames ) if ( f.cv ) { f.cv.remove?.(); f.cv.width = 0; f.cv.height = 0; f.cv = null; }
+    for ( const f of h.plan.frames ) { if ( f.cv ) { f.cv.remove?.(); f.cv.width = 0; f.cv.height = 0; f.cv = null; } dropFigs(f); }
     if ( h.copies ) { for ( const c of h.copies.values() ) { c.filter?.remove?.(); c.cv.width = 0; c.cv.height = 0; } h.copies = null; }
     h.wrap?.remove(); h.wrap = null;
     stats.last = { kind: h.plan.kind, mode: h.plan.mode, frames: h.plan.frames.length, ms: h.plan.ms, paintMs: +h.paintMs.toFixed(2), frameMax: +h.frameMax.toFixed(2), why };
@@ -488,6 +533,7 @@ export function createImpact(L, tools = null) {
       let a = 0; for ( let k = 0; k < i; k++ ) a += h.plan.frames[k].ticks * TICK;
       const p = punchAt(h.plan, i, Math.floor((el - a) / TICK));
       if ( p || h.punched ) setPunch(h, p);
+      followFigs(h);
       if ( h.spec.keep ) applyKeep(h);
       if ( h.plan.frames[i + 1] && h.plan.frames[i + 1].cv === undefined ) paint(h, i + 1);
     }
@@ -542,9 +588,11 @@ export function createImpact(L, tools = null) {
     /* drawings painted by prepare() are kept when the view and the frame type are still the same */
     if ( armed?.env && armed.env.W === h.env.W && armed.env.H === h.env.H && Math.hypot(armed.env.cx - h.env.cx, armed.env.cy - h.env.cy) < 2 && armed.plan.mode === plan.mode ) {
       h.env._tints = armed.env._tints;
-      plan.frames.forEach((f, i) => { const g = armed.plan.frames[i]; if ( g?.cv && g.type === f.type && g.seed === f.seed ) { f.cv = g.cv; f.clip = g.clip; g.cv = null; } });
+      /* the figures keep the tokens' places at prepare time (they follow from there) */
+      h.env.figs = armed.env.figs;
+      plan.frames.forEach((f, i) => { const g = armed.plan.frames[i]; if ( g?.cv && g.type === f.type && g.seed === f.seed && g.fig === f.fig ) { f.cv = g.cv; f.clip = g.clip; f.clipPts = g.clipPts; f.figEls = g.figEls; g.cv = null; g.figEls = null; } });
     }
-    if ( armed ) for ( const g of armed.plan.frames ) if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; }
+    if ( armed ) for ( const g of armed.plan.frames ) { if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; } dropFigs(g); }
     h.wrap = document.createElement("div");
     Object.assign(h.wrap.style, { position: "absolute", inset: "0" });
     h.back = document.createElement("div");

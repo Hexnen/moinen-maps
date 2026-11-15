@@ -6,8 +6,8 @@
 // full / local / off, and the cost (a picture's art is worked out once, a bounded number of draw calls per drawing).
 // Run from check-impact.mjs (`run`), or alone: node scripts/letters/impact/check-figures.mjs -> "impact figures: N checks, F failed".
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, isRed, TICK } from "./plan.mjs";
-import { paintFrame, figTreat, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED } from "./draw.mjs";
+import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK } from "./plan.mjs";
+import { paintFrame, paintFigLayers, figTreat, popOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED } from "./draw.mjs";
 
 const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
 const MAGS = [0.2, 0.45, 0.7, 1.1, 1.5, 1.9];   // one per step
@@ -39,7 +39,12 @@ export async function run(ok) {
     ok(jumps.every((v, i) => i === 0 || v >= jumps[i - 1]), `figures: ${id}: the figures' palette jumps do not build with the strength (${jumps})`);
     /* the strongest is plainly the most: the longest, the most palette jumps, a full hit-stop */
     const st5 = K.steps[5];
-    ok(st5.reduce((a, s) => a + s.ticks, 0) === LIMITS.maxTicks && st5.filter((s) => s.stop).reduce((a, s) => a + s.ticks, 0) >= 3, `figures: ${id} step 5 is not the longest held cut`);
+    /* IMPACT4 (the owner: one roll, a show the table watches for minutes): step 5 is a cut of at least 20 ticks with a hold of at least 4, the
+       one-on-one blows (hit, heavy, crit, ko) the whole second (was: exactly 12 ticks, the old limit) */
+    const len5 = st5.reduce((a, s) => a + s.ticks, 0);
+    ok(len5 >= 20 && len5 <= LIMITS.maxTicks && (!["hit", "heavy", "crit", "ko"].includes(id) || len5 === LIMITS.maxTicks) && st5.filter((s) => s.stop).reduce((a, s) => a + s.ticks, 0) >= 4, `figures: ${id} step 5 is not the longest held cut (${len5} ticks)`);
+    /* step 3 stays short enough that a rapid series (blows ~0.48 s apart) still plays: at most 11 ticks */
+    ok(K.steps[3].reduce((a, s) => a + s.ticks, 0) <= 11, `figures: ${id} step 3 is longer than 11 ticks`);
   }
   { const c5 = KINDS.crit.steps[5], spect = (st) => st.filter((s) => s.fig).length + st.filter((s) => s.punch > 0).length + st.filter((s) => FRAMES[s.type].full).length;
     ok(KIND_IDS.every((id) => spect(KINDS[id].steps[5]) <= spect(c5)), "figures: the strongest critical is the most spectacular picture of all kinds"); }
@@ -84,10 +89,12 @@ export async function run(ok) {
     const small = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }]);
     ok(figTreat(small, f).each[0] === "i", "figures: a token of 100 px keeps its negative");
     const big = env([{ role: "target", cx: 800, cy: 450, sil: sil(320), area: 0.78 }]);
-    ok(figTreat(big, f).each[0] === "r", "figures: a token of 320 px on a 1600 x 900 view (over figArea) gets the rim only");
+    /* IMPACT4: over the cap a bright treatment becomes its luminance-held twin (no area), with a slice of the bright art from what is left */
+    { const tb = figTreat(big, f); ok(tb.each[0] === "n" && tb.slices[0] > 0 && tb.area <= LIMITS.figArea * W * H + 1e-6, `figures: a token of 320 px on a 1600 x 900 view (over figArea) gets its hue negative with a slice of the negative (${tb.each[0]} ${tb.slices[0]})`);
+      ok(figTreat(big, { ...f, fig: "p" }).each[0] === "d" && figTreat(big, { ...f, fig: "k" }).each[0] === "d", "figures: over the cap posterised and inked become the duotone"); }
     const many = env([0, 1, 2, 3].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(140), area: 0.78 })));
     const tm = figTreat(many, f);
-    ok(tm.each[0] === "i" && tm.each.includes("r") && tm.area <= LIMITS.figArea * 1600 * 900, `figures: four tokens share the area cap, the struck one first, the rest get the rim (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
+    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: four tokens share the area cap, the struck one first, the rest get the held twin (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
     for ( const n of [1, 2, 3, 5, 8] ) for ( const w of [40, 90, 150, 260] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
       ok(tt.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: ${n} figures of ${w} px: art changes over ${(tt.area / (1600 * 900) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`); }
     ok(figTreat({ ...small, local: { r: 100 } }, f).each.every((x) => x === "r"), "figures: the gentle panel draws rims only");
@@ -111,6 +118,65 @@ export async function run(ok) {
     const q = redSafePixels(new Uint8ClampedArray([255, 0, 0, 255, 120, 10, 10, 255])); ok(!isRed(`rgb(${q[0]},${q[1]},${q[2]})`) && !isRed(`rgb(${q[4]},${q[5]},${q[6]})`), "figures: red made safe keeps under the line");
     for ( const tone of Object.values(TONES).concat([{ a: "#ff0000", b: "#ee1111" }, { a: "#e3202a", b: "#ffd400" }]) ) for ( const rt of ["a", "b"] )
       ok(!isRed(rimColor({ tone, rimTone: rt, redOk: false })), `figures: the rim's accent is never saturated red under the guard (${tone.a}/${tone.b} ${rt})`);
+  }
+
+  /* 2b. IMPACT4: the held colours (hue negative n, hue cycle h, duotone d) keep EVERY pixel's relative luminance (WCAG 2.3.1 measures a flash
+     in it: under a tenth is no transition; we hold it within 0.01) and never give saturated red, on any colour, for any turn */
+  { let sd = 11; const rnd = () => ((sd = (Math.imul(sd, 1103515245) + 12345) >>> 0) >>> 13) & 255;
+    const n = 20000, d = new Uint8ClampedArray(n * 4);
+    const fixed = [[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 255, 255], [255, 255, 0], [255, 0, 255], [128, 128, 128], [20, 230, 220], [250, 60, 70], [8, 8, 40], [250, 240, 230]];
+    for ( let i = 0; i < n; i++ ) d.set(i < fixed.length ? [...fixed[i], 255] : [rnd(), rnd(), rnd(), i % 17 ? 255 : 20], i * 4);
+    for ( const [m, o] of [["n", {}], ["d", {}], ["d", { a: [227, 32, 42], b: [255, 212, 0] }], ...[0.08, 0.25, 0.42, 0.58, 0.75, 0.92].map((t) => ["h", { turn: t }])] ) {
+      const out = heldPixels(d, m, o);
+      let worst = 0, red = 0, alpha = 0, changed = 0;
+      for ( let i = 0; i < n; i++ ) { const j = i * 4;
+        if ( d[j + 3] <= 40 ) { if ( out[j + 3] ) alpha++; continue; }
+        worst = Math.max(worst, Math.abs(relY(out[j], out[j + 1], out[j + 2]) - relY(d[j], d[j + 1], d[j + 2])));
+        if ( isRed(`rgb(${out[j]}, ${out[j + 1]}, ${out[j + 2]})`) ) red++;
+        if ( Math.abs(out[j] - d[j]) + Math.abs(out[j + 1] - d[j + 1]) + Math.abs(out[j + 2] - d[j + 2]) > 60 ) changed++; }
+      ok(worst < 0.01 && red === 0 && alpha === 0, `figures: held ${m} ${JSON.stringify(o)} changes a pixel's luminance by ${worst.toFixed(4)} (bound 0.01), ${red} saturated red, ${alpha} transparent made visible`);
+      ok(changed > n * 0.5, `figures: held ${m} ${JSON.stringify(o)} visibly turns the colours (${changed} of ${n})`);
+    }
+    ok(FIG_HELD.has("n") && FIG_HELD.has("d") && FIG_HELD.has("h") && [...FIG_HELD].every((t) => !FIG_BRIGHT.has(t)) && Object.entries(FIG_TWIN).every(([a, b]) => FIG_BRIGHT.has(a) && FIG_HELD.has(b)), "figures: every bright treatment has a held twin");
+  }
+  /* 2c. IMPACT4: the pops and the bright art stay inside the figures' area cap on every drawing that is not itself a flash, at every step,
+     mode, figure size (a far zoom to a close one) and count; a flash drawing takes no area only when it IS a flash; gentle / reduced: rims,
+     no pop */
+  { const W = 1600, H = 900, cap = LIMITS.figArea * W * H, sil = (w) => ({ src: {}, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
+    let draws = 0, popped = 0, held = 0;
+    for ( const kind of KIND_IDS ) for ( const m of MAGS ) for ( const pr of [P0, { ...P0, impact: "local" }, { ...P0, flashes: false }, { ...P0, motion: "gentle" }, { ...P0, motion: "reduced" }] ) {
+      const p = safety(planImpact({ kind, magnitude: m, seed: `c:${kind}:${m}`, dir: 30 }), pr, { flashLog: [], now: 0, t0: 0 });
+      const gentle = p.mode !== "full";
+      for ( const f of p.frames ) {
+        if ( gentle ) ok(!f.z && (!f.fig || f.fig === "r"), `figures: ${kind} m=${m} ${p.mode}: a pop or an art change on a calm seat`);
+        for ( const w of [30, 75, 150, 262, 440] ) for ( const cnt of [1, 3] ) {
+          const figs = Array.from({ length: cnt }, (_, i) => ({ role: i ? (i === 1 ? "from" : "also") : "target", cx: 300 + 400 * i, cy: 450, sil: sil(w), area: 0.95 }));
+          const tr = figTreat({ W, H, figs, local: gentle ? { r: 200 } : null }, f);
+          if ( !tr ) continue;
+          draws++;
+          ok(tr.flash === (!gentle && isFlash(f)), `figures: ${kind} m=${m} ${f.type}: a drawing takes the flash exemption without being a flash`);
+          if ( !tr.flash ) ok(tr.area <= cap + 1e-6, `figures: ${kind} m=${m} ${f.type} ${cnt} x ${w} px: the figures change ${(tr.area / (W * H) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`);
+          if ( gentle ) ok(tr.each.every((t) => t === "r") && tr.zs.every((z) => z === 1), `figures: ${kind} m=${m} ${p.mode}: the gentle panel pops or turns a figure`);
+          if ( tr.zs.some((z) => z > 1) ) popped++;
+          if ( tr.each.some((t) => FIG_HELD.has(t)) ) held++;
+        }
+      }
+    }
+    ok(popped > 50 && held > 50, `figures: the pops and the held colours are used (${popped} popped, ${held} held of ${draws} drawings)`);
+    /* a small figure pops more, but at most 2.2 x; the others half as much */
+    const ez = { W, H };
+    ok(popOf(ez, { role: "target", sil: sil(40) }, 1.55) > popOf(ez, { role: "target", sil: sil(200) }, 1.55) && popOf(ez, { role: "target", sil: sil(10) }, 1.55) <= 2.2 && popOf(ez, { role: "from", sil: sil(200) }, 1.55) < 1.55, "figures: the pop grows for small figures (max 2.2 x), half as much for the others");
+  }
+  /* 2d. IMPACT4: the figures on their own canvases (the player moves them with their tokens): one per figure shown, sized for the pop */
+  { const fake = (w, h) => { const c = { width: w, height: h }; c.getContext = () => new Proxy({}, { get: (t, k) => (k === "getImageData" ? (x, y, ww, hh) => ({ data: new Uint8ClampedArray(ww * hh * 4).fill(200) }) : k === "createImageData" ? (ww, hh) => ({ data: new Uint8ClampedArray(ww * hh * 4) }) : () => {}) }); return c; };
+    const src = fake(64, 64), sl = (w) => ({ src, sx: 0, sy: 0, sw: 64, sh: 64, w, h: w, rot: 0 });
+    const figs = [{ role: "target", cx: 800, cy: 450, sil: sl(90) }, { role: "from", cx: 400, cy: 450, sil: sl(90) }];
+    const e = { W: 1600, H: 900, cx: 800, cy: 450, R: 45, dir: 0, mag: 1.6, step: 4, kind: "hit", tone: TONES.hero, rimTone: "a", sil: figs[0].sil, figs, local: null, redOk: false, makeCanvas: fake };
+    const L = paintFigLayers(e, { type: "fig", seed: 3, fig: "i", z: 1.55 });
+    ok(L.length === 2 && L.every((x) => x.canvas.width >= 90 && Math.abs(x.x + x.size / 2 - x.g.cx) < 1e-6), `figures: one canvas per figure, centred on it (${L.length})`);
+    ok(L[0].size >= 90 * 1.55, `figures: the struck figure's canvas holds its pop (${L[0].size})`);
+    ok(paintFigLayers(e, { type: "shadow", seed: 3, fig: "i" }).every((x) => x.g.role !== "target"), "figures: an enlarged frame has no second struck figure on a layer");
+    ok(paintFigLayers(e, { type: "fig", seed: 3 }).length === 0, "figures: no treatment, no layers");
   }
 
   /* 3. painting with figures on a recording context: every drawing type, every figure treatment, bounded draw calls, nothing left saved */
@@ -203,6 +269,25 @@ async function life(ok) {
   P.flashes = false; h = I.play({ kind: "crit", magnitude: 1.9, seed: 5, subject: tgt, from: att }); ok(h.mode === "local" && h.plan.frames.every((f) => !f.fig || f.fig === "r"), "figures life: a seat without flashes (photosensitive) gets rims only"); h.stop(); P.flashes = true;
   P.motion = "reduced"; h = I.play({ kind: "crit", magnitude: 1.9, seed: 6, subject: tgt, from: att }); ok(h.mode === "static" && h.plan.frames.every((f) => !f.fig || f.fig === "r"), "figures life: reduced motion: the still drawing with rims"); h.stop(); P.motion = "full";
   await I.setMode("off"); ok(I.play({ kind: "crit", magnitude: 1.9, subject: tgt }).off, "figures life: off = nothing"); await I.setMode("full");
+  /* IMPACT4: the figures sit on their own canvases and follow their tokens (the mesh's world transform: a knock-back, a fall) */
+  { canvas.app.view = { clientWidth: 1600, clientHeight: 900, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1600, height: 900 }) };
+    for ( const t of [tgt, att] ) t.mesh.worldTransform = { a: 1, b: 0, c: 0, d: 1, tx: t.x, ty: t.y };
+    await E.tick(1500);
+    h = I.play({ kind: "hit", magnitude: 1.9, seed: 21, subject: tgt, from: att });
+    let seen = 0, moved = false;
+    for ( let t = 0; t < h.plan.ms + 100; t += 16 ) {
+      tgt.mesh.worldTransform = { a: Math.cos(0.2), b: Math.sin(0.2), c: -Math.sin(0.2), d: Math.cos(0.2), tx: tgt.x + 40, ty: tgt.y + 10 };
+      await E.tick(16);
+      const f = h.plan.frames[h.idx];
+      for ( const L0 of f?.figEls ?? [] ) { seen++; if ( L0.g.role === "target" && /translate\(40\.0px,10\.0px\) rotate\(0\.2000rad\)/.test(L0.el.style.transform) ) moved = true; }
+    }
+    ok(seen > 0, "figures life: the figures are drawn on their own canvases in the full mode");
+    ok(moved, "figures life: the struck figure follows its token (moved 40,10 px and turned 0.2 rad with it)");
+    ok(!h.alive && document.body.children.flatMap((r) => r.children ?? []).length === 0, "figures life: the figure canvases are gone after the impact");
+    tgt.mesh.worldTransform = { a: 1, b: 0, c: 0, d: 1, tx: tgt.x, ty: tgt.y };
+    P.flashes = false; h = I.play({ kind: "hit", magnitude: 1.9, seed: 22, subject: tgt, from: att });
+    ok(h.env.figLayers === false, "figures life: the gentle panel paints its figures inside its own clip (no layers)"); h.stop(); P.flashes = true;
+    await E.tick(1500); }
   /* runs and leaves nothing */
   await E.tick(1500);
   h = I.play({ kind: "crit", magnitude: 1.9, seed: 7, subject: tgt, from: att, also: [flip] });

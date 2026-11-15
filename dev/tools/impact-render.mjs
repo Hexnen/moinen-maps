@@ -6,6 +6,9 @@
 //   "subject": "tok" = the test figure, "tok2" = the small one, "word" = a lettered word; { "fx", "fy" } = a point (viewport fractions).
 // --art fig|round|square|light (IMPACT3): the struck token's art (a cut-out figure, a round portrait, a square portrait with dark art, a round
 //   portrait with light art); --tok its size in px; --figfrom 1 passes the attacker "tok2" as an element (it takes part as a figure).
+// --artdir <dir> --artfile <name> [--fromfile <name>] (IMPACT4): the struck token (and the attacker "tok2") from a real picture file in <dir>
+//   (served locally, nothing fetched), --tok / --tok2 their sizes in px; --move <px> the struck token is shoved that far along the blow
+//   during the impact (its figure must follow it).
 // --keep "KA-THOOM!" (KEEPBOX): a LETR word (and its number, --keepnum "-3") lettered over the figure UNDER the impact layer (like a world
 //   word in the scene) and passed to every item as `keep`: shows how a kept word reads through every drawing. --keepsize = its size (px).
 // Output: <out>/<nn>-<label>/f##.png (one per tick), <out>/<nn>-<label>.png (the strip), <out>/frames.png (sheet of the single frame
@@ -38,6 +41,7 @@ html,body{margin:0;overflow:hidden;background:#000} #board{position:fixed;inset:
     while ( T < end ) {
       T = Math.min(end, T + 1000 / 120);
       for (;;) { timers.sort((a, b) => a.at - b.at || a.id - b.id); const t = timers[0]; if ( !t || t.at > T ) break; timers.shift(); try { t.f(); } catch (e) { console.error(e); } }
+      try { window.__onT?.(T); } catch (e) { console.error(e); }
       const fr = raf; raf = []; for ( const f of fr ) try { f(T); } catch (e) { console.error(e); }
       await new Promise((r) => queueMicrotask(r));
     }
@@ -115,7 +119,16 @@ if ( q.get("round") ) document.getElementById("tok").style.display = "none";
   }
   if ( art === "round" ) { document.getElementById("tok").style.display = "none"; document.getElementById("tok3").style.display = "block"; }
 }
-const TOKMAIN = q.get("art") === "square" || q.get("art") === "light" ? "tokA" : q.get("art") === "round" || q.get("round") ? "tok3" : "tok";
+/* IMPACT4: real token pictures (--artfile / --fromfile): an <img> at the struck token's (and the attacker's) place */
+for ( const [id, key, size, x, y] of [["tokF", "artfile", +(q.get("tok") ?? 120), W * 0.56, H * 0.5], ["tok2F", "fromfile", +(q.get("tok2") ?? q.get("tok") ?? 54), W * 0.24, H * 0.44]] ) {
+  if ( !q.get(key) ) continue;
+  const im = new Image(); im.id = id; im.src = "/art/" + q.get(key); await im.decode().catch(() => {});
+  Object.assign(im.style, { position: "fixed", pointerEvents: "none", width: size + "px", height: size + "px", left: (x - size / 2) + "px", top: (y - size / 2) + "px" });
+  document.body.insertBefore(im, document.getElementById("under"));
+  document.getElementById(id === "tokF" ? "tok" : "tok2").style.display = "none";
+  if ( id === "tokF" ) for ( const o of ["tokA", "tok3"] ) { const el = document.getElementById(o); if ( el ) el.style.display = "none"; }
+}
+const TOKMAIN = q.get("artfile") ? "tokF" : q.get("art") === "square" || q.get("art") === "light" ? "tokA" : q.get("art") === "round" || q.get("round") ? "tok3" : "tok";
 const { createImpact } = await import("/eng/impact/index.mjs");
 const prefs = JSON.parse(q.get("prefs"));
 const I = createImpact({ get prefs() { return prefs; } }, null); window.I = I;
@@ -130,13 +143,18 @@ if ( q.get("keep") ) {
   window.__keep.push(L.play(q.get("keep"), { ...o, at: { x: W * 0.56, y: H * 0.5 - ts / 2 - size * 0.55 } }));
   if ( q.get("keepnum") ) window.__keep.push(L.play(q.get("keepnum"), { ...o, seed: "keepbox#n", size: size * 0.8, at: { x: W * 0.56 + ts * 0.62 + size * 0.5, y: H * 0.5 - ts * 0.1 } }));
 }
-const fx = (v) => (v === "tok" ? document.getElementById(TOKMAIN) : v === "tok2" || v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
+const fx = (v) => (v === "tok" ? document.getElementById(TOKMAIN) : v === "tok2" ? document.getElementById(q.get("fromfile") ? "tok2F" : "tok2") : v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
 window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( window.__keep.length && a.keep !== false ) a.keep = window.__keep.length > 1 ? window.__keep : window.__keep[0]; if ( a.from ) a.from = fx(a.from);
   /* IMPACT3: an element attacker stays an element (it takes part as a figure on an engine that knows figures); its direction is passed as
      dir too, so an older engine draws the same blow */
   if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(), s = a.subject?.getBoundingClientRect?.() ?? (a.subject && Number.isFinite(a.subject.x) ? { left: a.subject.x, top: a.subject.y, width: 0, height: 0 } : null);
     if ( s && a.dir == null ) a.dir = Math.atan2(s.top + s.height / 2 - (r.top + r.height / 2), s.left + s.width / 2 - (r.left + r.width / 2)) * 180 / Math.PI;
     if ( q.get("figfrom") !== "1" ) a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  /* IMPACT4 --move: the struck token is shoved along the blow from its 3rd tick on (like a token's own knock-back reaction) and comes back */
+  const mv = +(q.get("move") ?? 0), el = document.getElementById(TOKMAIN);
+  if ( mv && el ) { const x0 = parseFloat(el.style.left), y0 = parseFloat(el.style.top), t0 = performance.now(), ang = (a.dir ?? 0) * Math.PI / 180;
+    window.__onT = (T) => { const t = (T - t0) / 1000, k = t < 0.12 ? 0 : t < 0.32 ? (t - 0.12) / 0.2 : t < 0.9 ? 1 : Math.max(0, 1 - (t - 0.9) / 0.3); el.style.left = (x0 + Math.cos(ang) * mv * k) + "px"; el.style.top = (y0 + Math.sin(ang) * mv * k) + "px"; el.style.transform = "rotate(" + (k * 0.35).toFixed(3) + "rad)"; }; }
+  else window.__onT = null;
   const h = it.fn === "show" ? I.show(it.type, a) : I.play(a); window.__h = h;
   return { alive: h.alive, mode: h.mode, ms: h.plan?.ms, frames: h.plan?.frames.map((f) => [f.type, f.ticks, f.full ? "F" : "", f.stop ? "s" : "", f.punch ? "p" : ""].join("")), guard: h.plan?.guard }; };
 window.__done = true;
@@ -146,6 +164,7 @@ const MIME = { ".mjs": "text/javascript", ".js": "text/javascript", ".json": "ap
 const srv = http.createServer((q, s) => {
   const u = decodeURIComponent(q.url.split("?")[0]);
   if ( u === "/" ) { s.writeHead(200, { "content-type": "text/html" }); return s.end(PAGE); }
+  if ( u.startsWith("/art/") && arg("artdir") ) { const f = path.join(path.resolve(arg("artdir")), path.basename(u)); return fs.readFile(f, (e, b) => { if ( e ) { s.writeHead(404); return s.end(); } s.writeHead(200, { "content-type": f.endsWith(".svg") ? "image/svg+xml" : f.endsWith(".webp") ? "image/webp" : "image/png" }); s.end(b); }); }
   if ( !u.startsWith("/eng/") ) { s.writeHead(404); return s.end(); }
   const f = path.join(ENG, u.slice(5));
   if ( !f.startsWith(ENG) ) { s.writeHead(403); return s.end(); }
@@ -169,7 +188,7 @@ try {
   await s.send("Page.enable"); await s.send("Runtime.enable");
   const logs = []; s.on("Runtime.consoleAPICalled", (e) => { if ( e.type === "error" || e.type === "warning" ) logs.push(e.args.map((a) => a.value ?? a.description).join(" ")); });
   s.on("Runtime.exceptionThrown", (e) => logs.push("EXC " + (e.exceptionDetails?.exception?.description ?? e.exceptionDetails?.text)));
-  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}${arg("art") ? `&art=${arg("art")}` : ""}${arg("figfrom") ? "&figfrom=1" : ""}${arg("keep") ? `&keep=${encodeURIComponent(arg("keep"))}&keepnum=${encodeURIComponent(arg("keepnum", ""))}&keepsize=${arg("keepsize", "56")}` : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
+  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}${arg("art") ? `&art=${arg("art")}` : ""}${arg("figfrom") ? "&figfrom=1" : ""}${arg("artfile") ? `&artfile=${encodeURIComponent(arg("artfile"))}` : ""}${arg("fromfile") ? `&fromfile=${encodeURIComponent(arg("fromfile"))}` : ""}${arg("tok2") ? `&tok2=${arg("tok2")}` : ""}${arg("move") ? `&move=${arg("move")}` : ""}${arg("keep") ? `&keep=${encodeURIComponent(arg("keep"))}&keepnum=${encodeURIComponent(arg("keepnum", ""))}&keepsize=${arg("keepsize", "56")}` : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
   const ev = async (x) => { const r = await s.send("Runtime.evaluate", { expression: x, awaitPromise: true, returnByValue: true }); if ( r.result?.exceptionDetails ) logs.push("EVAL " + r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
   for ( let i = 0; i < 400 && !(await ev("window.__done===true")); i++ ) { await ev("window.__advance(10).then(()=>true)"); await new Promise((r) => setTimeout(r, 30)); }
   if ( arg("keep") ) await ev("window.__advance(1500).then(()=>true)");   // the kept word has landed and holds

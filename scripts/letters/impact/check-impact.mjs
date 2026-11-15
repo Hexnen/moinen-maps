@@ -425,7 +425,7 @@ async function life(ok) {
   /* KEEPBOX: the cut is a TIME (the stronger one's start), carried out by the cut one's own frame loop on the next display frame */
   await E.tick(16);
   ok(c.alive && !a.alive && (await a.finished) === "replaced", "impact life: a stronger one takes over");
-  await E.tick(700);
+  await E.tick(c.plan.ms + 100);   // IMPACT4: the strongest hit lasts up to a second now (was a fixed 700 ms, longer than the old 500 ms limit)
   ok(!c.alive && kids() === 0 && liveCv() === 0, "impact life: clean after a take-over");
 
   /* a shared start: nothing before startAt, the same drawing at the same instant, late = not shown */
@@ -450,7 +450,7 @@ async function life(ok) {
   stops = 0; await E.tick(400);
   ok(!h.alive && stops === 0 && board.style.translate === "1px 2px", "impact life: reduced motion never holds or shoves"); P.motion = "full";
   /* KEEPBOX: one at a time reads the FULL plan's window on every seat (a reduced seat's still drawing ends earlier, its window does not) */
-  await E.tick(200);
+  await E.tick(LIMITS.maxTicks * TICK);   // IMPACT4: the reduced critical's window is the full plan's (up to a second now; was 200 ms after a 400 ms wait)
   P.flashes = false; h = I.play({ kind: "crit", magnitude: 2, seed: 9 });
   ok(h.mode === "local" && h.plan.frames.every((f) => !f.full && !f.stop) && h.env.local.r <= localRadius(innerWidth, innerHeight) + 1e-6, "impact life: flashes off = the gentle variant in its panel");
   await E.tick(700); P.flashes = true;

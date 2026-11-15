@@ -4,7 +4,7 @@
            local: null | { r }, panel: { r } (a local change of the scene), redOk, makeCanvas, ctx2d }
    Rule of the look: flat colour, hard shapes, and every ink shape carries a keyline of the opposite value, so it reads on any map
    (a dark busy scene as much as a pale one). */
-import { INK, PAPER, FRAMES, LIMITS, isRed, safeColor, SAFE_RED, FIG_BRIGHT } from "./plan.mjs";
+import { INK, PAPER, FRAMES, LIMITS, isRed, safeColor, SAFE_RED, FIG_BRIGHT, FIG_TWIN, isFlash } from "./plan.mjs";
 import { rng } from "../rng.mjs";
 import * as G from "./shapes.mjs";
 
@@ -204,6 +204,7 @@ export function blowUp(e) {
   return Math.max(1, Math.min(8, want / Math.max(1, have)));
 }
 function sil(ctx, e, o) {
+  if ( o.own && e.sil ) { const r = ownSil(ctx, e, o); if ( r ) return true; }
   const s = e.sil, t = s && tint(e, o.color);
   if ( !t ) return false;
   const k = o.scale ?? 1, w = s.w * k, h = s.h * k;
@@ -220,6 +221,28 @@ function sil(ctx, e, o) {
   ctx.drawImage(t, -w / 2, -h / 2, w, h);
   const a = o.art ? art(e, o.art) : null;
   if ( a ) ctx.drawImage(a, -w / 2, -h / 2, w, h);
+  ctx.restore();
+  return true;
+}
+
+/* IMPACT4: the enlarged struck figure of the frames that show it alone (shadow, glare, swap) in its OWN art turned (the colour negative on
+   the black frame, posterised on the white one, inked on the colour one): the owner's "colour inversion on the token", big, on the two flash
+   drawings where the whole picture changes anyway. A round portrait shows its cut-out figure, a square or cut-out token its whole art.
+   -> false when the picture cannot be read (the old inked silhouette then) */
+function ownSil(ctx, e, o) {
+  const s = e.sil, P = figPix(e, s);
+  if ( !P.pixels ) return false;
+  const disc = !!P.cut && P.kind === "disc";
+  let art = o.own === "inv" ? P.inv : o.own === "ink" ? P.ink : (() => { const lit = e.tone.a, k = `own:post:${lit}`; let a = P.post.get(k); if ( !a ) { a = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit)))); P.post.set(k, a); } return a; })();
+  if ( disc ) { const k = `own:cut:${o.own}`; let c = P.held.get(k); if ( !c ) { c = e.makeCanvas(P.w, P.h); const x = ctx2d(e, c), m = cutTint(e, P, "#ffffff"); if ( m ) { x.drawImage(m, 0, 0); x.globalCompositeOperation = "source-in"; } x.drawImage(art, 0, 0); P.held.set(k, c); } art = c; }
+  const shape = disc ? tint(e, o.color) : alphaTint(e, s, o.color), ot = disc ? tint(e, o.outline ?? INK) : alphaTint(e, s, o.outline ?? INK);
+  const k = o.scale ?? 1, w = s.w * k, h = s.h * k, ow = o.outlineW ?? unit(e) * 0.006;
+  ctx.save();
+  ctx.translate(o.x ?? e.cx, o.y ?? e.cy);
+  ctx.rotate(s.rot ?? 0);
+  if ( ot ) for ( let i = 0; i < 12; i++ ) ctx.drawImage(ot, -w / 2 + Math.cos((i / 12) * TAU) * ow, -h / 2 + Math.sin((i / 12) * TAU) * ow, w, h);
+  if ( shape ) for ( let i = 0; i < 12; i++ ) ctx.drawImage(shape, -w / 2 + Math.cos((i / 12) * TAU) * ow * 0.45, -h / 2 + Math.sin((i / 12) * TAU) * ow * 0.45, w, h);
+  ctx.drawImage(art, -w / 2, -h / 2, w, h);
   ctx.restore();
   return true;
 }
@@ -273,6 +296,78 @@ export function postPixels(d, w, h, alpha, cut, accent) {
   return redSafePixels(o);
 }
 const hexRgb = (c) => { const m = /^#([0-9a-f]{6})/i.exec(String(c)); return m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) : [255, 212, 0]; };
+
+/* ---------- IMPACT4 (1.9.21): colour changes that hold luminance ----------
+   WCAG 2.3.1 measures a flash in RELATIVE LUMINANCE (linear sRGB, 0.2126 R + 0.7152 G + 0.0722 B): a change of under a tenth of the maximum
+   is no transition at all. So a token's colours may be turned (hue negative, hue cycle, duotone in the accents) on any area, at any zoom,
+   on every drawing, as long as every pixel keeps its own luminance: the impact moves ink (hue), not light. Each colour is fitted back to
+   the pixel's original luminance exactly (scaled, then mixed with white when a channel would clip), then pushed off saturated red at the
+   same luminance (mixed toward the grey of that luminance until R / (R+G+B) < 0.7). The 8-bit rounding leaves under 0.004 of error
+   (check-figures measures every pixel). */
+const LIN = new Float32Array(256);
+for ( let i = 0; i < 256; i++ ) { const c = i / 255; LIN[i] = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }
+/* linear -> 8-bit sRGB, the code whose luminance is NEAREST (a table and the midpoints between codes: no pow per pixel) */
+const MIDL = new Float32Array(255); for ( let i = 0; i < 255; i++ ) MIDL[i] = (LIN[i] + LIN[i + 1]) / 2;
+const TOS = new Uint8Array(4097); for ( let i = 0, c = 0; i <= 4096; i++ ) { while ( c < 255 && i / 4096 > MIDL[c] ) c++; TOS[i] = c; }
+const toS = (v) => { if ( !(v > 0) ) return 0; if ( v >= 1 ) return 255; let c = TOS[Math.round(v * 4096)]; while ( c < 255 && v > MIDL[c] ) c++; while ( c > 0 && v < MIDL[c - 1] ) c--; return c; };
+export const relY = (r, g, b) => 0.2126 * LIN[r] + 0.7152 * LIN[g] + 0.0722 * LIN[b];
+/* linear rgb -> the same hue and saturation as far as possible, at luminance Y exactly; -> 8-bit [r, g, b], never saturated red */
+export function fitY(lr, lg, lb, Y) {
+  let r = lr, g = lg, b = lb;
+  const yc = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  if ( !(yc > 1e-7) ) r = g = b = Y;
+  else {
+    const k = Y / yc; r *= k; g *= k; b *= k;
+    const m = Math.max(r, g, b);
+    if ( m > 1 ) { r /= m; g /= m; b /= m; const y1 = Y / m, t = (Y - y1) / Math.max(1e-7, 1 - y1); r += (1 - r) * t; g += (1 - g) * t; b += (1 - b) * t; }
+  }
+  let o = [toS(r), toS(g), toS(b)];
+  for ( let mix = 0.12; mix <= 1.0001 && o[0] / Math.max(1, o[0] + o[1] + o[2]) >= 0.7; mix += 0.12 ) o = [toS(r + (Y - r) * mix), toS(g + (Y - g) * mix), toS(b + (Y - b) * mix)];
+  return o;
+}
+/* rgb (8-bit) -> hsl (0..1) and back */
+function hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if ( d < 1e-6 ) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+function rgbOfHsl(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h * 6) % 2) - 1)), m = l - c / 2, k = Math.floor(h * 6) % 6;
+  const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][k];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+/* the art's colours turned, every pixel at its own luminance. mode "n" = the opposite hue, "h" = turned by `turn` (0..1 of a circle),
+   "d" = duotone: the darker half of the figure in accent A, the lighter in accent B (rgb arrays), each at its own luminance. Saturation is
+   raised (a dull art still shows the turn); a grey pixel stays grey in n / h. -> RGBA */
+export function heldPixels(d, mode, o = {}) {
+  const out = new Uint8ClampedArray(d.length), n = d.length / 4;
+  let mid = 0.18;
+  if ( mode === "d" ) {   // the median luminance of the figure (a histogram of 1024 bins, no sort)
+    const hg = new Uint32Array(1025); let cnt = 0;
+    for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { hg[Math.round(relY(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) * 1024)]++; cnt++; }
+    if ( cnt ) { let acc = 0, k = 0; for ( ; k <= 1024; k++ ) { acc += hg[k]; if ( acc > cnt >> 1 ) break; } mid = Math.min(1024, k) / 1024; }
+  }
+  const A = o.a ?? [255, 212, 0], B = o.b ?? [25, 168, 255], turn = mode === "n" ? 0.5 : (o.turn ?? 0.33);
+  const memo = new Map();   // token art repeats its colours: each colour is turned once
+  for ( let i = 0; i < n; i++ ) {
+    const j = i * 4, r = d[j], g = d[j + 1], b = d[j + 2];
+    if ( !(d[j + 3] > 40) ) continue;
+    const key = (r << 16) | (g << 8) | b, hit = memo.get(key);
+    if ( hit !== undefined ) { out[j] = hit >>> 16; out[j + 1] = (hit >>> 8) & 255; out[j + 2] = hit & 255; out[j + 3] = 255; continue; }
+    const Y = relY(r, g, b);
+    let c;
+    if ( mode === "d" ) c = Y < mid ? A : B;
+    else { const [hh, ss, ll] = hsl(r, g, b); c = ss < 0.04 ? [r, g, b] : rgbOfHsl((hh + turn) % 1, Math.min(1, ss * 1.35 + 0.08), ll); }
+    const f = fitY(LIN[Math.round(Math.max(0, Math.min(255, c[0])))], LIN[Math.round(Math.max(0, Math.min(255, c[1])))], LIN[Math.round(Math.max(0, Math.min(255, c[2])))], Y);
+    out[j] = f[0]; out[j + 1] = f[1]; out[j + 2] = f[2]; out[j + 3] = 255;
+    memo.set(key, (f[0] << 16) | (f[1] << 8) | f[2]);
+  }
+  return out;
+}
+
 /* the pictures of one figure's art (worked out once per picture, shared by every impact on it) */
 function figPix(e, s) {
   const sh = sharedOf(s), sk = skey(s, "figpix");
@@ -291,13 +386,22 @@ function figPix(e, s) {
       let on = 0; for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { alpha[i] = 1; on++; }
       const m = figureMask(d, w, h);
       const put = (rgba) => { const cv = e.makeCanvas(w, h), cx = ctx2d(e, cv), id = cx.createImageData(w, h); id.data.set(rgba); cx.putImageData(id, 0, 0); return cv; };
-      P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null,
-        inv: put(invPixels(d)), orig: put(origPixels(d)), ink: put(inkPixels(d, w, h, alpha, false)), post: new Map(), put };
+      P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null, kind: m.kind,
+        inv: put(invPixels(d)), orig: put(origPixels(d)), ink: put(inkPixels(d, w, h, alpha, false)), post: new Map(), held: new Map(), proj: new Map(), put };
     }
     c.width = 0; c.height = 0;
   } catch { P = { w, h, pixels: false, area: 0.8 }; }
   e._figs.set(s, P); sh?.set(sk, P);
   return P;
+}
+/* the held art of a figure (IMPACT4), cached per treatment and parameter */
+function heldArt(e, P, t, turn = 0.33) {
+  if ( !P.pixels ) return null;
+  const A = hexRgb(safeColor(e.tone.a)), B = hexRgb(safeColor(e.tone.b));
+  const key = t === "d" ? `d:${A}:${B}` : t === "h" ? `h:${Math.round(turn * 12)}` : "n";
+  let c = P.held.get(key);
+  if ( !c ) { c = P.put(heldPixels(P.d, t, { a: A, b: B, turn: Math.round(turn * 12) / 12 })); P.held.set(key, c); }
+  return c;
 }
 /* the figure's whole outline (its alpha, not the cut-out) in one flat colour: needs no pixel read */
 function alphaTint(e, s, color) {
@@ -310,65 +414,160 @@ function alphaTint(e, s, color) {
   sh?.set(sk, c);
   return c;
 }
+/* IMPACT4: the cut-out figure inside a portrait (a full-square or round token whose background the cut removed) as a flat colour: its
+   edge gets the accent too, so a token whose art fills its square still shows WHO is struck, not only a lit square */
+function cutTint(e, P, color) {
+  if ( !P.cut ) return null;
+  const key = `cut:${color}`;
+  let c = P.held.get(key);
+  if ( !c ) { const rgb = hexRgb(color), a = new Uint8ClampedArray(P.w * P.h * 4); for ( let i = 0; i < P.w * P.h; i++ ) if ( P.cut[i] ) a.set([rgb[0], rgb[1], rgb[2], 255], i * 4); c = P.put(a); P.held.set(key, c); }
+  return c;
+}
 /* the accent that lights the rims (seeded per impact: tone a or b; never saturated red under the guard) */
 export const rimColor = (e) => { const c = e.rimTone === "b" ? e.tone.b : e.tone.a; return e.redOk ? c : isRed(c) ? (isRed(e.tone.b) ? PAPER : e.tone.b) : c; };
-/* which figures and what they show on this drawing, on this seat:
-   -> null (no figures' part) | { t (r i p k o), list: [fig] }. A treatment that changes the brightness of the figures' own art (i, p, k)
-   is drawn only while all of them together cover at most LIMITS.figArea of the view (a seat zoomed close onto a big token gets the
-   rim only), only from art this seat can read, and never in the gentle variant (safety() already made those r) */
 export const ENLARGED = new Set(["shadow", "glare", "swap"]);
+/* how much a figure pops on a drawing with `z` (IMPACT4): the struck figure by z, the others by half as much; a figure small on this screen
+   pops more (a token of a few dozen px at a far zoom), at most 2.2 x */
+export const popOf = (e, g, z) => {
+  if ( !(z > 1) ) return 1;
+  const zz = g.role === "target" ? z : 1 + (z - 1) * 0.5, size = Math.max(Math.abs(g.sil.w), Math.abs(g.sil.h)), want = unit(e) * 0.085;
+  return Math.min(2.2, zz * Math.max(1, Math.min(1.45, want / Math.max(1, size))));
+};
+/* which figures and what they show on this drawing, on this seat:
+   -> null (no figures' part) | { t, list: [fig], each: [treatment], zs: [pop], slices: [share | 0], area }.
+   The guard (IMPACT3 + IMPACT4): on a drawing that is not itself a flash, every change of LUMINANCE the figures make (a bright treatment i
+   p k, and a figure popped bigger than its token: the scene round it is covered) is shared out of LIMITS.figArea of the view, the struck
+   figure first, then the attacker, then the rest. A figure that does not fit keeps its place size first, then turns to its held twin
+   (i -> n, p / k -> d: colours turned, luminance kept, no area taken) and gets a SLICE of the bright one cut along the blow with what area
+   is left (a share of its own area, at least 8 %), else none. On a flash drawing (a full-field frame, a scene change that the guard
+   counted) the figures take no area: that drawing is already one of the rationed flashes. The gentle variant: rims only, no pop. */
 export function figTreat(e, f) {
   if ( !f?.fig || !e.figs?.length ) return null;
   const list = e.figs.filter((g) => g.sil && !(g.role === "target" && ENLARGED.has(f.type)));
   if ( !list.length ) return null;
-  const t = e.local ? "r" : f.fig;
-  /* the area is shared out in order (the struck figure first, then the attacker, then the others): a figure whose art would take the
-     figures' area over the cap keeps the rim only */
+  const t = e.local ? "r" : f.fig, z = e.local ? 1 : (f.z ?? 1);
+  const flash = !e.local && isFlash(f);
+  const cap = LIMITS.figArea * e.W * e.H;
   let a = 0;
-  const each = list.map((g) => {
-    if ( !FIG_BRIGHT.has(t) ) return t;
-    const ga = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area);
-    if ( a + ga > LIMITS.figArea * e.W * e.H ) return "r";
-    a += ga; return t;
-  });
-  return { t, list, each, area: a };
+  const each = [], zs = [], slices = [];
+  for ( const g of list ) {
+    const base = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area), zz = popOf(e, g, z), bright = FIG_BRIGHT.has(t);
+    if ( flash ) { each.push(t); zs.push(zz); slices.push(0); continue; }
+    const cost = (zz2) => (bright || zz2 > 1 ? base * zz2 * zz2 : 0);
+    if ( a + cost(zz) <= cap ) { a += cost(zz); each.push(t); zs.push(zz); slices.push(0); continue; }
+    if ( a + cost(1) <= cap ) { a += cost(1); each.push(t); zs.push(1); slices.push(0); continue; }
+    const twin = FIG_TWIN[t];
+    if ( !twin ) { each.push(t); zs.push(1); slices.push(0); continue; }
+    const left = Math.min(base * 0.5, cap - a), share = left >= base * 0.08 ? left / base : 0;
+    a += share * base; each.push(twin); zs.push(1); slices.push(share ? +share.toFixed(4) : 0);
+  }
+  return { t, list, each, zs, slices, area: a, flash };
 }
-/* one figure: ink line and lit rim round its true outline, then its art in the treatment */
-function drawFig(ctx, e, f, g, t, R) {
+/* the projections of a figure's pixels on a direction (local units), sorted: the slice's cut line for a share of its area */
+function cutAt(P, w, h, ang, share) {
+  const key = Math.round(((ang % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 16)) % 32;
+  let list = P.proj.get(key);
+  if ( !list ) {
+    const c = Math.cos((key * Math.PI) / 16), s = Math.sin((key * Math.PI) / 16);
+    list = []; for ( let y = 0; y < P.h; y++ ) for ( let x = 0; x < P.w; x++ ) if ( P.alpha[y * P.w + x] ) list.push(((x + 0.5) / P.w - 0.5) * c + ((y + 0.5) / P.h - 0.5) * s);
+    list = Float32Array.from(list).sort(); P.proj.set(key, list);
+  }
+  if ( !list.length ) return null;
+  const v = list[Math.max(0, Math.min(list.length - 1, Math.floor(list.length * (1 - share))))];
+  return { ang: (key * Math.PI) / 16, at: v };   // the slice = local points whose projection (x / w, y / h, on ang) is above `at`
+}
+/* one figure: ink line and lit rim round its true outline, then its art in the treatment (IMPACT4: popped by z, a held twin with a slice of
+   the bright art, the cut-out figure's own edge lit inside a portrait) */
+function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   const s = g.sil, P = figPix(e, s), u = unit(e);
   const step = Number.isFinite(e.step) ? e.step : 3;
   const w = s.w, h = s.h;
-  if ( (t === "i" || t === "p" || t === "k" || t === "o") && !P.pixels ) t = "r";
-  /* the rim boils: its width and the angle of its copies change with every drawing (seeded) */
-  const rw = Math.max(1.5, Math.min(u * 0.016, Math.min(w, h) * 0.045 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.2, rw * 0.5);
+  if ( t !== "r" && !P.pixels ) t = "r";
+  /* the rim boils: its width and the angle of its copies change with every drawing (seeded); a small figure keeps a rim that reads */
+  const rw = Math.max(2.2, Math.min(u * 0.016, Math.min(w, h) * 0.05 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.4, rw * 0.5);
   const lit = rimColor(e), inkT = alphaTint(e, s, INK), litT = alphaTint(e, s, lit);
+  const turn = R.f(0.17, 0.83);   // the hue cycle's angle on this drawing
   ctx.save();
   ctx.translate(g.cx, g.cy);
+  /* the pop: bigger at its own place, stretched a little along the blow (the contact of a hand-drawn hit) */
+  if ( z > 1 ) { if ( e.dir != null ) { ctx.rotate(e.dir); ctx.scale(z * 1.07, z / 1.07); ctx.rotate(-e.dir); } else ctx.scale(z, z); }
   ctx.rotate(s.rot ?? 0);
   if ( g.flipX || g.flipY ) ctx.scale(g.flipX ? -1 : 1, g.flipY ? -1 : 1);
   /* the side the blow comes from, in the figure's own frame */
   const da = e.dir != null ? e.dir + Math.PI - (s.rot ?? 0) : null;
   const lx = da != null ? Math.cos(da) * (g.flipX ? -1 : 1) : 0, ly = da != null ? Math.sin(da) * (g.flipY ? -1 : 1) : 0;
-  const a0 = R.f(0, Math.PI * 2);
-  const ring = (img, r, sx = 0, sy = 0) => { if ( !img ) return; for ( let i = 0; i < 12; i++ ) { const a = a0 + (i / 12) * Math.PI * 2; ctx.drawImage(img, -w / 2 + Math.cos(a) * r + sx, -h / 2 + Math.sin(a) * r + sy, w, h); } };
-  ring(inkT, rw + iw, lx * rw * 0.7, ly * rw * 0.7);
-  ring(litT, rw, lx * rw * 0.9, ly * rw * 0.9);
-  let art = null;
-  if ( t === "i" ) art = P.inv;
-  else if ( t === "k" ) art = P.ink;
-  else if ( t === "p" ) { art = P.post.get(lit); if ( !art && P.pixels ) { art = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER ? e.tone.a : lit)))); P.post.set(lit, art); } }
-  else if ( P.pixels ) art = P.orig;
+  const a0 = R.f(0, Math.PI * 2), rz = 1 / z;
+  const ring = (img, r, sx = 0, sy = 0, iw0 = w, ih0 = h, n = 12) => { if ( !img ) return; for ( let i = 0; i < n; i++ ) { const a = a0 + (i / n) * Math.PI * 2; ctx.drawImage(img, -iw0 / 2 + Math.cos(a) * r + sx, -ih0 / 2 + Math.sin(a) * r + sy, iw0, ih0); } };
+  ring(inkT, (rw + iw) * rz, lx * rw * 0.7 * rz, ly * rw * 0.7 * rz);
+  ring(litT, rw * rz, lx * rw * 0.9 * rz, ly * rw * 0.9 * rz);
+  const artOf = (tt) => {
+    if ( tt === "i" ) return P.inv;
+    if ( tt === "k" ) return P.ink;
+    if ( tt === "p" ) { let a = P.post.get(lit); if ( !a && P.pixels ) { a = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER ? e.tone.a : lit)))); P.post.set(lit, a); } return a; }
+    if ( tt === "n" || tt === "d" || tt === "h" ) return heldArt(e, P, tt, turn);
+    return P.pixels ? P.orig : null;
+  };
+  const art = artOf(t);
   if ( art ) ctx.drawImage(art, -w / 2, -h / 2, w, h);
   else { try { ctx.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, -w / 2, -h / 2, w, h); } catch {} }
+  /* the slice: the bright treatment on the struck side of a line along the blow, as much as the area left allows */
+  if ( slice > 0 && P.pixels ) {
+    const bt = FIG_BRIGHT.has(f.fig) ? f.fig : "i";
+    const ang = da != null ? Math.atan2(ly, lx) : R.f(0, Math.PI * 2), cut = cutAt(P, w, h, ang, slice), b = artOf(bt);
+    if ( cut && b ) {
+      const c = Math.cos(cut.ang), sn = Math.sin(cut.ang), D = Math.hypot(w, h);
+      /* the line in local px: points p with (p.x / w) c + (p.y / h) sn = at; the slice is beyond it */
+      const n0 = [c / w, sn / h], nl = Math.hypot(n0[0], n0[1]), nx = n0[0] / nl, ny = n0[1] / nl, d0 = cut.at / nl;
+      const ox = nx * d0, oy = ny * d0, tx = -ny, ty = nx;
+      ctx.save(); ctx.beginPath();
+      ctx.moveTo(ox + tx * D, oy + ty * D); ctx.lineTo(ox - tx * D, oy - ty * D); ctx.lineTo(ox - tx * D + nx * D, oy - ty * D + ny * D); ctx.lineTo(ox + tx * D + nx * D, oy + ty * D + ny * D); ctx.closePath();
+      ctx.clip(); ctx.drawImage(b, -w / 2, -h / 2, w, h); ctx.restore();
+      /* the cut line itself: paper with an ink edge, inside the figure */
+      ctx.save(); ctx.globalCompositeOperation = "source-atop"; ctx.lineCap = "butt";
+      ctx.beginPath(); ctx.moveTo(ox + tx * D, oy + ty * D); ctx.lineTo(ox - tx * D, oy - ty * D);
+      ctx.lineWidth = Math.max(2, rw * 0.9) * rz; ctx.strokeStyle = INK; ctx.stroke(); ctx.lineWidth = Math.max(1, rw * 0.4) * rz; ctx.strokeStyle = PAPER; ctx.stroke();
+      ctx.restore();
+    }
+  }
+  /* a portrait's own figure (the cut-out) gets an ink and accent edge inside the token: its edge is lit, not only the token's square */
+  if ( P.cut && t !== "r" && t !== "p" ) {
+    const ci = cutTint(e, P, INK), cl = cutTint(e, P, lit), ew = Math.max(1.2, rw * 0.45) * rz;
+    if ( ci && cl ) { ctx.save(); ring(ci, ew * 1.9, 0, 0, w, h, 8); ring(cl, ew, lx * ew * 0.6, ly * ew * 0.6, w, h, 8); ctx.restore();
+      const a2 = t === "o" ? P.orig : art; if ( a2 ) { ctx.save(); ctx.globalCompositeOperation = "source-over"; const m = cutTint(e, P, "#ffffff");
+        /* the figure itself over its edge again: drawn through its own cut (a copy of the art masked by the cut) */
+        const key = `cutart:${t}:${t === "h" ? Math.round(turn * 12) : ""}:${lit}`; let ca = P.held.get(key);
+        if ( !ca && m ) { ca = e.makeCanvas(P.w, P.h); const x = ctx2d(e, ca); x.drawImage(m, 0, 0); x.globalCompositeOperation = "source-in"; x.drawImage(a2, 0, 0, P.w, P.h); P.held.set(key, ca); }
+        if ( ca ) ctx.drawImage(ca, -w / 2, -h / 2, w, h); ctx.restore(); } }
+  }
   ctx.restore();
 }
-/* the figures' part of a drawing (painted last, over the drawing's own ink) */
+/* the figures' part of a drawing (painted last, over the drawing's own ink). With e.figLayers (the player) the figures are not painted here
+   but each on its own small canvas that follows its token (paintFigLayers) */
 function paintFigs(ctx, e, f) {
+  if ( e.figLayers ) return;
   const tr = figTreat(e, f);
   if ( !tr ) return;
   const R = rng((f.seed ^ 0x5bd1e995) >>> 0);
-  tr.list.forEach((g, i) => drawFig(ctx, e, f, g, tr.each[i], R));
+  tr.list.forEach((g, i) => drawFig(ctx, e, f, g, tr.each[i], R, tr.zs[i], tr.slices[i]));
 }
+/* IMPACT4: the figures of a drawing each on its own canvas, so the player can move it with its token (a knock-back, a fall, a shake the
+   token's own reaction plays during the impact). -> [{ g, canvas, x, y, size (css px) }]; the same seeded draws as paintFigs */
+export function paintFigLayers(e, f, q = 1) {
+  const tr = figTreat(e, f);
+  if ( !tr ) return [];
+  const R = rng((f.seed ^ 0x5bd1e995) >>> 0), u = unit(e), out = [];
+  tr.list.forEach((g, i) => {
+    if ( e.local && Math.hypot(g.cx - e.cx, g.cy - e.cy) > e.local.r ) { drawFig(skipCtx, e, f, g, tr.each[i], R, 1, 0); return; }   // outside the gentle panel: nothing (the draws keep the seeded order)
+    const zz = tr.zs[i], size = Math.ceil(Math.hypot(g.sil.w, g.sil.h) * zz * 1.12 + u * 0.08 + 8);
+    const c = e.makeCanvas(Math.max(2, Math.round(size * q)), Math.max(2, Math.round(size * q))), x = ctx2d(e, c);
+    x.setTransform?.(q, 0, 0, q, 0, 0);
+    drawFig(x, e, f, { ...g, cx: size / 2, cy: size / 2 }, tr.each[i], R, zz, tr.slices[i]);
+    out.push({ g, canvas: c, x: g.cx - size / 2, y: g.cy - size / 2, size });
+  });
+  return out;
+}
+/* a context that draws nothing (keeps the seeded order of a figure that is not shown) */
+const skipCtx = new Proxy({}, { get: () => () => {} });
 /* the outline of a figure as a ring (for the knock-back echoes), cached per figure, colour and width */
 function ringOf(e, s, color, wpx) {
   const key = `ring:${color}:${wpx.toFixed(1)}:${s.w.toFixed(0)}x${s.h.toFixed(0)}`, sh = sharedOf(s), sk = skey(s, key);
@@ -480,13 +679,13 @@ const PAINT = {
     lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: small, key: INK, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
     const r = Math.max(burstR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
     burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4 });
-    sil(ctx, e, { color: PAPER, outline: INK, outlineW: u * 0.008, scale: k, art: "bw" });
+    sil(ctx, e, { color: PAPER, outline: INK, outlineW: u * 0.008, scale: k, art: "bw", own: "inv" });
   },
   glare(ctx, e, f) {
     ctx.fillStyle = PAPER; ctx.fillRect(0, 0, e.W, e.H);
     const k = blowUp(e), u = unit(e);
     lines(ctx, e, f.seed, { n: 78, fat: 1.8, color: INK, key: PAPER, second: null, gap: Math.max(1, k * 0.7) });
-    if ( !sil(ctx, e, { color: INK, outline: e.tone.a, outlineW: u * 0.007, scale: k, art: "neg" }) ) burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.2, fill: INK, stroke: e.tone.a, long: 4 });
+    if ( !sil(ctx, e, { color: INK, outline: e.tone.a, outlineW: u * 0.007, scale: k, art: "neg", own: "post" }) ) burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.2, fill: INK, stroke: e.tone.a, long: 4 });
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.5, fill: e.tone.a, long: 2 });
   },
   swap(ctx, e, f) {
@@ -494,7 +693,7 @@ const PAINT = {
     ctx.fillStyle = bg; ctx.fillRect(0, 0, e.W, e.H);
     halftone(ctx, e, f.seed, { color: INK, under: null, all: e.dir == null, whole: true, r0: 0, r1: Math.hypot(e.W, e.H) * 0.62, pitch: Math.max(12, u * 0.03), fan: 1.25 });
     lines(ctx, e, f.seed + 1, { n: 34, fat: 1.1, color: PAPER, key: INK, second: null, gap: Math.max(1, k * 0.7) });
-    if ( !sil(ctx, e, { color: INK, outline: PAPER, outlineW: u * 0.008, scale: k, art: "neg" }) ) burst(ctx, e, f.seed + 2, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.3, fill: INK, stroke: PAPER, long: 4 });
+    if ( !sil(ctx, e, { color: INK, outline: PAPER, outlineW: u * 0.008, scale: k, art: "neg", own: "ink" }) ) burst(ctx, e, f.seed + 2, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.3, fill: INK, stroke: PAPER, long: 4 });
   },
   window(ctx, e, f) {
     const u = unit(e), r = Math.max(burstR(e) * 2.3, u * 0.3);

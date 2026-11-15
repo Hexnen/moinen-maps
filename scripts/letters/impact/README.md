@@ -3,7 +3,8 @@
 The few drawings of full force at the instant of a hit: the scene slammed to hard black and white or to its negative, the struck
 figure as a flat silhouette on a black, white or colour field, burst stars, speed and focus lines, smears, the frame torn in two,
 halftone, ink splashes, a chromatic split, a hold of the whole scene (hit-stop) and a shove of the frame. The lettering itself is
-restrained; this is the brief, violent exception, and it lasts 2 to 12 ticks of the engine's 24-tick clock (83 to 500 ms).
+restrained; this is the brief, violent exception, and it lasts 2 to 24 ticks of the engine's 24-tick clock (83 ms to 1 s; 1.9.21
+IMPACT4: the strongest blows are a one-second hand-drawn cut, since a roll is rare and its animation is watched for minutes).
 
 Any effect uses it through one call. Nothing here knows about dice, tokens' tracks or map presets: callers say what kind of blow
 it was, how strong, where and from where; the system picks the drawings.
@@ -40,7 +41,7 @@ over), `"off"` (switched off on this client).
 | `series` | (1.9.1) the blow's place in a series (0, 1, 2, ...): each later blow is drawn `I.series.step` (0.15) magnitude stronger, at most `I.series.max` (4) steps; the guard is unchanged |
 | `over` | `"scene"` (default: over the map, under bars and windows, z 4) or `"ui"` (over every window, one under the lettering's `screen` layer, so a word on that layer stays on top); `z` or `parent` (an element) override |
 | `tone` / `colors` | accent pair: `hero fire blood volt toxic void dust`, or `colors: [accent, second]` (a power's own colours). Ink and paper are fixed |
-| `frames` | your own sequence instead of the kind's: `["shadow", { type: "slam", ticks: 2, punch: 1, stop: false }, "dots"]` (the limits still apply). 1.9.20: a step may carry `fig` (`"r" "i" "p" "k" "o"`, what the figures do in that drawing, see "The figures") and `kick: -1` (that drawing's shove goes BACK against the blow, so a punch then a kick shakes the frame). A sequence without any `fig` gets one worked out from its peak: rims before it, own colours on it, then the negative, then posterised, rims after |
+| `frames` | your own sequence instead of the kind's: `["shadow", { type: "slam", ticks: 2, punch: 1, stop: false }, "dots"]` (the limits still apply). 1.9.20: a step may carry `fig` (`"r" "i" "p" "k" "o"`, 1.9.21 also `"n" "d" "h"`, what the figures do in that drawing, see "The figures"), 1.9.21 `z` (the figures pop bigger at their place, at most 1.8; the area cap still applies) and `kick: -1` (that drawing's shove goes BACK against the blow, so a punch then a kick shakes the frame). A sequence without any `fig` gets one worked out from its peak: rims before it, own colours on it, then the negative, then posterised, rims after |
 | `also` | (1.9.20) more tokens that take part as figures (the other tokens a crowd blow struck, a thrower): up to 8 figures in all with `subject` and `from`; each one only on a seat that may see it |
 | `figures` | (1.9.20) `false`: no figure is drawn (the new ladders without the tokens taking part); `"rim"`: rims only, the art never changed. Can only lower |
 | `hitstop`, `punch` | `false` turns the hold / the shove off for this call; `punch: 0.5` scales it |
@@ -118,26 +119,50 @@ drawing does to them is its `fig`:
 | `p` posterised | the art cut to three flat tones: ink, the impact's accent, paper (by its own light and dark thirds; the cut-away portrait background inked) |
 | `k` inked | the art inked hard black and white, like the `shadow` frame's figure, at its true place and size |
 | `o` own colours | the art in its own colours with the rim: on the scene's negative or a black field the figure stands out as the one thing in colour |
+| `n` hue negative (1.9.21) | the art's hues turned half a circle, EVERY PIXEL AT ITS OWN LUMINANCE: reads as the negative (a blue square goes orange, a green costume magenta) but changes no light |
+| `h` hue cycle (1.9.21) | the hues turned by an angle the seed gives per drawing (each held tick a new colour), each pixel at its own luminance |
+| `d` duotone (1.9.21) | the figure's darker half in the impact's accent A, its lighter half in accent B, each pixel at its own luminance |
 
 The rim's accent is one of two tones chosen by the seed, never red under the guard; a red pixel in a figure's negative or posterised art
 is drawn as `SAFE_RED`. Frames that already show the subject enlarged (`shadow`, `glare`, `swap`) leave the struck figure to themselves
 and still draw the others. The ladders put the palette jumps on ONES under the hit-stop (each held tick a new palette) and release on
 twos; a seed swaps the order of the negative and the posterised jump, so two blows of the same strength do not cut alike.
 
-Safety of the figures (on top of the table below): `i`, `p`, `k` change brightness, so on every drawing the figures that get them may
-cover together at most `LIMITS.figArea` = 2.5 % of the view (their own alpha area at this screen's size; shared out target first, then
-the attacker, then the rest); a figure past it gets the rim. That is under the small safe area of WCAG 2.3.1 (a 341 x 256 px square on
-a 1024 x 768 screen = 2.78 %), so a figure's palette jump is never a flash by itself and takes no flash slot. A big token at a close
-zoom therefore shows rims, not the negative: by design. The gentle variant (photosensitive seat, `local`, `gentle: true`) and reduced
-motion draw rims only; `figures: "rim"` asks the same of one call.
+Safety of the figures (on top of the table below): `i`, `p`, `k` change brightness, so on every drawing that is not itself a flash the
+figures that get them may cover together at most `LIMITS.figArea` = 2.5 % of the view (their own alpha area at this screen's size;
+shared out target first, then the attacker, then the rest). That is under the small safe area of WCAG 2.3.1 (a 341 x 256 px square on
+a 1024 x 768 screen = 2.78 %), so a figure's palette jump is never a flash by itself and takes no flash slot.
+
+1.9.21 IMPACT4 (the owner: colour inversions ON the tokens, accents on their edges, more, more dynamic). In 1.9.20 a token of ordinary
+size at the table's zoom (The Warehouse at 0.75: 262 px = 4.8 % of a 1600 x 900 view) was already over the cap and got rims only, and a
+full-square token (a minion's blue square) showed nothing else. Now:
+- **Luminance held, not light.** WCAG 2.3.1 measures a flash in relative luminance; `n`, `h`, `d` turn every pixel's colour and fit it
+  back to that pixel's own luminance (`heldPixels`, `fitY`: within 0.004, measured on 20 000 pixels in check-figures; saturated red
+  moved toward the grey of the same luminance). They move ink, not light, so they take no area and no flash slot, at any size.
+- **Over the cap a bright treatment becomes its held twin** (`i` -> `n`, `p` / `k` -> `d`) plus a SLICE of the true bright art cut along
+  the blow (an ink and paper cut line through the figure), as big as the area left allows (8 to 50 % of the figure). So a big token at
+  a close zoom is turned, sliced and lit, never only rimmed.
+- **Pops**: a drawing's `z` (1.25 / 1.55 on the ladders) draws the figures bigger at their place, stretched a little along the blow;
+  a figure small on this screen pops more (at most 2.2 x). A pop covers the scene round the token, so it is counted against the same
+  area cap (base x z^2); a figure that does not fit keeps its size. On a FLASH drawing (one of the two the guard rations) the figures
+  take no area: that drawing is already a counted flash.
+- **The enlarged frames show the token's own art**: `shadow` its negative, `glare` posterised, `swap` inked (a portrait: its cut-out
+  figure; a full-square art: the whole art), instead of a flat silhouette.
+- **A portrait's own figure gets its edge**: the cut-out inside a round or square portrait gets an ink line and the accent inside the
+  token, so the struck person is lit, not only the token's disc.
+- The gentle variant (photosensitive seat, `local`, `gentle: true`) and reduced motion still draw rims only, no pop, no held colour;
+  `figures: "rim"` asks the same of one call.
 
 Who is drawn: a token passes the same visibility rule as the impact's subject on this seat (a GM-hidden token is never drawn, its outline
 neither, on a player's seat; a token out of the player's sight neither). A hidden attacker gives neither a direction nor a figure (as
 before for the direction). What is drawn where differs per seat only as the seat's own pan and zoom; the plan (what each drawing does
 to the figures, which rim tone) is a function of the call, the same on every seat.
 
-Known limit: the figure is drawn from the token's place when the impact is set up; a token moving or posed by another effect DURING
-the 83-500 ms of the impact is not followed (the figure stays where the blow found it, which reads as the held frame).
+Following the token (1.9.21 IMPACT4): in the full mode each figure of a drawing is painted on its own small canvas and moved every
+display frame with its token (a CSS transform from the token mesh's world transform: the pose another effect gives it, a knock-back,
+a fall; one frame old at most; frozen while the hit-stop holds the ticker); an element subject follows its box. The gentle panel keeps
+its figures inside its clip, painted where the blow found them (1.9.20 behaviour). Before 1.9.21 the figure stayed where the blow found
+it while the token's reaction moved.
 
 ## Kinds
 
@@ -152,14 +177,22 @@ tokens, accents on their edges, more effects, more dynamic). Ticks / flash drawi
 
 | kind | 0 | 1 | 2 | 3 | 4 | 5 |
 |---|---|---|---|---|---|---|
-| hit | 2/0/0 | 4/0/0 | 5/1/0 | 9/2/4 | 10/2/3 | 12/2/4 |
-| heavy | 3/0/0 | 5/0/0 | 5/2/0 | 9/2/4 | 10/2/3 | 12/2/4 |
-| crit | 4/1/0 | 5/1/0 | 6/1/0 | 10/2/4 | 11/2/4 | 12/2/4 |
-| blast | 3/0/0 | 4/0/0 | 4/2/0 | 7/2/1 | 9/2/1 | 12/2/4 |
-| slash | 2/0/0 | 4/0/0 | 6/0/0 | 7/1/4 | 9/2/4 | 12/2/4 |
-| landing | 2/0/0 | 4/0/0 | 5/1/0 | 7/1/1 | 9/2/1 | 12/2/3 |
-| ko | 4/1/0 | 5/1/0 | 6/1/0 | 8/2/4 | 11/2/4 | 12/2/4 |
-| shock | 2/0/0 | 4/0/0 | 4/1/0 | 6/1/1 | 9/2/1 | 12/2/3 |
+| hit | 2/0/0 | 4/0/0 | 6/1/0 | 11/2/4 | 17/2/5 | 24/2/7 |
+| heavy | 3/0/0 | 5/0/0 | 6/2/0 | 11/2/4 | 16/2/5 | 24/2/7 |
+| crit | 4/1/0 | 6/1/0 | 7/1/0 | 11/2/4 | 18/2/5 | 24/2/7 |
+| blast | 3/0/0 | 4/0/0 | 5/2/0 | 11/2/2 | 15/2/2 | 22/2/5 |
+| slash | 2/0/0 | 4/0/0 | 7/0/0 | 11/1/4 | 15/2/5 | 22/2/6 |
+| landing | 2/0/0 | 4/0/0 | 5/1/0 | 11/1/2 | 15/2/2 | 21/2/4 |
+| ko | 4/1/0 | 6/1/0 | 7/1/0 | 11/2/5 | 17/2/5 | 24/2/7 |
+| shock | 2/0/0 | 4/0/0 | 5/1/0 | 10/1/2 | 15/2/2 | 21/2/4 |
+
+(1.9.21 IMPACT4; 1.9.20 had 9-12 ticks at steps 3-5 with a 4-tick hold. Still at most 2 flash drawings at every step: the longer cut adds
+held palette drawings, pops, slices and own-art frames, not flashes. Step 3 stays at most 11 ticks so a rapid series ~0.48 s apart
+still plays; steps 4-5 are the rare table show.) The strongest one-on-one blow (hit / heavy / crit / ko step 5) is the whole second:
+lead lines, the enlarged negative on black (held), the slam with the figure in its own colours popped, then on ONES under the hit-stop
+negative -> posterised -> hue -> negative -> duotone (popping 1.55 then 1.25), then on twos the colour split, cracks, halftone, the ring,
+the figure back in its own colours, a splat, rims fading. A seed swaps the hue and duotone rungs and, from step 3, rotates the release
+drawings, so two blows of the same strength differ.
 
 What each step does now (every kind follows it with its own drawings):
 - steps 0-1 (graze, scratch): the scene untouched; the star at the figure's rim, the figure lit at its edge, at step 1 flipped to its
@@ -195,8 +228,9 @@ Full-screen flashes and inversions can harm photosensitive viewers. The engine's
 
 | limit | value | where |
 |---|---|---|
-| length of an impact | at most 12 ticks = 500 ms; one drawing at most 4 ticks | `planImpact` (also a caller's own `frames`) |
-| hit-stop | at most 4 ticks = 167 ms per impact | `planImpact` |
+| length of an impact | at most 24 ticks = 1 s (1.9.21; was 12 = 500 ms); one drawing at most 4 ticks | `planImpact` (also a caller's own `frames`) |
+| hit-stop | at most 8 ticks = 333 ms per impact (1.9.21; was 4) | `planImpact` |
+| the figures' colours (1.9.21) | bright treatments (`i p k`) and pops share `figArea` (2.5 %) on non-flash drawings; held treatments (`n d h`) keep every pixel's relative luminance within 0.01 (measured 0.004) and never give saturated red, so they need no area | `figTreat`, `heldPixels` |
 | flash drawings, guard on (`photosafe`, the default) | a FLASH is a full-field frame OR any drawing that changes the scene's brightness behind it, even inside a panel (`ink`, `shatter`, the gentle variant's panels; `isFlash`). At most 2 per impact AND at most 2 in any rolling second on this client, counted in the SAME log as the words' flash frames; over the budget a full frame becomes its quiet twin (`slam` -> `ink`, `shadow`/`window` -> `pop`, `glare` -> `lines`, `swap` -> `dots`, `tear` -> `rip`) and a twin or panel that would still change the scene keeps its ink and leaves the scene alone. The slam is kept first. Two flashes a second is under the three of WCAG 2.3.1 (1.8.2: before, `ink` and `shatter` turned the WHOLE view black and white uncounted, and the guard's twin for `slam` was that whole-view `ink`) | `safety` |
 | scene changed by a drawing that is not full-field | only inside a jagged panel of at most 20 % of the view round the blow (`localPanelR`, `backClip`) | `draw.mjs` |
 | saturated red (R / (R+G+B) >= 0.7, stricter than WCAG's 0.8) | under the guard covers at most 1 % of ANY drawing (`LIMITS.redArea`): every red accent (a kind's, a `tone`, a caller's `colors`) is drawn as the deep crimson `SAFE_RED` (#b02840, 0.63); the guard off keeps the red. Measured in check-impact.mjs on every frame type x red tones x subjects (1.8.2: before, the knock-out's shadow frame threw red spikes over the black field: ADVI 18) | `draw.mjs` `guarded` |
@@ -267,6 +301,18 @@ the impact. Both seats got the same drawings at the same instant (60 fps frame s
 attacker: the player's drawing radial, by design). Cost of the figures: one 256 px software copy per token picture, cached and shared;
 at most 3 x 26 + 4 extra draw calls per drawing (check-figures).
 
+Re-measured 2026-11-15 (1.9.21 IMPACT4, lane 5, GM + Test Gracz 1 on one chrome-headless-shell, 1600x900, The Warehouse at zoom 0.6,
+both modules; the maps and plus-ultra suites running on the same machine). Free-running pages (film clock OFF, real frame times):
+every animation frame inside every directly called impact (the hit ladder 0..5 on the full-square Soldier and on the round Omni-Man,
+a critical on each, one second long at step 5) was at most 16.8 ms on both seats. The four plus-ultra criticals (screen / overlay
+layer, with and without a target): 133-450 ms frames that END 3-16 ms BEFORE the impact call (the splash's own work; the call then
+joins 190-390 ms late on the shared clock, so the first drawings of those criticals are skipped: a caller matter), and two 33 ms frames
+right after the call once. On the film clock (60 fps, both seats): 27 impacts incl. a plus-ultra knock-down, a crowd, a direct critical
+with four `also` figures, a hidden attacker and a map blast: identical drawings on both seats; the figures turned on the Soldier
+(orange, black, magenta, olive, green) and followed the knock-down's fall. A photosensitive seat (Foundry's photosensitive mode)
+drew every impact `local` while the GM drew `full`. Held colours: a token picture's held twins cost 1-10 ms per 256 px picture the first
+time (a linear->sRGB table and a colour memo; cached per picture and shared); figure layers add one small canvas per figure per drawing.
+
 ## Integration recipes
 
 - **Dice-roll splash (critical).** `I.play({ kind: "crit", magnitude: 1.7, subject: splashPanelElement, over: "ui", seed: message.id,
@@ -305,4 +351,5 @@ and with `motion: reduced`.
   simulated seats fed the same calls must draw the same pictures; `check-figures.mjs` (run from it, 1.9.20) = the figure ladders, the
   guard on every new effect at every step and mode, the area cap, red, seats, hidden tokens, the settings, draw cost.
 - Offline with the figures (1.9.20): `--art fig|round|square|light` (the struck token's art), `--tok <px>` (its size), `--figfrom 1`
-  (the attacker takes part as a figure).
+  (the attacker takes part as a figure). 1.9.21: `--artdir <dir> --artfile <name> [--fromfile <name>] --tok2 <px>` real token pictures
+  (served locally), `--move <px>` shoves the struck token along the blow during the impact (its figure must follow).
