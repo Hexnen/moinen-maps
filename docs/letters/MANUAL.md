@@ -513,8 +513,15 @@ const startAt = L.clock.toPage(event.serverStart);
 const run = L.sustain({ kind: "fire", lang, space: "world", at, seed: event.id, startAt, view: TABLE, level: (ms) => event.levelAt(ms) });
 ```
 The phrase a seat on time is already fading out when the late seat joins is not drawn there (the first ~150 ms after joining may lack
-one fading word). [V node: invincible, comic, expressive; two seats, page clocks 2.64 s apart, other windows and zooms; live: section 21
-change log]
+one fading word). [V node: invincible, comic, expressive; two seats, page clocks 2.64 s apart, other windows and zooms]
+**Live (lane 5, 2026-11-15)**: GM seat at zoom 0.5 starts an invincible and a comic fire on `startAt` from `L.clock` with the table's
+view; a player's page reloads and joins 9.2 s into the event at zoom 0.8 with the same call: 78 of 83 paired instants (250 ms apart,
+pairs at most 40 ms apart) showed the same phrases in both runs, every one at the same size, 77 of 78 within 12 scene px (words move
+between the paired instants); the 5 others differ only by a word crossing half opacity. **Trap: wait for a settled clock.** Right after
+a page load `L.clock.ready()` can be true with `L.clock.error()` ~280 ms (the first pings answered slowly while the page loaded); a
+`startAt` taken then keeps that error for the whole run (first live try: the late seat ran 280 ms behind, constant, every phrase
+the same otherwise). Take `startAt` when `L.clock.error()` is small (e.g. under 15 ms; it took ~5 s after the load here), or take it
+again and restart the run once it is.
 
 **5. The impact's strength ladders (plus-ultra `tierOf`).** `L.impact.tierOf(m)` (0..3 at `L.impact.tiers` = [0.35, 0.85, 1.35]),
 `L.impact.stepOf(m)` (0..5 at `L.impact.steps`), `L.impact.seriesBoost(n)`. A plan's tier is `tierOf(min(2, magnitude +
@@ -1203,6 +1210,8 @@ Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest t
 ## 18. Known limits
 Status: stable list; edit as items close.
 
+- (1.9.18 ENGVIEW) A run's `startAt` is converted once: a seat whose clock was still settling when it called carries that error for the
+  whole run (live: 280 ms right after a reload). No engine re-anchoring yet (question ENGVIEW-1).
 - (1.9.18 ENGVIEW) A late seat joins a sustained run at the phrases still up or to come: a phrase the seat on time is already
   fading out is not drawn there (the first ~150 ms after joining). Positions agree within a device pixel (each seat snaps to its own
   pixels). `L.measure`'s `standBox` / `inkReachBox` hold the drawn ink within 2 px in the node runs (the ink recorder over-estimates
