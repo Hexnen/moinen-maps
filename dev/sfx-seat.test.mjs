@@ -203,6 +203,18 @@ await group("RULE", async () => {
   ok(g1.rules.includes("fit") && g1.k < 1, `the page bigger than this view: all its words smaller together (k ${g1.k.toFixed(2)})`);
   ok(ov(after) <= ov(items.map((q) => q.box)) * g1.k * g1.k + 1e-6, "no word moved onto another: their overlap only scales with them");
   ok(after.every((b) => b.x0 >= vw.x0 - 1e-6 && b.x1 <= vw.x1 + 1e-6 && b.y0 >= vw.y0 - 1e-6 && b.y1 <= vw.y1 + 1e-6), "every word whole in this seat's view");
+  ok(after.every((b) => Math.max(0, Math.min(b.x1, panel.x1) - Math.max(b.x0, panel.x0)) * Math.max(0, Math.min(b.y1, panel.y1) - Math.max(b.y0, panel.y0)) === 0), "and off this seat's panel");
+  // (a panel no shift clears - a bar across the bottom of a tight view: the group a little smaller, its words off the bar)
+  const bar = { x0: vw.x0, y0: vw.y1 - (vw.y1 - vw.y0) * 0.12, x1: vw.x1, y1: vw.y1 };
+  const g2 = SEAT.seatGroup({ items, anchor, view: vw, panels: [bar], zoom: 1.35 });
+  const onBar = (g) => items.reduce((s, q) => { const b = SEAT.groupBox(q.box, g); return s + Math.max(0, Math.min(b.x1, bar.x1) - Math.max(b.x0, bar.x0)) * Math.max(0, Math.min(b.y1, bar.y1) - Math.max(b.y0, bar.y0)); }, 0);
+  ok(onBar(g2) === 0 && g2.k < g1.k + 1e-9, `a bar no shift clears: the page a little smaller (k ${g2.k.toFixed(2)}), off the bar`);
+  // (the move pulls words toward the event, where its pins stand: a word put on a pin steps off it, in the view)
+  const pin = { x0: 1000, y0: 1000, x1: 1060, y1: 1100 }, wb = [{ x0: 950, y0: 1050, x1: 1150, y1: 1120 }, { x0: 1300, y0: 1000, x1: 1400, y1: 1050 }];
+  const nd = SEAT.groupNudge(wb, [pin], { x0: 0, y0: 0, x1: 3000, y1: 2000 }, 1);
+  const moved = { x0: wb[0].x0 + nd[0].dx, y0: wb[0].y0 + nd[0].dy, x1: wb[0].x1 + nd[0].dx, y1: wb[0].y1 + nd[0].dy };
+  ok(Math.max(0, Math.min(moved.x1, pin.x1) - Math.max(moved.x0, pin.x0)) * Math.max(0, Math.min(moved.y1, pin.y1) - Math.max(moved.y0, pin.y0)) === 0 && nd[1].dx === 0 && nd[1].dy === 0, "a group word moved onto a pin steps off it; the others stay");
+  ok(/const nds = SEAT\.groupNudge\(/.test(SRC) && /pinBoxes\(vw\)/.test(SRC), "the runtime steps a group's words off this seat's pins after the move");
   const one = items.map((q) => { const f = SEAT.seatFit({ box: q.box, reach: q.box, view: vw, panels: [panel], zoom: 1.35, cap: q.cap }); const cx = (q.box.x0 + q.box.x1) / 2, cy = (q.box.y0 + q.box.y1) / 2; return SEAT.groupBox(q.box, { k: f.k, dx: f.dx, dy: f.dy, ax: cx, ay: cy }); });
   if ( process.env.SEAT_VERBOSE ) console.log("group overlap: table", ov(items.map((q) => q.box)).toFixed(0), "group rule", ov(after).toFixed(0), "word by word", ov(one).toFixed(0));
   ok(/const f = w\.group \? groupFit\(w\.group, vw, ui, zoom\)/.test(SRC) && /p\.group = \{ words:/.test(SRC) && /for \( const w of grp\.words \) w\.group = grp;/.test(SRC), "the runtime applies the group rule to every page and moment");

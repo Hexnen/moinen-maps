@@ -840,14 +840,16 @@ function seatCall(w) {
   const f = w.group ? groupFit(w.group, vw, ui, zoom) : SEAT.seatFit({ box, reach, view: vw, panels: ui, zoom, cap: u, subject: w.subject ?? null });
   if ( f.rule === "off" ) return { o: null, fit: f, box };
   const g = w.group ? f : { k: f.k, dx: f.dx, dy: f.dy, ax: (box.x0 + box.x1) / 2, ay: (box.y0 + box.y1) / 2 };
-  const sh = (q) => SEAT.groupAt(q, g);
+  // (a group word the move put on one of this seat's pins: stepped off it)
+  const nd = (w.group && f.nudge?.get(w)) || { dx: 0, dy: 0 };
+  const sh = (q) => { const p = SEAT.groupAt(q, g); return { ...p, x: p.x + nd.dx, y: p.y + nd.dy }; };
   const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
   if ( f.k !== 1 && Number.isFinite(o.size) ) oo.size = o.size * f.k;
   if ( o.path?.points ) oo.path = { ...o.path, points: o.path.points.map(sh) };
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
-  return { o: oo, fit: f, box: SEAT.groupBox(box, g), table: { size: o.size, at } };
+  return { o: oo, fit: f, box: moveBox(SEAT.groupBox(box, g), nd.dx, nd.dy), table: { size: o.size, at } };
 }
 /** a table word's play options and its box and reach on this seat (world units, this seat's engine scale applied) */
 function wordGeom(w) {
@@ -864,10 +866,17 @@ function wordGeom(w) {
 function groupFit(grp, vw, ui, zoom) {
   const key = vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${L.prefs?.scale ?? 1}` : "";
   if ( grp.seat && grp.seatKey === key ) return grp.seat;
-  const items = [];
-  for ( const q of grp.words ) { try { const gq = wordGeom(q); items.push({ box: gq.box, reach: gq.reach, cap: gq.u }); } catch {} }
+  const items = [], ws = [];
+  for ( const q of grp.words ) { try { const gq = wordGeom(q); items.push({ box: gq.box, reach: gq.reach, cap: gq.u }); ws.push(q); } catch {} }
   grp.seatKey = key;
-  return (grp.seat = SEAT.seatGroup({ items, anchor: grp.anchor, view: vw, panels: ui, zoom, subject: grp.subject ?? null }));
+  const f = SEAT.seatGroup({ items, anchor: grp.anchor, view: vw, panels: ui, zoom, subject: grp.subject ?? null });
+  // (the move pulls the words toward the event, where its pins stand: a word it put on a pin steps off it - only when the group moved)
+  if ( f.rule !== "ok" && f.rule !== "off" && vw ) {
+    const nds = SEAT.groupNudge(items.map((q) => SEAT.groupBox(q.box, f)), pinBoxes(vw), vw, zoom);
+    f.nudge = new Map(); nds.forEach((d, i) => { if ( d.dx || d.dy ) f.nudge.set(ws[i], d); });
+    if ( f.nudge.size ) f.rules = [...f.rules, "pin"];
+  }
+  return (grp.seat = f);
 }
 /** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
 function logCall(w, call) {

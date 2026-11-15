@@ -188,9 +188,25 @@ export function seatGroup({ items, anchor = null, view, panels = [], zoom = 1, r
   // (the group's whole reach bigger than this seat's view: all smaller together, to fit)
   const kv = Math.min(1, (v.x1 - v.x0) / Math.max(1e-6, r.x1 - r.x0), (v.y1 - v.y0) / Math.max(1e-6, r.y1 - r.y0));
   if ( kv < 1 - 1e-6 ) { k *= kv; r = sc(R, k); rules.push("fit"); }
-  const d = shiftClear(r, its.map((q) => sc(q.box, k)), panels, v);
+  const covered = (f, d) => its.reduce((s, q) => { const b = sc(q.box, f); const m2 = { x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy }; return s + panels.reduce((t, p) => t + inter(m2, p), 0); }, 0);
+  let d = shiftClear(r, its.map((q) => sc(q.box, k)), panels, v), c = covered(k, d);
+  // (no shift clears this seat's panels: the group a little smaller, a few steps, never under the readable floor - live, a player's
+  // main word stood on the macro bar)
+  for ( let i = 0, f = k; c > 1e-6 && i < 5; i++ ) {
+    f *= 0.9;
+    if ( cmin > 0 && cmin * f * zoom < read ) break;
+    const d2 = shiftClear(sc(R, f), its.map((q) => sc(q.box, f)), panels, v), c2 = covered(f, d2);
+    if ( c2 < c - 1e-6 ) { k = f; d = d2; c = c2; if ( !rules.includes("fit") ) rules.push("fit"); }
+  }
   if ( Math.abs(d.dx) > 1e-6 || Math.abs(d.dy) > 1e-6 ) rules.push("shift");
   return { rule: rules.length ? rules.at(-1) : "ok", rules, k, dx: d.dx, dy: d.dy, ax, ay };
+}
+/** after the group's move, a word that now stands on a pin (the move pulls the words toward the event, where its pins are) steps off it
+    by the smallest shift that keeps it in the view: [{ dx, dy }] per box (boxes as this seat draws them, world units) */
+export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE) {
+  if ( !view || !pins?.length ) return boxes.map(() => ({ dx: 0, dy: 0 }));
+  const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
+  return boxes.map((b) => (pins.some((p) => inter(b, p) > 0) ? shiftClear(b, b, pins, v) : { dx: 0, dy: 0 }));
 }
 /** a point of the group's table picture as this seat draws it (seatGroup) */
 export const groupAt = (p, g) => ({ ...p, x: g.ax + (p.x - g.ax) * g.k + g.dx, y: g.ay + (p.y - g.ay) * g.k + g.dy });
