@@ -64,6 +64,12 @@ function cleanOpts(o) {
    word is sized for), zoom (world words: the canvas scale), alive (world words up at that moment: the crowd's share), dpr (device pixels
    per CSS px: the rim's pixel floor) }. A field left out is this seat's live value, except `alive` (0) and `dpr` (1): a view names the
    table's picture, so nothing of this seat's own words or screen density slips in. null when unusable (one warning). */
+/* ENGVIEW: L.measure's lazy ink fields, read through a shared prototype; the thunk sits under a symbol (not enumerated, not in JSON) */
+const INK_OF = Symbol("letr.inkOf"), INK_MEMO = Symbol("letr.inkMemo");
+const inkArgs = ([f, plan, track, pixel, reducedMotion, rotation, path, orbit, unit, S, cx, cy]) => f({ plan, track, pixel, reducedMotion, opts: { rotation, path, orbit } }, unit, S, cx, cy);
+const MEASURE_INK = {};
+for ( const k of ["stand", "standBox", "inkReach", "inkReachBox", "ink", "rim", "life"] )
+  Object.defineProperty(MEASURE_INK, k, { get() { return (this[INK_MEMO] ??= inkArgs(this[INK_OF]))[k]; }, enumerable: true });
 const VIEW_KEYS = { vw: (v) => v >= 200, vh: (v) => v >= 200, zoom: (v) => v > 0, alive: (v) => v >= 0, dpr: (v) => v > 0 };
 function cleanView(v) {
   if ( !v || typeof v !== "object" ) { warnOnce("opt:view", `LETR | option view = ${String(v)} ignored (an object { vw, vh, zoom, alive, dpr })`); return null; }
@@ -1458,6 +1464,7 @@ export function createEngine(base) {
     const zoom = space === "world" ? zoomOf(opts) : 1;
     const r = (v) => Math.round(v * 1000) / 1000;
     const m = {
+      __proto__: MEASURE_INK,
       version: VERSION, text: textOf(text), space, anchor, at: p ? { x: r(p.x), y: r(p.y) } : null,
       size: h.size, sizeK: plan.sizeK, unit, px: unit * zoom, clamp: h.sizeInfo?.clamp ?? null, fit: h.sizeInfo?.fit ?? null,
       hold: { w: hb.w * unit, h: hb.h * unit },
@@ -1480,10 +1487,9 @@ export function createEngine(base) {
     const S = Math.max(4, unit * zoom * (space === "world" ? dpr : (globalThis.devicePixelRatio || 1)));
     if ( opts.view ) m.view = viewUsed(sizeCtx(h), opts);
     if ( opts.ceilK !== undefined ) m.unread = ["ceilK"];
-    let inkMemo = null;
-    const inkOf = () => (inkMemo ??= inkMeasure(h, unit, S, cx, cy));
-    for ( const k of ["stand", "standBox", "inkReach", "inkReachBox", "ink", "rim", "life"] )
-      Object.defineProperty(m, k, { get: () => inkOf()[k], enumerable: true, configurable: true });
+    /* the ink fields are getters on a shared prototype (no per-call property definitions: the old fields cost what they cost) */
+    /* only what the ink needs is kept (not the measured word itself: a measure result stays as light as before) */
+    m[INK_OF] = [inkMeasure, plan, h.track, h.pixel, h.reducedMotion, opts.rotation, opts.path, opts.orbit, unit, S, cx, cy];
     return m;
   }
   /* ENGVIEW: the standing and arriving ink of a measured word (see measure). `h` = the measure's word (plan settled, track, size), `unit` its
