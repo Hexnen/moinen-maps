@@ -19,6 +19,7 @@ import { rowOut } from "./motion.mjs";
 export const AMBIENT_MAX = { world: 3, screen: 2 };
 /* SUSTAINGAP: the run's spacing, in cap heights of the words concerned: the air between the two seats (each side keeps its share),
    between the run's edge and a fragment or echo copy, and between fragments side by side */
+const SPLIT_K = 0.8;
 export const RUN_GAP = { seat: 0.14, edge: 0.12, side: 0.25 };
 const clamp01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5);
 /* the treatments of one phrase (README); ambient uses only the quiet ones */
@@ -81,10 +82,12 @@ export function makeSustain(E) {
     const up = Math.sin(drift) <= 0;   // fragments and echo copies leave by the run's top (else by its bottom)
 
     /* ---------- the run's layout (SUSTAINGAP) ----------
-       seat 0 (even phrases) below, seat 1 (odd) above, on either side of one split line (an offset from the source, fixed for the run
-       while any of its phrases is up): a phrase's centre is its own ink reach plus its share of the gap away from that line. */
+       seat 0 (even phrases) below, seat 1 (odd) above, on either side of one split line (an offset from the source by the phrase's size):
+       a phrase's centre is its own ink reach plus its share of the gap away from that line. */
     const seat = [null, null];
-    let split = null;   // the split line's offset from the source (space units), null = set by the next phrase from its own box
+    /* the split line's offset from the source: 0.8 of a phrase's cap height above it (by each phrase's own size: nothing carried over
+       from the run's past, so every seat, one joining late too, seats a phrase at the same place) */
+    const splitOf = (b) => -SPLIT_K * b.k;
     const box = (h) => { try { return E.boxOf?.(h) ?? null; } catch { return null; } };
     const fallbackK = () => (Number.isFinite(o.size) && o.size > 0 ? o.size : 1.6 * U());
     /* the room the run keeps to: the view (unless keepInView: false) and the caller's `room` (extents round the source, or a rect) */
@@ -104,18 +107,24 @@ export function makeSustain(E) {
     /* a phrase's ink round its centre, and how far its exit takes it toward the split line (lower seat: up, upper seat: down) and
        away from it, while it is still legible */
     const toward = (b, s) => fin(s ? b.ed : b.eu), away = (b, s) => fin(s ? b.eu : b.ed);
-    let tallest = 0;   // the tallest phrase of the run so far (ink + exit): a phrase still to come may stand that tall in its seat
-    const seatH = (b, s) => { if ( !b ) return Math.max(tallest, 2 * fallbackK()); const v = b.u + b.d + toward(b, s) + away(b, s); tallest = Math.max(tallest, v); return v; };
     const up0 = () => box(seat[0]?.alive ? seat[0] : null), up1 = () => box(seat[1]?.alive ? seat[1] : null);
+    /* how tall a phrase still to come may stand: the tallest phrase up now (ink + exit), at least 2.4 caps; read from the phrases up,
+       never from the run's past, so a seat that joins late lays the run out the same */
+    const tallest = () => {
+      const bs = [up0(), up1()].filter(Boolean), k = bs[0]?.k ?? fallbackK();
+      return Math.max(2.4 * k, ...bs.map((b) => b.u + b.d + fin(b.eu) + fin(b.ed)));
+    };
+    const seatH = (b, s) => (b ? b.u + b.d + toward(b, s) + away(b, s) : tallest());
     /* the split line now (absolute y): the run's base line, moved as one block to stay inside its room (both seats read the same) */
-    const splitNow = (p) => {
-      let y = p.y + (split ?? 0);
+    const splitNow = (p, b) => {
+      const y00 = p.y + splitOf(b);
+      let y = y00;
       const r = roomAt(p);
       if ( r ) {
         const b0 = up0(), b1 = up1();
-        const top = y - gapOf(b1 ?? b0) - Math.max(seatH(b1, 1), b1 ? 0 : tallest), bot = y + gapOf(b0 ?? b1) + seatH(b0, 0);
+        const top = y - gapOf(b1 ?? b0) - seatH(b1, 1), bot = y + gapOf(b0 ?? b1) + seatH(b0, 0);
         if ( bot > r.y1 ) y -= bot - r.y1;
-        const top2 = top + (y - (p.y + (split ?? 0)));
+        const top2 = top + (y - y00);
         if ( top2 < r.y0 ) y += r.y0 - top2;   // the top wins: a run taller than its room overflows downwards (never onto itself)
       }
       return y;
@@ -125,8 +134,7 @@ export function makeSustain(E) {
       const p = src() ?? last; if ( !p ) return null;
       const b = box(ph.h);
       if ( !b ) { const em = fallbackK(); return { x: p.x + ph.dx, y: p.y + (ph.s ? -1.05 : 0.1) * em }; }
-      if ( split === null ) split = 0.1 * b.k - gapOf(b) - toward(b, 0) - b.u;   // the first phrase keeps today's spot (centre 0.1 cap under the source)
-      const y0 = splitNow(p), g = gapOf(b);
+      const y0 = splitNow(p, b), g = gapOf(b);
       let x = p.x + ph.dx;
       const r = roomAt(p);
       if ( r ) { if ( x + b.r > r.x1 ) x = r.x1 - b.r; if ( x - b.l < r.x0 ) x = Math.min(r.x0 + b.l, (r.x0 + r.x1) / 2); }
@@ -134,9 +142,9 @@ export function makeSustain(E) {
     };
     /* the run's edge on the drift side (absolute y): past the seat on that side, its phrase's exit included */
     const edgeNow = (p) => {
-      const y0 = splitNow(p), b0 = up0(), b1 = up1();
-      if ( up ) return y0 - gapOf(b1 ?? b0) - Math.max(seatH(b1, 1), tallest);
-      return y0 + gapOf(b0 ?? b1) + Math.max(seatH(b0, 0), tallest);
+      const b0 = up0(), b1 = up1(), y0 = splitNow(p, b0 ?? b1 ?? { k: fallbackK() });
+      if ( up ) return y0 - gapOf(b1 ?? b0) - Math.max(seatH(b1, 1), tallest());
+      return y0 + gapOf(b0 ?? b1) + Math.max(seatH(b0, 0), tallest());
     };
 
     /* WORD's continuous-sound flow (contract v5 corrections, `L.flow`): onset, body segments for ever, tail; WORD owns the text,
@@ -224,9 +232,7 @@ export function makeSustain(E) {
       const tr = travel(d.T);
       const s = ambient ? -1 : i % 2;
       const ph = { s, dx: tr ? 0 : d.dx, h: null };
-      /* the phrase before leaves as this one comes (its exit plays under the new entrance, in the OTHER seat: never a pile of words);
-         the run's base line is set again by a phrase that comes when none of the run's phrases is up */
-      if ( !ambient && !seat[0]?.alive && !seat[1]?.alive ) split = null;
+      /* the phrase before leaves as this one comes (its exit plays under the new entrance, in the OTHER seat: never a pile of words) */
       let at;
       if ( tr ) at = undefined;
       else if ( ambient ) { const dy = -d.dyR * u; at = () => { const p = src() ?? last; return p ? { x: p.x + ph.dx, y: p.y + dy } : null; }; }
