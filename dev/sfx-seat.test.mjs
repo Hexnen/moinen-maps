@@ -359,7 +359,7 @@ await group("SEAT2", async () => {
     // (B: live the main word stood on two sides of the bomb's pin; now the same side - or, where a seat cannot show it on the table's side
     // ("side"), on the first side of the order every seat shares)
     ok(JSON.stringify(sideOf(ma)) === JSON.stringify(sideOf(mb)) || ma.rules.includes("side") || mb.rules.includes("side"), `step ${step}: the blast's main word on the same side of the bomb on both seats (${sideOf(ma)} ${ma.rules} / ${sideOf(mb)} ${mb.rules})`);
-    if ( process.env.SEAT_VERBOSE ) console.log("main side step", step, sideOf(ma), ma.rules.join("+"), "|", sideOf(mb), mb.rules.join("+"));
+    if ( process.env.SEAT_VERBOSE ) console.log("main side step", step, sideOf(ma), ma.rules.join("+"), [ma.box.x0, ma.box.y0, ma.box.x1, ma.box.y1].map(Math.round).join(","), "|", sideOf(mb), mb.rules.join("+"), [mb.box.x0, mb.box.y0, mb.box.x1, mb.box.y1].map(Math.round).join(","), "sub", [ma.sub.x0, ma.sub.y0, ma.sub.x1, ma.sub.y1].map(Math.round).join(","));
   }
   if ( process.env.SEAT_VERBOSE ) console.log("side: prev", sidePrev, "now", sideNew, "of", sideCases);
   ok(sideNew === 0, `every word both seats show stands on the same side of what it letters (${sideNew} of ${sideCases} not; previous rule ${sidePrev})`);

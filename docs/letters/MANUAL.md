@@ -260,9 +260,10 @@ What works (the map's `sfx-table.mjs` + `sfx-seat.mjs`, pure and tested by `dev/
     ink under this seat's panels / the words up with it (an edge under a panel is read; a word made smaller is weaker). Else moved the
     least: away from the thing and along it on its own side ("shift"), then the first side of the table's own order every seat shares
     ("side": two seats that both must leave agree), farther away but clean;
-  - *where nothing clean holds it at its size*: smaller, the largest clean size ("small") - on its own side down to this seat's
-    step-1 size, then the first clean side of the shared order at that size ("side"), then smaller on any side down to the legibility
-    floor x 1.15 (clean before big); a step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under
+  - *where nothing clean holds it at its size*: smaller, the largest clean size on any side ("small"; its own side first at a size,
+    then the shared order: "side"), down to the legibility floor x 1.15 (clean before big). The roomiest side is the one seats short of
+    room share: live, "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it;
+    largest-on-any-side puts both under the pin, the GM's at 196 (MAPSFXSEAT2-6); a step-3 word that cannot stand clean at 1.15 x its step 2 takes the largest clean size not under
     step 2 ("full"); a step-1 word stays under 1 / 1.15 of what a step-2 word gets on this view ("yield": a seat short of room still
     draws step 1 < step 2); nothing clean at all: the least covered spot at its step's own size, never on a pin ("tight"); a rider (a
     bomb's fall) keeps the table's way ("ride"); off this view (place, subject and way): not drawn ("off"). The table may put a word

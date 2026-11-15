@@ -267,7 +267,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       for ( let i = 0; i < around.length; i++ ) { const dd = Math.hypot(ox - around[i][0], oy - around[i][1]); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } }
       return k;
     };
-    let best = null, fallback = null, flipSmall = null, sideMin = it.side1 > 0 ? it.side1 : 0;
+    let best = null, fallback = null;
     const trySize = (cap) => {
       const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
       const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
@@ -311,12 +311,12 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         const clean = hh2 <= 1e-6 && off <= 1e-6 && subX <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
         // (clean first; on its own side; off it, the earliest side of the shared order; then the nearest, the least covered)
         const score = c.base + (soft / Math.max(1, ia)) * 40;
-        // (made smaller for want of room: on its own side while it can - the seats that must shrink it keep one picture -, another side
-        // only when its own has no clean spot down to this seat's step-1 size `sideMin`; under it either side, its own first by score)
+        // (made smaller for want of room: the largest clean size on any side - its own side first at a size, then the shared order -:
+        // the roomiest side is the one seats short of room share, and the word stays as strong as this view lets it; live 2026-11-15
+        // "own side first while shrinking" kept the GM's blast word above the bomb at 155 and sent the player's below it, MAPSFXSEAT2-6)
         // (the larger size wins, then the lower score: the sizes under `min` are not tried in order, see below)
         const over = (o) => !o || cap > o.cap + 1e-9 || (Math.abs(cap - o.cap) <= 1e-9 && score < o.score - 1e-9);
-        if ( clean && fl && cap < min - 1e-9 && cap >= sideMin - 1e-9 ) { if ( over(flipSmall) ) flipSmall = { cap, f, d, q, score, fl, soft }; }
-        else if ( clean ) { if ( over(best) ) best = { cap, f, d, q, score, fl, soft }; continue; }
+        if ( clean ) { if ( over(best) ) best = { cap, f, d, q, score, fl, soft }; continue; }
         else if ( cap >= fmin - 1e-9 ) {
           // (nothing clean at any size: the least covered at a size not under `fmin` - off pins and tokens first, then on its own side, then
           // the least covered and the least cut by the view edge)
@@ -329,8 +329,8 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         if ( sub && subX > 1e-6 ) { add({ dx: d.dx, dy: d.dy + (side.y || -1) * Math.min(bh, subX / Math.max(1, k.x1 - k.x0)) }); }
       }
     };
-    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") on its own
-    // side down to its step-1 size, then the first clean side of the shared order there, then smaller on any side. Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
+    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") down to the
+    // legibility floor x MIN_GAIN, on any side (its own first at a size). Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
     // fits where a larger one did nearly always, and a view with no room at all tries a third of the sizes. The run under `min` is the
     // same on every step (`min` x 0.95^k), so its search finds the same size whichever step the word was asked at)
     const gallop = (list) => {
@@ -344,18 +344,17 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     };
     const search = (list) => {
       gallop(list.filter((c) => c >= min - 1e-9));
-      if ( !best ) gallop(list.filter((c) => c < min - 1e-9 && c >= sideMin - 1e-9));
-      if ( !best && !flipSmall ) gallop(list.filter((c) => c < min - 1e-9 && c < sideMin - 1e-9));
+      if ( !best ) gallop(list.filter((c) => c < min - 1e-9));
     };
     // (step 1 yields: where a step-2 word would have to shrink for room here (`probe`: its sizes on this seat), step 1 stays at most
     // 1 / MIN_GAIN of what step 2 gets - a seat short of room keeps step 1 < step 2 as drawn, never under the legibility floor)
     if ( it.probe?.length && !rules.includes("fit") ) {
-      const keep = [min, fmin, sideMin], pr = it.probe.filter((c) => c <= fitCap + 1e-9);
+      const keep = [min, fmin], pr = it.probe.filter((c) => c <= fitCap + 1e-9);
       if ( pr.length ) {
-        min = fmin = pr[0]; sideMin = sizes[0];
+        min = fmin = pr[0];
         search(pr);
-        const c2 = (best ?? flipSmall)?.cap ?? pr.at(-1);
-        best = flipSmall = fallback = null; [min, fmin, sideMin] = keep;
+        const c2 = best?.cap ?? pr.at(-1);
+        best = fallback = null; [min, fmin] = keep;
         const lim = Math.max(c2 / MIN_GAIN, it.floor > 0 ? it.floor : 0);
         if ( sizes[0] > lim + 1e-9 ) {
           const s2 = sizes.filter((c) => c <= lim + 1e-9);
@@ -368,12 +367,11 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // smallest that keeps its step (`fmin`) is sought)
     if ( sizes.length > 2 ) {
       trySize(sizes.at(-1));
-      const none = !best && !flipSmall;
-      best = flipSmall = null;
+      const none = !best;
+      best = null;
       if ( none ) { const fs = sizes.filter((c) => c >= fmin - 1e-9); for ( const cap of new Set([fs[0], fs.at(-1)]) ) if ( cap > 0 ) trySize(cap); }
       else search(sizes);
     } else for ( const cap of sizes ) { trySize(cap); if ( best ) break; }
-    best ??= flipSmall;
     const pick = best ?? fallback ?? { cap: sizes[0], f: sizes[0] / u, d: { dx: 0, dy: 0 }, q: at(sizes[0] / u) };
     if ( Math.abs(pick.f - 1) > 1e-6 && !rules.includes("fit") ) rules.push("size");
     if ( Math.abs(pick.d.dx) > 1e-6 || Math.abs(pick.d.dy) > 1e-6 ) rules.push("shift");
