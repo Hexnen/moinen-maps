@@ -598,7 +598,7 @@ const area = (b) => Math.max(0, b.x1 - b.x0) * Math.max(0, b.y1 - b.y0);
 const inter = (a, b) => area({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) });
 /** where a word may go around its subject (unit offsets from the subject box's centre; the word box is added): above first (screen-up
     reads as the sound rising off it), then the upper corners, the sides, below; the subject's own centre last */
-const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
+export const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
 /** a word slightly overlaps the edge of its subject (the comic's sound word touches what makes it): share of the word height */
 export const TOUCH = 0.18;
 /** The sides of a page's MAIN word (EFFECTS1, SPEC-EFFECTS P1 b): beside its subject on `side` (-1 left, 1 right) at its height, never

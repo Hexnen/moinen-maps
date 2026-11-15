@@ -122,7 +122,8 @@ await group("PINS", () => {
   ok(satOnPin === 0, "a side word is never laid over a pin (it is dropped or moved)");
   ok(freeExists > 100 && avoided === freeExists, `a main word with a clean place keeps off the pins: ${avoided} of ${freeExists} (${mains} placed)`);
   // (MAPSFXSEAT: the TABLE placement gets the pins every seat counts; an unlocated word keeps off this seat's own pins on its screen)
-  ok(/return \{ view: v, ui: \[\], tokens: d\.tokens\?\.\(v\) \?\? \[\], pins: d\.pins\?\.\(v\) \?\? \[\], alive: d\.ledger\.boxes\(t0, t1, skip\) \};/.test(sfx) && /tokens: sharedTokens, pins: sharedPins,/.test(sfx) && /panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "every placement of the runtime gets the pins");
+  ok(/return \{ view: v, ui: \[\], tokens: d\.tokens\?\.\(v\) \?\? \[\], pins: d\.pins\?\.\(v\) \?\? \[\], alive: d\.ledger\.boxes\(t0, t1, skip\) \};/.test(sfx) && /tokens: sharedTokens, pins: sharedPins,/.test(sfx) && /pins: pinRects\(\), zoom: 1 \}\)/.test(sfx), "every placement of the runtime gets the pins");
+  // (MAPSFXSEAT2: an unlocated word's seat layout takes the pins as pins - seatLayout's `pins`, no longer appended to its panels)
   ok(/if \( !n\.visible \|\| n\.destroyed \) continue;/.test(sfx) && /if \( !SEAT\.sharedPin\(players, /.test(sfx), "a pin a seat does not see is no obstacle (nothing of a hidden note shows in a player's placement: the table counts only pins every player may see)");
 });
 
@@ -182,7 +183,8 @@ await group("RIDE", () => {
   const fake = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.6 : w.fitK > 0.4 ? 0.4 : 0.1) }));
   const r2 = FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) });
   ok(r2[0].fitK === 0, "a step-3 main word with no clean place anywhere stands at the size that covers least");
-  ok(/panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "an unlocated word keeps off the map's pins too (this seat's: the seat rule)");
+  // (MAPSFXSEAT2: seatLayout's `pins`, beside this seat's panels and the screen words still up on it)
+  ok(/panels: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.screenUp\.filter\(/.test(sfx) && /pins: pinRects\(\), zoom: 1 \}\)/.test(sfx), "an unlocated word keeps off the map's pins too (this seat's: the seat rule)");
   // (MAPSFXSEAT: with no clean size the BIGGEST size within LADDER_SLACK of the least covering one - not today's size by default)
   const fake2 = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.45 : w.fitK > 0.4 ? 0.42 : 0.4) }));
   ok(FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake2, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) })[0].fitK === undefined, "a step-3 main word with no clean place keeps its stepped size when it covers barely more than today's");
@@ -327,7 +329,8 @@ await group("THUNDER", async () => {
   ok(sameSeats === seatPairs && fitOnly === 0, `the GM's seat and a player's draw it the same size (${sameSeats} of ${seatPairs}); smaller only by the window's fit rule`);
   ok(sizeOrder === cases / 3, `step 1 <= step 2 <= step 3 (within the fit's half-percent search) for every flash and screen: ${sizeOrder} of ${cases / 3}`);
   if ( V ) console.log("THUNDER", { cases, before, after });
-  ok(/const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return SEAT\.screenLayout\(\{ hold: hd, reach: md\?\.reach \?\? null, /.test(sfx) && /const ss = SEAT\.seatScreen\(ref, \{ W: innerWidth, H: innerHeight, panels: /.test(sfx), "the runtime lays out and draws every unlocated word this way");
+  ok(/const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return SEAT\.screenLayout\(\{ hold: hd, reach: md\?\.reach \?\? null, /.test(sfx) && /const f = SEAT\.seatLayout\(\[item\], \{ view: \{ x0: 0, y0: 0, x1: W, y1: H \}, /.test(sfx), "the runtime lays out and draws every unlocated word this way");
+  // (MAPSFXSEAT2: the reference layout centred in this window, then this seat's size - sfx-table screenCaps - laid out by seatLayout; was seatScreen)
 });
 globalThis.innerWidth = 1600; globalThis.innerHeight = 900;
 fs.rmSync(base, { recursive: true, force: true });

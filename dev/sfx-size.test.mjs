@@ -191,13 +191,15 @@ group("WIRING", () => {
   ok(/if \( raw \) return o;\n\s*const step = d\.step\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const md = measureOf\(w\.text, o, d\)/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w, d\);/.test(sfx.slice(sfx.indexOf("function measure"))),
     "the stepped options are what the word plays AND is measured with (placement sees the stepped size)");
   ok(/o\.size = SEAT\.tableScreenSize\(engineSizeFor, L\.sizeModel, \{ \.\.\.o, size: EV\.rankSize\(spec\.rank, SEAT\.REF_VH, spec\.shrink \?\? 1\) \}, plan, step\);/.test(sfx)
-    && /const so = SZ\.sizeOpts\(o, step\);/.test(sfx) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return SZ\.screenSizeAt\(o\.size, s, /.test(SEAT_SRC),
+    && /const so = SZ\.sizeOpts\(o, step\);/.test(sfx) && /const ref = screenPlace\(spec\.text, o, fixed, spec\.seed\);/.test(sfx) && /return stepPx\(o\.size \* sk, s, /.test(SEAT_SRC),
     "an unlocated word steps too (MAPSFXSEAT: on the reference window, sfx-seat tableScreenSize = screenSizeAt), its spot found for the stepped box");
+  // (MAPSFXSEAT2: both step through sfx-seat stepPx - step 3 = STEP_K[3] x step 2 with no loud ceiling (the seat layout holds it to the
+  // view clean), step 1 its share over the legibility floor; was SZ.steppedPx / SZ.screenSizeAt under the loud ceiling)
   // (THUNDERFIT: the 4th argument is the ladder's share of the extra size, placeFit; 1 = the whole stepped size)
   // (MAPSFXSEAT: "today's size" is now the engine's size on the REFERENCE view - sfx-seat tableSize, the engine's own model fed that view -
   // stepped the same way and drawn at that size, fit "world"; dev/sfx-seat.test.mjs proves it is L.sizeOf's on a reference seat)
   ok(/if \( step !== 0 && w\.text \) \{ const b = tableSized\(w, o, step, d\); if \( b \) return b; \}/.test(sfx) && /const ts = SEAT\.tableSize\(d\.sizeFor, d\.L\.sizeModel, o, planInfo\(w\.text, o, d\), \{ z, alive: w\.alive \?\? 0, grid: d\.grid, step, fitK: w\.fitK \}\);/.test(sfx)
-    && /const out = \{ \.\.\.o, fit: "world", size: ts\.size, keepInView: false \};/.test(sfx) && /const st = SZ\.steppedPx\(px, s, /.test(SEAT_SRC), "a world word at another step is stepped from the size the engine draws it at (its clamp would hold it)");
+    && /const out = \{ \.\.\.o, fit: "world", size: ts\.size, keepInView: false \};/.test(sfx) && /const st = stepPx\(px, s, /.test(SEAT_SRC), "a world word at another step is stepped from the size the engine draws it at (its clamp would hold it)");
   ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
   ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
   ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");

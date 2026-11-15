@@ -17,18 +17,23 @@
       measured by the engine (L.measure: the hold box and the whole reach of the entrance and the hold), placed off the shared
       obstacles and off the words the table picture already holds (the LEDGER: planned words, not what one seat happened to draw), and
       timed on the shared clock (`startAt`).
-   2. A seat shows that picture unchanged, except by these rules only (seatFit), each logged per seat:
-      - not on this seat's screen (the place and the word both off its view): nothing (as before);
-      - smaller than READ_PX on this seat's screen (a far zoom): drawn at READ_PX cap height at its place ("read");
-      - its reach (the whole entrance) bigger than this seat's view: made smaller to fit the view, at its place ("fit");
-      - cut by this seat's view edge or under one of this seat's own panels: moved by the smallest shift that shows it whole ("shift");
-      - the words of one page or moment move and shrink TOGETHER (seatGroup: one scale about the event, one shift), and a word the move
-        put on a pin steps off it, off the words up with it and off this seat's panels (groupNudge, "pin");
+   2. A seat shows that picture by these rules only (MAPSFXSEAT2 seatLayout), each logged per seat:
+      - not on this seat's screen (the place, the subject and a rider's way all off its view): nothing (as before);
+      - how big is this seat's: the engine's own size of the word for this seat's window and zoom at step 2 (the table's options and
+        words up; a ranked word's request the larger of the table's and this view's share), then the step's share of it (step 3 x1.4, step 1
+        x0.7, never under the legibility floor) - a seat zoomed closer than the reference never draws a weaker word than before ("size");
+      - where is the table's: each word scaled about its point nearest the thing it letters, so it keeps its side and its gap; when its
+        ink would lie on this seat's panels, a pin, a shared token or a word up with it, or its box out of the view, it moves the least -
+        on its own side first, else on the first side of the table's own order every seat shares, farther away but clean ("shift", "side");
+      - a step-3 word that cannot stand clean at MIN_GAIN x its step-2 size anywhere: the largest clean size not under step 2 ("full");
+        nothing clean at all: the least covered spot at its step's own size ("tight"); bigger than the view: the size that fits ("fit");
+      - a word that rides (a bomb's fall, a car) keeps the table's way, only its size is this seat's ("ride");
       - a place this seat may not see (a player: fog, out of vision, a hidden shooter): unlocated on the screen (as before);
       - this seat's reduced motion and its performance mode (fewer words up) as before: they are this seat's needs, not its view.
       Words on the SCREEN (unlocated: thunder, a sound from a place this seat cannot see) are laid out once in the reference window
-      (SCREEN_ZONES: the shared panel zones every seat keeps them off) and drawn centred in this seat's window; a smaller window
-      shifts them in, then shrinks them, by the same rule. */
+      (SCREEN_ZONES: the shared panel zones every seat keeps them off) and drawn centred in this seat's window, at the size this window
+      gives them at step 2 then the step's share (sfx-table screenCaps), laid out by the same seatLayout off this seat's panels, its pins
+      and the screen words still up on it. */
 
 import * as SZ from "./sfx-size.mjs";
 import * as FIT from "./sfx-fit.mjs";
@@ -72,20 +77,29 @@ export function refView(c, z) {
  * reference zoom, `alive` the table's world words up at its moment (the ledger), `grid`. -> { size (scene px, to play with fit "world"),
  * px (cap height on the reference screen), clamp }.
  */
-export function refSize(sizeFor, o, plan, { z = 1, alive = 0, grid = 100, fit = null, space = "world" } = {}) {
+export function refSize(sizeFor, o, plan, { z = 1, alive = 0, grid = 100, fit = null, space = "world", vw = REF_USABLE_W, vh = REF_VH } = {}) {
   const world = space === "world";
   const info = sizeFor({ space: world ? "world" : "screen", size: o.size, magnitude: o.magnitude, area: world ? areaOf(o.area) : 0, tokenSpan: 0, grid, zoom: world ? z : 1,
-    vw: REF_USABLE_W, vh: REF_VH, scale: o.scale ?? 1, sizeK: plan?.sizeK ?? 1, aspect: plan?.hold?.w ?? 3, fit: fit ?? o.fit ?? "legible", alive: world ? alive : 0, pixel: 0,
+    vw, vh, scale: o.scale ?? 1, sizeK: plan?.sizeK ?? 1, aspect: plan?.hold?.w ?? 3, fit: fit ?? o.fit ?? "legible", alive: world ? alive : 0, pixel: 0,
     ceilK: o.ceil });
   return { size: info.size, px: info.px, clamp: info.clamp, natural: info.natural };
 }
-const areaOf = (a) => (Number.isFinite(a) ? a : a && Number.isFinite(a.radius) ? a.radius : a && Number.isFinite(a.w) ? 0.5 * Math.sqrt(a.w * (a.h ?? a.w)) : 0);
-/** the engine's loudest ceiling for a word on the REFERENCE screen (cap px incl. its mood factor): sfx-size LOUD_K steps under it */
-export function refLoudCap(sizeFor, o, plan, { z = 1, grid = 100, hardHi = 1.15, space = "world" } = {}) {
-  const zz = space === "world" ? z : 1;
-  const q = refSize(sizeFor, { ...o, size: (20 * REF_VH) / zz, scale: 1, magnitude: SZ.LOUD_MAG }, plan, { z: zz, grid, fit: "legible", space });
-  return q.px > 0 ? q.px / hardHi : 0;
+/** MAPSFXSEAT2: a step's share of today's (step 2's) size as drawn, the same ladder on the table's reference view and on every seat:
+    step 3 = STEP_K[3] x today's - no ceiling here: the seat layout (seatLayout) holds it to what this seat's view can show clean -, step 1 =
+    STEP_K[1] x today's but not under the engine's legibility floor (sfx-size smallPx). Before, step 3 was held under the engine's loudest
+    ceiling (sfx-size bigPx): a big blast's main word already stands at it at step 2, so step 3 drew it no bigger (live 2026-11-15: the
+    table's 282.5 -> 284.2), and a seat then fitted both to its view - step 3 smaller than step 2 there. */
+export function stepPx(px2, step, floor = 0) {
+  const s = SZ.stepOf(step);
+  if ( s > SZ.SIZE_DEFAULT ) return px2 * SZ.STEP_K[s];
+  if ( s < SZ.SIZE_DEFAULT && s > 0 ) return SZ.smallPx(px2, s, floor);
+  return px2;
 }
+/** step 3 counts as visibly bigger than step 2 (and step 2 than step 1) from this ratio of the drawn size on; a seat whose view cannot
+    hold a step-3 word that big anywhere clean draws it at the largest clean size not smaller than its step 2 ("full", question
+    MAPSFXSEAT2-1) */
+export const MIN_GAIN = 1.15;
+const areaOf = (a) => (Number.isFinite(a) ? a : a && Number.isFinite(a.radius) ? a.radius : a && Number.isFinite(a.w) ? 0.5 * Math.sqrt(a.w * (a.h ?? a.w)) : 0);
 /**
  * The TABLE size of a map word in scene px (shared; play it with fit "world"): the engine's own model on the reference view at zoom `z`
  * with the table's words up (`alive`), then the group's size step (SFXSIZE, sfx-size steppedPx: at a smaller step under the engine's
@@ -93,23 +107,27 @@ export function refLoudCap(sizeFor, o, plan, { z = 1, grid = 100, hardHi = 1.15,
  * size). `model` = the engine's L.sizeModel. -> { size, px (cap px on the reference screen, mood factor in), clamp } | null (exact or
  * pixel lettering: sized another way).
  */
-export function tableSize(sizeFor, model, o, plan, { z, alive = 0, grid = 100, step = SZ.SIZE_DEFAULT, fitK = 1 } = {}) {
+export function tableSize(sizeFor, model, o, plan, { z, alive = 0, grid = 100, step = SZ.SIZE_DEFAULT, fitK = 1, vw = REF_USABLE_W, vh = REF_VH } = {}) {
   if ( !o || o.fit === "exact" || o.pixel ) return null;
-  const q = refSize(sizeFor, o, plan, { z, alive, grid });
+  const q = refSize(sizeFor, o, plan, { z, alive, grid, vw, vh });
   const sk = plan?.sizeK ?? 1, s = SZ.stepOf(step);
   let px = q.px;
   if ( s !== SZ.SIZE_DEFAULT && s !== 0 ) {
-    const st = SZ.steppedPx(px, s, s > SZ.SIZE_DEFAULT ? { cap: refLoudCap(sizeFor, o, plan, { z, grid, hardHi: model?.hardHi ?? 1.15 }) } : { floor: SZ.floorPx(REF_VH, sk, model) });
+    const st = stepPx(px, s, SZ.floorPx(vh, sk, model ?? FLOOR_MODEL));
     px = s > SZ.SIZE_DEFAULT && Number.isFinite(fitK) && fitK < 1 ? px + (st - px) * Math.max(0, fitK) : st;
   }
-  return { size: px / (sk * z), px, clamp: q.clamp };
+  return { size: px / (sk * z), px, px2: q.px, clamp: q.clamp };
 }
+/** (the engine's legibility floor numbers, for a caller without L.sizeModel: size.mjs SIZE) */
+const FLOOR_MODEL = { floorMin: 15, floorMax: 30, floorVh: 0.026, quietFloorK: 0.8 };
 /** The TABLE size of an unlocated (screen) ranked word, CSS px on the reference window: its rank's share of the reference height,
     stepped (SFXSIZE screenSizeAt, at a bigger step under the engine's loudest ceiling of the reference screen). */
 export function tableScreenSize(sizeFor, model, o, plan, step = SZ.SIZE_DEFAULT) {
   const s = SZ.stepOf(step), sk = plan?.sizeK ?? 1;
   if ( s === SZ.SIZE_DEFAULT || s === 0 ) return o.size;
-  return SZ.screenSizeAt(o.size, s, s > SZ.SIZE_DEFAULT ? refLoudCap(sizeFor, o, plan, { space: "screen", hardHi: model?.hardHi ?? 1.15 }) : 0, sk);
+  // (MAPSFXSEAT2: the same ladder as a world word - the seat layout holds it to the window; before, step 3 stood under the loudest
+  // ceiling, which a long thunder word already reaches at step 2: live, step 3's KRA-KA-GRRRRRAWOOM!! drew smaller than step 2's)
+  return stepPx(o.size * sk, s, s < SZ.SIZE_DEFAULT ? SZ.floorPx(REF_VH, sk, model ?? FLOOR_MODEL) : 0) / sk;
 }
 
 /* ---------------------------------------------------------------- the ledger: what the table picture holds */
@@ -165,69 +183,163 @@ export function seatFit({ box, reach = null, view, panels = [], zoom = 1, cap = 
   return { rule: rules.length ? rules.at(-1) : "ok", rules, k, dx: d.dx, dy: d.dy };
 }
 /**
- * THE SEAT RULE FOR A GROUP: the words of one page or one moment are one picture (placed off each other, beside what they letter, off
- * the shared pins): a seat that must move or shrink them moves and shrinks them TOGETHER - one scale about the event's anchor, one
- * shift - so no word lands on another or loses its place in the story. items: [{ box, reach, cap }] (world units, this seat's scale
- * applied); anchor { x, y } (the event); subject: the event's box. -> { rule, rules, k, dx, dy, ax, ay } (apply with groupAt / groupBox).
- * Live (two seats, 2026-11-15): moved word by word, the player's FHWOOOOMMFF! was shifted onto the main word.
+ * MAPSFXSEAT2, THE SEAT LAYOUT: how THIS seat draws the words of one page / moment of the table picture (pure). The table picture says
+ * which words, when, and where each stands against the thing it letters (its side, its gap); THIS seat says how big - the size its own
+ * screen gives the word (`sizes`: the engine's own size for this seat's window and zoom at step 2, then the step's share of it), so a seat
+ * zoomed closer than the reference view never draws a weaker word than it drew before the table picture, and step 3 stays bigger than 2
+ * and 2 than 1 as drawn on every seat. Live (2026-11-15, MAPSFXSEAT) the whole page was scaled down as one group to fit a closer seat's
+ * view (k 0.6 GM, 0.4 player: the blast word 203 -> 159 GM, 120 -> 111 player as drawn), the more at step 3 (bigger words, more to shrink:
+ * smaller than step 2), and the group's shift put the main word on the bomb's pin.
+ *
+ * Each word, in `prio` order (the main word first): scaled about its PIVOT - the point of its table box nearest to its subject's centre
+ * (beside the thing: its near edge; over it: the thing's own point) - to its first size, so it keeps its side of the thing and its gap;
+ * kept there when it is clean: whole inside this seat's view (less `edge`), off this seat's panels, the pins, the tokens every seat counts,
+ * the words of the same picture up at the same time (`life`), and off its own subject beyond `cover`. Else moved: the smallest shift
+ * that makes it clean - away from the thing and along it first, on its own side; another side only when its own side has no room (owner's
+ * ruling for plus-ultra's map block: a seat that cannot show it clean may show it farther away, but clean). No clean spot at that size: the
+ * next of its `sizes` (never under `min`); none at all: at `min` where it covers least ("tight"). A word bigger than the view is made to
+ * fit it ("fit"). A word that rides (`ride`) keeps its table way. A word whose place and subject are both off this view: "off".
+ *
+ * items: [{ key, prio, box (table box, world units), sub (subject box | null), sizes: [cap, ...] (world units, preferred first), u (the table
+ *          box's cap), min (cap), full (cap), small (cap), life: [t0, t1] | null, ride, cover, ink: [kx, ky] (its ink's share of its box) }]
+ * -> Map(key -> { cap, k (cap / u), px, py (pivot), f, dx, dy, box, rules, clean, side })   map a table point q: px + (q.x - px) * f + dx
  */
-export function seatGroup({ items, anchor = null, view, panels = [], zoom = 1, read = READ_PX, edge = SEAT_EDGE, subject = null }) {
-  const its = (items ?? []).filter((q) => q?.box);
-  if ( !view || !its.length ) return { rule: "ok", rules: [], k: 1, dx: 0, dy: 0, ax: 0, ay: 0 };
-  const U = (bs) => bs.reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }));
-  const R = U(its.map((q) => q.reach ?? q.box));
-  const ax = Number.isFinite(anchor?.x) ? anchor.x : (R.x0 + R.x1) / 2, ay = Number.isFinite(anchor?.y) ? anchor.y : (R.y0 + R.y1) / 2;
-  if ( inter(R, view) <= 0 && !(subject && inter(subject, view) > 0) ) return { rule: "off", rules: ["off"], k: 1, dx: 0, dy: 0, ax, ay };
-  const rules = [];
-  let k = 1;
-  // (the group's smallest word under the readable floor at this zoom: the whole group grows to it)
-  const caps = its.map((q) => q.cap).filter((c) => c > 0), cmin = caps.length ? Math.min(...caps) : 0;
-  if ( cmin > 0 && cmin * zoom < read ) { k = read / (cmin * zoom); rules.push("read"); }
-  const m = edge / Math.max(1e-4, zoom);
-  const v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
-  const sc = (b, f) => ({ x0: ax + (b.x0 - ax) * f, y0: ay + (b.y0 - ay) * f, x1: ax + (b.x1 - ax) * f, y1: ay + (b.y1 - ay) * f });
-  let r = sc(R, k);
-  // (the group's whole reach bigger than this seat's view: all smaller together, to fit)
-  const kv = Math.min(1, (v.x1 - v.x0) / Math.max(1e-6, r.x1 - r.x0), (v.y1 - v.y0) / Math.max(1e-6, r.y1 - r.y0));
-  if ( kv < 1 - 1e-6 ) { k *= kv; r = sc(R, k); rules.push("fit"); }
-  const covered = (f, d) => its.reduce((s, q) => { const b = sc(q.box, f); const m2 = { x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy }; return s + panels.reduce((t, p) => t + inter(m2, p), 0); }, 0);
-  let d = shiftClear(r, its.map((q) => sc(q.box, k)), panels, v), c = covered(k, d);
-  // (no shift clears this seat's panels: the group a little smaller, a few steps, never under the readable floor - live, a player's
-  // main word stood on the macro bar)
-  for ( let i = 0, f = k; c > 1e-6 && i < 5; i++ ) {
-    f *= 0.9;
-    if ( cmin > 0 && cmin * f * zoom < read ) break;
-    const d2 = shiftClear(sc(R, f), its.map((q) => sc(q.box, f)), panels, v), c2 = covered(f, d2);
-    if ( c2 < c - 1e-6 ) { k = f; d = d2; c = c2; if ( !rules.includes("fit") ) rules.push("fit"); }
-  }
-  if ( Math.abs(d.dx) > 1e-6 || Math.abs(d.dy) > 1e-6 ) rules.push("shift");
-  return { rule: rules.length ? rules.at(-1) : "ok", rules, k, dx: d.dx, dy: d.dy, ax, ay };
-}
-/** after the group's move, a word that now stands on a pin (the move pulls the words toward the event, where its pins are) steps off it
-    by the smallest shift that keeps it in the view: [{ dx, dy }] per box (boxes as this seat draws them, world units) */
-export function groupNudge(boxes, pins, view, zoom = 1, edge = SEAT_EDGE, lives = null, panels = []) {
-  const out = boxes.map(() => ({ dx: 0, dy: 0 }));
-  if ( !view || !pins?.length ) return out;
+export function seatLayout(items, { view, panels = [], pins = [], tokens = [], zoom = 1, edge = SEAT_EDGE } = {}) {
+  const out = new Map();
+  if ( !view ) { for ( const it of items ?? [] ) out.set(it.key, { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }); return out; }
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
+  const vw = Math.max(1, v.x1 - v.x0), vh = Math.max(1, v.y1 - v.y0);
+  const placed = [];
+  const meet = (a, b) => !a || !b || (a[0] < b[1] && b[0] < a[1]);
   const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
-  // (the words up at the same time are obstacles too - lives [t0, t1] per box; without them every word of the group: a word stepped off
-  // a pin must not step onto another word)
-  const meet = (i, j) => !lives || (lives[i][0] < lives[j][1] && lives[j][0] < lives[i][1]);
-  boxes.forEach((b, i) => {
-    if ( !pins.some((p) => inter(b, p) > 0) ) return;
-    const others = boxes.map((q, j) => (j !== i && meet(i, j) ? mv(q, out[j]) : null)).filter(Boolean);
-    // (and this seat's panels: live, the main word stepped off the pin onto the challenges' panel)
-    const obs = [...pins, ...others, ...(panels ?? [])];
-    const d = shiftClear(b, b, obs, v), nb = mv(b, d);
-    const cost = (q) => obs.reduce((s, p) => s + inter(q, p), 0);
-    if ( cost(nb) < cost(b) - 1e-6 ) out[i] = d;
-  });
+  const into = (lo, hi, a, z) => (hi - lo > z - a ? (a + z) / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > z ? z - hi : 0);
+  const inView = (b) => b.x0 >= v.x0 - 1e-6 && b.x1 <= v.x1 + 1e-6 && b.y0 >= v.y0 - 1e-6 && b.y1 <= v.y1 + 1e-6;
+  for ( const it of (items ?? []).slice().sort((a, b) => (a.prio ?? 9) - (b.prio ?? 9)) ) {
+    const B = it.box, u = it.u > 0 ? it.u : 1, sub = it.sub ?? null;
+    const sc = sub ? { x: (sub.x0 + sub.x1) / 2, y: (sub.y0 + sub.y1) / 2 } : { x: (B.x0 + B.x1) / 2, y: (B.y0 + B.y1) / 2 };
+    const p = { x: clamp(sc.x, B.x0, B.x1), y: clamp(sc.y, B.y0, B.y1) };
+    const at = (f) => ({ x0: p.x + (B.x0 - p.x) * f, y0: p.y + (B.y0 - p.y) * f, x1: p.x + (B.x1 - p.x) * f, y1: p.y + (B.y1 - p.y) * f });
+    // (off this view: its place and its subject both)
+    if ( inter(B, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && (it.path ?? []).some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); continue; }
+    const rules = [];
+    // (its sizes, the first that fits the view whole; a word bigger than the view: the size that fits)
+    const fitCap = (B.x1 - B.x0) > 0 && (B.y1 - B.y0) > 0 ? u * Math.min(vw / (B.x1 - B.x0), vh / (B.y1 - B.y0)) : Infinity;
+    let sizes = (it.sizes?.length ? it.sizes : [u]).filter((c) => c > 0);
+    const min = Math.min(it.min > 0 ? it.min : sizes.at(-1), sizes.at(-1));
+    // (no clean spot at any of its sizes on this view: smaller - the largest size that stands clean, never under `small` (this seat's
+    // step-1 size: the legibility floor's side of it) - rule "small", question MAPSFXSEAT2-1: clean before as big as before)
+    const small = it.small > 0 ? Math.min(it.small, min) : min;
+    for ( let c = min * 0.95; c > small * 1.0001; c *= 0.95 ) sizes.push(c);
+    if ( small < min - 1e-9 ) sizes.push(small);
+    if ( sizes.every((c) => c > fitCap) ) { sizes = [fitCap]; rules.push("fit"); } else sizes = sizes.filter((c) => c <= fitCap + 1e-9);
+    // (a word that rides keeps its table way: only its size is this seat's)
+    if ( it.ride ) { const f = sizes[0] / u; out.set(it.key, { cap: sizes[0], k: f, f, px: p.x, py: p.y, dx: 0, dy: 0, box: at(f), rules: [...rules, "ride"], rule: "ride", clean: true }); continue; }
+    // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
+    // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
+    const hard = [...pins, ...tokens], soft = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)], obs = [...hard, ...soft];
+    // (its own subject: covered no more than its kind allows, or than the table picture itself covers it - the table's placement weighs
+    // that share, it does not forbid it: a big blast's word stands over the top of its crater on the table)
+    const hw0 = sub ? (sub.x1 - sub.x0) / 2 : 0, hh0 = sub ? (sub.y1 - sub.y0) / 2 : 0;
+    const cover = sub ? Math.max(it.cover ?? 0.3, inter(B, sub) / Math.max(1, area(sub))) + 0.02 : 0;
+    // (what may not be covered is the word's INK - its hold picture with the rim under it (`ink`: shares of its box) -, not the room its
+    // box keeps for the entrance and the outline: the box stays whole inside the view)
+    const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
+    const inkOf = (b) => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw = ((b.x1 - b.x0) * kx) / 2, hh = ((b.y1 - b.y0) * ky) / 2; return { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }; };
+    const hardHits = (b) => { const k = inkOf(b); return hard.reduce((s, o) => s + inter(k, o), 0); };
+    const hits = (b) => { const k = inkOf(b); return obs.reduce((s, o) => s + inter(k, o), 0) + (sub ? Math.max(0, inter(k, sub) - cover * area(sub)) : 0); };
+    // (nothing clean at any size: the least covered spot, at a size that still keeps its step - a step-3 word not under `full`)
+    const fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
+    const offView = (b) => area(b) - inter(b, v);
+    // (its side of the thing: which way the table put it from the subject's centre - kept on every seat)
+    // (its side of the thing: the way the table put it from the subject's centre, along the axis it stands out most - above, below, left,
+    // right; kept on every seat, left only where this seat has no clean spot on it)
+    const sideOf = (b) => {
+      const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw0 + (b.x1 - b.x0) / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh0 + (b.y1 - b.y0) / 2);
+      if ( Math.max(Math.abs(ox), Math.abs(oy)) < 0.15 ) return null;
+      return Math.abs(ox) > Math.abs(oy) ? { x: Math.sign(ox), y: 0 } : { x: 0, y: Math.sign(oy) };
+    };
+    const side0 = sideOf(B), side = side0 ?? { x: 0, y: 0 };
+    const flips = (b) => { if ( !side0 ) return 0; const s2 = sideOf(b); return !s2 || s2.x !== side0.x || s2.y !== side0.y ? 1 : 0; };
+    // (the table's side order round the subject, and which of its sides a box stands on)
+    const around = it.around?.length ? it.around : AROUND, touch = Number.isFinite(it.touch) ? it.touch : 0.18;
+    const hw = sub ? (sub.x1 - sub.x0) / 2 : 0, hh = sub ? (sub.y1 - sub.y0) / 2 : 0;
+    const rankOf = (b, bw, bh) => {
+      const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw + bw / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh + bh / 2);
+      let k = around.length, dk = Infinity;
+      around.forEach(([ax2, ay2], i) => { const dd = Math.hypot(ox - ax2, oy - ay2); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } });
+      return k;
+    };
+    let best = null, fallback = null, flipSmall = null;
+    for ( const cap of sizes ) {
+      const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
+      const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
+      const clampD = (d) => { const q = mv(b0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
+      // candidate shifts: none / into the view; just past every obstacle it meets (two rounds, so a word between two obstacles finds the
+      // gap); away from the thing and along it on its own side
+      const cands = [d0], seen = new Set();
+      const add = (d) => { const c = clampD(d), k = `${Math.round(c.dx)}|${Math.round(c.dy)}`; if ( !seen.has(k) ) { seen.add(k); cands.push(c); } };
+      const ax = side.x || (side.y ? 0 : 1), ay = side.y || (side.x ? 0 : -1);
+      for ( const s of [0.25, 0.5, 1, 1.5, 2.5] ) { add({ dx: d0.dx + ax * s * bh, dy: d0.dy + ay * s * bh }); add({ dx: d0.dx + s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx - s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx, dy: d0.dy + s * bh }); add({ dx: d0.dx, dy: d0.dy - s * bh }); }
+      // (beside its subject on each side of the table's own order `around`, touching it as the table places - and a step farther out:
+      // a seat that must leave the table's side takes the first side of that SHARED order it can show clean, so two seats that both
+      // must leave it agree)
+      if ( sub ) for ( const [ox, oy] of around ) for ( const g of [0, 0.5] ) {
+        const tx = sc.x + ox * (hw + bw / 2 - touch * bh + g * bh), ty = sc.y + oy * (hh + bh / 2 - touch * bh + g * bh);
+        add({ dx: tx - (b0.x0 + b0.x1) / 2, dy: ty - (b0.y0 + b0.y1) / 2 });
+      }
+      for ( let round = 0; round < 2; round++ ) {
+        for ( const d of cands.slice() ) {
+          const q = inkOf(mv(b0, d));
+          for ( const o of obs ) {
+            if ( inter(q, o) <= 0 ) continue;
+            add({ dx: d.dx + o.x0 - q.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - q.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - q.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - q.y0 + 1 });
+          }
+          if ( cands.length > 400 ) break;
+        }
+      }
+      for ( const d of cands ) {
+        const q = mv(b0, d), h = hits(q), hh2 = hardHits(q), off = offView(q), dist = Math.hypot(d.dx, d.dy) / Math.max(1, bh), fl = flips(q);
+        // (clean: whole in the view, off every pin and token, and at most SOFT_OK of its ink under this seat's panels / words up with it -
+        // an edge of a word under a panel is read, a word made smaller is weaker: question MAPSFXSEAT2-1)
+        const ia = area(inkOf(q)), soft = h - hh2;
+        const clean = hh2 <= 1e-6 && off <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
+        // (clean first; on its own side; off it, the earliest side of the shared order; then the nearest, the least covered)
+        const score = (fl ? 6 + 2 * rankOf(q, bw, bh) + dist : dist) + (soft / Math.max(1, ia)) * 40;
+        // (made smaller for want of room: on its own side while it can - the seats that must shrink it keep one picture -, another side
+        // only when its own has no clean spot down to `small`)
+        if ( clean && fl && cap < min - 1e-9 ) { if ( !flipSmall || (flipSmall.cap === cap && score < flipSmall.score - 1e-9) ) flipSmall = { cap, f, d, q, score, fl }; continue; }
+        if ( clean ) { if ( !best || score < best.score - 1e-9 ) best = { cap, f, d, q, score, fl, soft }; continue; }
+        // (nothing clean at any size: the least covered at a size not under `min`)
+        if ( cap < fmin - 1e-9 ) continue;
+        // (off pins and tokens first, then on its own side, then the least covered and the least cut by the view edge)
+        const fs = ((h + hh2 * 1000 + off * 4) / Math.max(1, area(q))) * 100 + fl * 20 + score;
+        if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs };
+      }
+      if ( best ) break;
+    }
+    best ??= flipSmall;
+    const pick = best ?? fallback ?? { cap: sizes[0], f: sizes[0] / u, d: { dx: 0, dy: 0 }, q: at(sizes[0] / u) };
+    if ( Math.abs(pick.f - 1) > 1e-6 && !rules.includes("fit") ) rules.push("size");
+    if ( Math.abs(pick.d.dx) > 1e-6 || Math.abs(pick.d.dy) > 1e-6 ) rules.push("shift");
+    if ( best && best.fl ) rules.push("side");
+    if ( !best ) rules.push("tight");
+    if ( best && it.full > 0 && best.cap < it.full - 1e-9 && best.cap >= min - 1e-9 ) rules.push("full");
+    if ( best && best.cap < min - 1e-9 ) rules.push("small");
+    if ( best?.soft > 1e-6 ) rules.push("edge");
+    const r = { cap: pick.cap, k: pick.f, f: pick.f, px: p.x, py: p.y, dx: pick.d.dx, dy: pick.d.dy, box: pick.q, rules, rule: rules.at(-1) ?? "ok", clean: !!best && !(best.soft > 1e-6), ok: !!best };
+    out.set(it.key, r);
+    placed.push({ box: inkOf(pick.q), life: it.life ?? null });
+  }
   return out;
 }
-/** a point of the group's table picture as this seat draws it (seatGroup) */
-export const groupAt = (p, g) => ({ ...p, x: g.ax + (p.x - g.ax) * g.k + g.dx, y: g.ay + (p.y - g.ay) * g.k + g.dy });
-/** a box of the group's table picture as this seat draws it */
-export const groupBox = (b, g) => ({ x0: g.ax + (b.x0 - g.ax) * g.k + g.dx, y0: g.ay + (b.y0 - g.ay) * g.k + g.dy, x1: g.ax + (b.x1 - g.ax) * g.k + g.dx, y1: g.ay + (b.y1 - g.ay) * g.k + g.dy });
+/** the share of a word's ink a seat lets lie under its own panels / the words up with it (its edge) before it moves farther or is made
+    smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size
+    between the challenges panel, the scene bar, the hotbar and the bomb's pin) */
+export const SOFT_OK = 0.06;
+/** the table's side order round a word's subject when the item names none (sfx-core AROUND: above, above beside, beside, below) */
+const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
+/** a point of the table picture as this seat draws it (seatLayout's entry `L`) */
+export const layoutAt = (q, L) => (L ? { ...q, x: L.px + (q.x - L.px) * L.f + L.dx, y: L.py + (q.y - L.py) * L.f + L.dy } : q);
 
 /** the smallest shift that brings reach `r` inside `v` and the box `b` (or every box of a group) off every panel (inside the view
     first; panels as far as they let it stay inside the view; nothing clean: the least covered) */

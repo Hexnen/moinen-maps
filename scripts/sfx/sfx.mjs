@@ -13,9 +13,11 @@
    zoom, tokens whose documents are not hidden, pins every player may see, the table's own word ledger, the shared clock), sized by the
    engine's size model on that reference view (world size, the same everywhere), measured by the engine itself (L.measure: hold box +
    reach in cap heights), beside what it letters, off tokens, pins and other words; played at the shared instant (startAt: a late seat
-   joins mid-life). Then the seat rule (sfx-seat.mjs seatFit: off / read / fit / shift, only where this seat needs it) and the seat's
-   own needs (scale setting, reduced motion, perf caps, "big only", what it may see). An unlocated word - thunder - is laid out once in
-   the reference window, then centred into this window off its panels. api.sfx.log() lists every call with its seat rule.
+   joins mid-life). Then the seat rule (MAPSFXSEAT2, sfx-seat.mjs seatLayout: the size this seat's window and zoom give the word at
+   step 2, then the step's share; the table's side of the thing, moved the least to stand clean - farther away but clean) and the
+   seat's own needs (scale setting, reduced motion, perf caps, "big only", what it may see). An unlocated word - thunder - is laid out
+   once in the reference window, then centred into this window and laid out the same way. api.sfx.log() lists every call with its
+   seat rule.
    Settings: "sfxLetters" (client: all / big only / off), "sfxLettersWorld" (the GM's switch for everyone), "sfxWords" (client: the
    word set, auto = the game's language), "sfxLayer"; SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (world, the
    GM's for the table, live: 0 none, 1 smaller, 2 today's size, 3 bigger; sfx-size.mjs; a player sees them read-only under
@@ -89,6 +91,7 @@ let farCount = { key: "", k: 0, n: 0, list: new Map() };
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
 const ledger = SEAT.makeLedger();
 let seatLog = [];
+let screenUp = [];              // MAPSFXSEAT2: this seat's unlocated words still up ({ box (CSS px), life [t0, t1] shared ms }): a new one keeps off them
 const holdMemo = new Map();     // word + look -> the engine's hold box (a page plans many words in one frame)
 const pageWaits = new Map();    // firing id -> the shared moment its page stops waiting for its strokes
 const PAGE_WAIT_MS = 4000;      // a page waits this long (shared ms after its firing's moment) for all its fire-layer strokes
@@ -445,10 +448,9 @@ function groundAt(rec) {
 function tablePage(p) {
   if ( p.table || !L ) return p.table ?? null;
   p.table = T.planPage(p, tdeps());
-  // (the page's located words are one picture: a seat moves and scales them together - seatGroup)
-  const at = Array.isArray(p.rec?.at) ? { x: Number(p.rec.at[0]), y: Number(p.rec.at[1]) } : null, r = grid();
-  p.group = { words: [...(p.table?.values() ?? [])].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y)), anchor: at,
-    subject: at && Number.isFinite(at.x) ? { x0: at.x - r, y0: at.y - r, x1: at.x + r, y1: at.y + r } : null };
+  // (the page's located words are one picture: a seat lays them out together - sfx-seat seatLayout: each keeps its side of what it letters,
+  // none onto another)
+  p.group = { words: [...(p.table?.values() ?? [])].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y)) };
   for ( const q of p.group.words ) q.group = p.group;
   return p.table;
 }
@@ -500,6 +502,7 @@ function playScreen(spec, fixed = null) {
   if ( !engineSizeFor ) return;
   // (a ranked word: its rank's share of the reference height, at the group's size step - at a bigger step under the engine's ceiling for
   // its loudest word on the reference screen; another word: the engine's own size on the reference screen at the step)
+  const o0 = { ...o };
   if ( Number.isFinite(spec.rank) ) o.size = SEAT.tableScreenSize(engineSizeFor, L.sizeModel, { ...o, size: EV.rankSize(spec.rank, SEAT.REF_VH, spec.shrink ?? 1) }, plan, step);
   else { const so = SZ.sizeOpts(o, step); o.size = SEAT.refSize(engineSizeFor, so, plan, { space: "screen" }).size; }
   o.fit = "screen"; delete o.scale;
@@ -509,13 +512,22 @@ function playScreen(spec, fixed = null) {
   const g0 = gen, go = () => {
     if ( g0 !== gen || !L || mode() === "off" || stepFor(grp) === 0 ) return;
     if ( lifeOver(spec) ) { stats.late++; return; }
-    // (this seat: the reference window centred in its own, then the seat rule: shifted off its panels and pins, smaller only to fit)
+    // (MAPSFXSEAT2, this seat: the reference window centred in its own; its size the one THIS window gives it at step 2 - as before the
+    // table picture - then the step's share; laid out off its panels, its pins and the unlocated words still up here, scaled about its
+    // centre and moved the least, smaller only to fit this window)
     uiBoxes();
-    const ss = SEAT.seatScreen(ref, { W: innerWidth, H: innerHeight, panels: [...(uiCache.rects ?? []), ...pinRects()], scale: L.prefs?.scale ?? 1 }), f = ss.fit;
-    const oo = { ...o, at: ss.at, size: o.size * ss.k, startAt: spec.t, reduced: reducedMotion() };
+    const sc = L.prefs?.scale ?? 1, W = innerWidth, H = innerHeight, off = SEAT.screenOffset(W, H), sv = seatView(1, sc);
+    const caps = T.screenCaps(engineSizeFor, L.sizeModel, o0, plan, { rank: Number.isFinite(spec.rank) ? spec.rank : null, shrink: spec.shrink ?? 1, step: stepFor(grp), vw: sv.vw, vh: sv.vh, scale: sc });
+    const box = { x0: ref.box.x0 + off.x, y0: ref.box.y0 + off.y, x1: ref.box.x1 + off.x, y1: ref.box.y1 + off.y }, now = sharedNow();
+    screenUp = screenUp.filter((q) => q.life[1] > now);
+    const life = [spec.ts ?? toShared(spec.t), (spec.ts ?? toShared(spec.t)) + lifeMs(spec)];
+    const item = { key: "s", prio: 0, box, u: ref.cap, sub: null, sizes: caps?.sizes ?? [ref.cap * sc], min: caps?.min ?? ref.cap * sc, full: caps?.full ?? 0, small: caps?.small ?? 0, life };
+    const f = SEAT.seatLayout([item], { view: { x0: 0, y0: 0, x1: W, y1: H }, panels: [...(uiCache.rects ?? []), ...screenUp.filter((q) => q.life[0] < life[1]).map((q) => q.box)], pins: pinRects(), zoom: 1 }).get("s");
+    const at = SEAT.layoutAt({ x: ref.x + off.x, y: ref.y + off.y }, f);
+    const oo = { ...o, at, size: f.cap / ((plan?.sizeK ?? 1) * sc), startAt: spec.t, reduced: reducedMotion() };
     try {
       const h = L.play(spec.text, oo);
-      if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; logCall(spec, { o: oo, fit: f, table: { size: o.size, at: { x: ref.x, y: ref.y } }, space: "screen" }); }
+      if ( h ) { stats.words++; stats.unlocated = (stats.unlocated ?? 0) + 1; screenUp.push({ box: f.box, life }); logCall(spec, { o: oo, fit: { ...f, k: oo.size / o.size }, box: f.box, table: { size: o.size, at: { x: ref.x, y: ref.y } }, space: "screen" }); }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); }
   };
   const wait = spec.t - performance.now();
@@ -800,10 +812,9 @@ function flushMoment(due) {
     const secs = mine.filter((w) => w.role === "sec").sort((a, b) => a.t - b.t).slice(0, caps.sec);
     mine = C.capWords([...mine.filter((w) => w.role !== "sec"), ...secs], caps.alive - alive.size);
     for ( const w of placed ) if ( !mine.includes(w) ) seatSkip(w, big ? "big" : "perf");
-    // (the moment's located words are one picture: a seat moves and scales them together - seatGroup; the table's whole group, not
+    // (the moment's located words are one picture: a seat lays them out together - sfx-seat seatLayout; the table's whole group, not
     // this seat's filtered share, so every seat applies its rule to the same picture)
-    const grp = { words: placed.filter((w) => !w.stream && Number.isFinite(w.x) && Number.isFinite(w.y)), anchor: Number.isFinite(g?.x) ? { x: g.x, y: g.y } : null };
-    grp.subject = grp.anchor ? { x0: grp.anchor.x - (g.span ?? grid()), y0: grp.anchor.y - (g.span ?? grid()), x1: grp.anchor.x + (g.span ?? grid()), y1: grp.anchor.y + (g.span ?? grid()) } : null;
+    const grp = { words: placed.filter((w) => !w.stream && Number.isFinite(w.x) && Number.isFinite(w.y)) };
     for ( const w of grp.words ) w.group = grp;
     for ( const w of mine ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     trimPlaced();
@@ -826,64 +837,53 @@ const { lifeMs, lifeBox, moveBox, unionBox, scaleBox } = T;
 const lifeOver = (w) => performance.now() > w.t + lifeMs(w) - 250;
 
 /**
- * MAPSFXSEAT, THE SEAT RULE: how THIS seat draws a word of the table picture (sfx-seat seatFit), and nothing else changes - its text,
- * its seed, its instant and its table place and size are the table's. Only: off this seat's view (place and reach): not drawn; under the
- * readable floor at this zoom: drawn at it; its whole reach bigger than this view: smaller to fit; cut by the view's edge or under this
- * seat's own panels: the smallest shift that shows it whole. This seat's own lettering size setting (the engine's) scales it first, and
- * its reduced motion changes how it moves - both this seat's needs. -> { o (the play options), fit, box (this seat's box) } | null (off).
+ * MAPSFXSEAT2, THE SEAT RULE: how THIS seat draws a word of the table picture. Its text, seed, instant, and where it stands against the
+ * thing it letters are the table's; how big is this seat's - the size its own window and zoom give the word at step 2 (the engine's own
+ * size model with the table's options and words up), then the step's share - so no seat draws a weaker word than it drew before the table
+ * picture and step 3 > 2 > 1 as drawn here. The words of a page / moment are laid out together (sfx-seat seatLayout): each scaled about its
+ * point nearest the thing, kept there when clean (whole in the view, off this seat's panels, the pins, the shared tokens, the words up with
+ * it), else moved the least - on its own side first, farther away but clean. This seat's own size setting (the engine's) is in its size,
+ * its reduced motion changes how it moves. -> { o (the play options), fit, box (this seat's box), table } (o null: off).
  */
 function seatCall(w) {
-  const { o, at, u, box, reach } = wordGeom(w);
-  const vw = view(), ui = uiBoxes(), zoom = canvas.stage?.scale?.x || 1;
-  // (a word of a page or a moment: the group's one seat rule - all its words moved and scaled together, so they keep off each other and
-  // their places in the story; a word on its own: its own)
-  const f = w.group ? groupFit(w.group, vw, ui, zoom) : SEAT.seatFit({ box, reach, view: vw, panels: ui, zoom, cap: u, subject: w.subject ?? null });
-  if ( f.rule === "off" ) return { o: null, fit: f, box };
-  const g = w.group ? f : { k: f.k, dx: f.dx, dy: f.dy, ax: (box.x0 + box.x1) / 2, ay: (box.y0 + box.y1) / 2 };
-  // (a group word the move put on one of this seat's pins: stepped off it)
-  const nd = (w.group && f.nudge?.get(w)) || { dx: 0, dy: 0 };
-  const sh = (q) => { const p = SEAT.groupAt(q, g); return { ...p, x: p.x + nd.dx, y: p.y + nd.dy }; };
+  const o = optsOf(w), at = o.at ?? { x: w.x, y: w.y };
+  const vw = view(), zoom = canvas.stage?.scale?.x || 1, sc = L.prefs?.scale ?? 1;
+  w.group ??= { words: [w] };
+  const lay = groupLayout(w.group, vw, zoom, sc), f = lay?.get(w.key ?? `${w.seed}|${w.role}`);
+  if ( !f ) return { o: { ...o, startAt: w.t, reduced: reducedMotion() }, fit: { rule: "ok", rules: [], k: 1 }, box: w.box, table: { size: o.size, at } };
+  if ( f.rule === "off" ) return { o: null, fit: f, box: f.box };
+  const sh = (q) => SEAT.layoutAt(q, f);
   const oo = { ...o, at: sh(at), startAt: w.t, reduced: reducedMotion() };
-  if ( f.k !== 1 && Number.isFinite(o.size) ) oo.size = o.size * f.k;
-  if ( o.path?.points ) oo.path = { ...o.path, points: o.path.points.map(sh) };
+  // (the size this seat draws: its cap over the table's, this seat's own size setting counted once - the engine applies it itself)
+  if ( Number.isFinite(o.size) && w.size > 0 ) oo.size = (o.size * f.cap) / (w.size * sc);
+  if ( o.path?.points && !f.rules.includes("ride") ) oo.path = { ...o.path, points: o.path.points.map(sh) };
   else if ( o.path?.from ) oo.path = { ...o.path, from: sh(o.path.from), to: sh(o.path.to) };
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
-  return { o: oo, fit: f, box: moveBox(SEAT.groupBox(box, g), nd.dx, nd.dy), table: { size: o.size, at } };
+  return { o: oo, fit: { ...f, k: oo.size && o.size ? oo.size / o.size : 1 }, box: f.box, table: { size: o.size, at } };
 }
-/** a table word's play options and its box and reach on this seat (world units, this seat's engine scale applied) */
-function wordGeom(w) {
-  const o = optsOf(w), at = o.at ?? { x: w.x, y: w.y };
-  const sc = L.prefs?.scale ?? 1, u = (w.size ?? 0) * sc;
-  const box = scaleBox(w.box ?? C.boxOf(w, at.x, at.y), sc, at.x, at.y);
-  let reach = w.reachU ? unionBox(box, { x0: at.x - w.reachU.l * u, y0: at.y - w.reachU.u * u, x1: at.x + w.reachU.r * u, y1: at.y + w.reachU.d * u }) : scaleBox(box, w.rk ?? 1, at.x, at.y);
-  // (a word that rides: its whole way is its reach - the seat moves the whole way at once)
-  const pts = o.path?.points ?? (o.path?.from ? [o.path.from, o.path.to] : null);
-  if ( pts ) for ( const q of pts ) reach = unionBox(reach, moveBox(reach, q.x - at.x, q.y - at.y));
-  return { o, at, u, box, reach };
+/** this seat's window for the size model (the engine's own: the usable width leaves an open sidebar out) */
+function seatView(zoom, sc) {
+  const sb = document.getElementById("sidebar")?.getBoundingClientRect?.();
+  return { vw: Math.max(320, innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0)), vh: innerHeight, zoom, scale: sc };
 }
-/** the seat rule of a group (a page's or a moment's located words), once per view of this seat: the same move for every word of it */
-function groupFit(grp, vw, ui, zoom) {
-  const key = vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${L.prefs?.scale ?? 1}` : "";
+/** the seat layout of a group (a page's or a moment's located words; a word on its own is a group of one), once per view of this seat */
+function groupLayout(grp, vw, zoom, sc) {
+  const ui = uiBoxes();
+  const key = vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${sc}|${innerWidth}x${innerHeight}` : "";
   if ( grp.seat && grp.seatKey === key ) return grp.seat;
-  const items = [], ws = [];
-  for ( const q of grp.words ) { try { const gq = wordGeom(q); items.push({ box: gq.box, reach: gq.reach, cap: gq.u }); ws.push(q); } catch {} }
   grp.seatKey = key;
-  const f = SEAT.seatGroup({ items, anchor: grp.anchor, view: vw, panels: ui, zoom, subject: grp.subject ?? null });
-  // (the move pulls the words toward the event, where its pins stand: a word it put on a pin steps off it - only when the group moved)
-  if ( f.rule !== "ok" && f.rule !== "off" && vw ) {
-    const nds = SEAT.groupNudge(items.map((q) => SEAT.groupBox(q.box, f)), pinBoxes(vw), vw, zoom, undefined, ws.map((q) => [q.t, q.t + lifeMs(q)]), ui);
-    f.nudge = new Map(); nds.forEach((d, i) => { if ( d.dx || d.dy ) f.nudge.set(ws[i], d); });
-    if ( f.nudge.size ) f.rules = [...f.rules, "pin"];
-  }
-  return (grp.seat = f);
+  const d = tdeps(), items = T.seatItems(grp.words, d, seatView(zoom, sc));
+  const pins = [...sharedPins(vw), ...pinBoxes(vw)];
+  return (grp.seat = SEAT.seatLayout(items, { view: vw, panels: ui, pins, tokens: sharedTokens(vw), zoom }));
 }
 /** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
 function logCall(w, call) {
   const r = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : v ?? null), P = (q) => (q ? { x: r(q.x), y: r(q.y) } : null);
   seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, space: call.space ?? "world", seed: w.seed,
     ts: Math.round(w.ts ?? toShared(w.t)), size: r(call.table?.size), at: P(call.table?.at), drawn: r(call.o?.size), seatAt: P(call.o?.at),
-    rule: call.fit?.rule ?? "ok", rules: call.fit?.rules ?? [], k: r(call.fit?.k ?? 1), played: Math.round(toShared(performance.now())) });
+    rule: call.fit?.rule ?? "ok", rules: call.fit?.rules ?? [], k: r(call.fit?.k ?? 1), cap: r(call.fit?.cap), clean: call.fit?.clean ?? null,
+    box: call.box ? [r(call.box.x0), r(call.box.y0), r(call.box.x1), r(call.box.y1)] : null, played: Math.round(toShared(performance.now())) });
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }
 /** a table word this seat does not draw, by one of its own needs (logged like a call) */

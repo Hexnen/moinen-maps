@@ -88,6 +88,84 @@ export function tableSized(w, o, step, d) {
     return out;
   } catch { return null; }
 }
+/**
+ * MAPSFXSEAT2: the sizes THIS seat draws a table word at (cap height in world units, this seat's own size setting `seat.scale` in): the
+ * engine's own size of the word for this seat's window and zoom at step 2 - with the TABLE's options and the table's words up (the
+ * ledger, not this seat's history), a ranked word's rank as a share of THIS seat's view height, as the map sized it before the table
+ * picture - then the step's share of it (sfx-seat stepPx): what this seat drew before at step 2, step 3 bigger, step 1 smaller. A seat whose
+ * window and zoom are the reference's draws the table size (dev/sfx-seat.test.mjs STEP2). seat = { vw (usable width), vh, zoom, scale }.
+ * -> { sizes (preferred first), min, full (step 3: the size from which it counts as bigger), cap2, px2, sk } | null (sized another way)
+ */
+export function seatCaps(w, d, seat) {
+  try {
+    if ( !w?.text || !d.sizeFor ) return null;
+    const o = baseOpts(w, d);
+    if ( o.fit === "exact" || o.pixel ) return null;
+    const step = d.step(grpOf(w)), z = seat.zoom > 0 ? seat.zoom : 1, sc = seat.scale > 0 ? seat.scale : 1;
+    // (a ranked word: its rank's share of the larger of the table's reference view and this seat's own view, as the engine's request -
+    // the engine's size model then holds it to this seat's window: a seat zoomed closer than the reference draws the most its window
+    // gives the word, as before the table picture; a seat zoomed out farther its own view's share, as before)
+    if ( Number.isFinite(w.rank) ) o.size = Math.max(o.size ?? 0, EV.rankSize(w.rank, seat.vh / z, w.shrink ?? 1));
+    const plan = planInfo(w.text, o, d), sk = plan.sizeK ?? 1;
+    const q = SEAT.refSize(d.sizeFor, o, plan, { z, alive: w.alive ?? 0, grid: d.grid, vw: seat.vw, vh: seat.vh });
+    if ( !(q?.px > 0) ) return null;
+    const px2 = q.px, floor = SZ.floorPx(seat.vh, sk, d.L?.sizeModel);
+    return { ...capLadder(px2, step, floor, (px) => (px / z) * sc), px2, sk, sc };
+  } catch { return null; }
+}
+/** MAPSFXSEAT2: the sizes to try for a word drawn at `px2` (cap px on this seat's screen) at step 2, at step `step`, as `W(px)` (the units
+    the layout works in): step 3 from the full step down to MIN_GAIN x step 2 in small steps, then - only where nothing that big is clean on
+    this view - down to step 2's own size (the rule "full", question MAPSFXSEAT2-1); step 2 its own size; step 1 its share, never under the
+    legibility floor `floor`, always at most step 2 / MIN_GAIN. -> { sizes (preferred first), min, full, cap2 } */
+export function capLadder(px2, step, floor, W = (px) => px) {
+  const s = SZ.stepOf(step), pxS = SEAT.stepPx(px2, s, floor), sizes = [];
+  let min, full = 0;
+  if ( s > SZ.SIZE_DEFAULT ) {
+    for ( let px = pxS; px > px2 * SEAT.MIN_GAIN * 0.999; px *= 0.94 ) sizes.push(W(px));
+    sizes.push(W(px2 * SEAT.MIN_GAIN));
+    for ( let px = px2 * SEAT.MIN_GAIN * 0.95; px > px2; px *= 0.95 ) sizes.push(W(px));
+    sizes.push(W(px2)); min = W(px2); full = W(px2 * SEAT.MIN_GAIN);
+  } else if ( s < SZ.SIZE_DEFAULT && s > 0 ) {
+    for ( let px = pxS, i = 0; i < 4; i++, px *= 0.93 ) if ( px >= floor ) sizes.push(W(Math.min(px, px2 / SEAT.MIN_GAIN)));
+    if ( !sizes.length ) sizes.push(W(Math.min(pxS, px2 / SEAT.MIN_GAIN)));
+    min = sizes.at(-1);
+  } else { sizes.push(W(px2)); min = W(px2); }
+  // (the smallest a word of a bigger step may be drawn where nothing clean holds it: this seat's step-1 size)
+  const small = s < SZ.SIZE_DEFAULT ? min : W(Math.min(SEAT.stepPx(px2, 1, floor), px2 / SEAT.MIN_GAIN));
+  return { sizes, min, full, small, cap2: W(px2) };
+}
+/** MAPSFXSEAT2: the sizes THIS seat draws an unlocated (screen) word at, CSS px of cap height (its own size setting in): a ranked word its
+    rank's share of THIS window's height, another the engine's own size on this window - as the map sized it before - then the step's share
+    (capLadder). seat = { vw, vh, scale } */
+export function screenCaps(sizeFor, model, o, plan, { rank = null, shrink = 1, step = SZ.SIZE_DEFAULT, vw, vh, scale = 1 } = {}) {
+  try {
+    const sk = plan?.sizeK ?? 1, sc = scale > 0 ? scale : 1;
+    const px2 = Number.isFinite(rank) ? EV.rankSize(rank, vh, shrink) * sk : SEAT.refSize(sizeFor, o, plan, { space: "screen", vw, vh }).px;
+    if ( !(px2 > 0) ) return null;
+    return { ...capLadder(px2, step, SZ.floorPx(vh, sk, model), (px) => px * sc), px2, sk, sc };
+  } catch { return null; }
+}
+/** MAPSFXSEAT2: the items of the seat layout (sfx-seat seatLayout) for the table words of one page / moment on THIS seat: each word's
+    table box and cap, its subject, its sizes on this seat (seatCaps), its life on the table, whether it rides its way */
+export function seatItems(ws, d, seat) {
+  const sc = seat.scale > 0 ? seat.scale : 1;
+  return ws.filter((w) => w && w.text && Number.isFinite(w.x)).map((w, i) => {
+    const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
+    const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
+    return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
+      cap2: c?.cap2 ?? u * sc, life: [w.ts ?? 0, (w.ts ?? 0) + lifeMs(w)], ride: (w.path?.length ?? 0) > 1, path: w.path ?? null, cover: w.cover, ink: inkShare(w), around: w.around ?? C.AROUND, touch: C.TOUCH };
+  });
+}
+/** MAPSFXSEAT2: the share of a word's box (FIT.wordBox: its hold box with room for its entrance and outline) its INK covers - the hold
+    picture and the ink rim the engine draws under a world word (RIMUNDER 1.9.12, about INK_RIM cap heights round it): what may not lie on
+    a pin, a token, a panel or another word. [kx, ky]; [1, 1] for a word without a measured box. */
+export const INK_RIM = 0.08;
+export function inkShare(w) {
+  const u = w.size > 0 ? w.size : 0;
+  if ( !(u > 0) || !(w.bw > 0) || !(w.bh > 0) ) return [1, 1];
+  const bx = w.bw / u, by = w.bh / u, hx = (bx - FIT.PAD.wc) / FIT.PAD.w, hy = (by - FIT.PAD.hc) / FIT.PAD.h;
+  return [Math.min(1, Math.max(0.5, (hx + 2 * INK_RIM) / bx)), Math.min(1, Math.max(0.5, (hy + 2 * INK_RIM) / by))];
+}
 /** the engine's plan facts the size model reads (its mood factor sizeK, its hold box's width) */
 export function planInfo(text, o, d) {
   const hd = holdOf(text, o, d);
