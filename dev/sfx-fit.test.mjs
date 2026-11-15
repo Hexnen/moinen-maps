@@ -168,7 +168,7 @@ await group("RIDE", () => {
   // whole way off this seat's panels; its reach is the engine's own measure of the word)
   ok(/const avoid = \[\.\.\.\(env\.mainBox \? \[env\.mainBox\] : \[\]\), \.\.\.upNow\(\), \.\.\.env\.pins\];/.test(sfx) && /spec\.path = FIT\.rideFit\(wr\.ride, vw, avoid, spec\.bw \?\? G, spec\.bh \?\? G \* 0\.4, spec\.rk \?\? FIT\.REACH\.other, FIT\.EDGE \/ z\);/.test(sfx), "the runtime fits the wave's way (off the pins, the main word, the words up; its measured reach)");
   // (MAPRIDE: burnRooms - the run's real block; pins and tokens hard, panels and the words up soft: dev/sfx-seat.test.mjs BURN)
-  ok(sfx.includes("const soft = [...uiBoxes(), ...ledger.boxes(now, now + 1000)], hard = [...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];"), "a burning fire's spots keep off the pins");
+  ok(sfx.includes("const soft = [...ledger.boxes(now, now + 1000)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];"), "a burning fire's spots keep off the pins");
   ok(/PG\.waveRide\(w\.wave\.at, w\.wave\.r0, w\.wave\.reach, w\.wave\.rim, \{ avoid, /.test(sfx), "the wave's way is chosen off the pins");
   // (MAPSFXSEAT, live at step 3: the wave word crossed the map pin BETWEEN two clean points of its way - the box is checked along it)
   const pin = { x0: 1500, y0: 1370, x1: 1560, y1: 1430 };

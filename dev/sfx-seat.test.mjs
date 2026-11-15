@@ -493,7 +493,7 @@ await group("GROUND", () => {
 // A burning fire's run on the take's two seats (The Warehouse, their recorded panels and the bomb's pin), steps 1-3: a fire burning by the
 // hotbar, one by the pin, and a second fire 4.5 run sizes above the first (two fires one above the other: SUSTAINGAP-5). Each run's block
 // (sfx-seat runReserve: the room the engine keeps the run to + the margin its ink may leave it by - measured in dev/sfx-burn.test.mjs)
-// stands whole in the view, off the pin, at most SOFT_OK under panels, never on another fire's block. The previous rule (f1d9491
+// stands whole in the view, off the pin and the panels (a 6 % share of a tall block hid a whole phrase live), never on another fire's block. The previous rule (f1d9491
 // burnOffsets: a box -2.5 .. +0.9 em, em = 1.25 x the run's size, cleared of panels and pins, the run left to take its own height) put the
 // run's real block on the hotbar, the pin or the other fire's run.
 await group("BURN", async () => {
@@ -517,10 +517,10 @@ await group("BURN", async () => {
     // (now)
     // (as sfx.mjs burnRooms: smaller on this seat where the table's size has no room, down to half of it, never under the legibility floor)
     const kMin = Math.min(k, SZ.floorPx(S.H, 1, L.sizeModel) / S.z);
-    const r = SEAT.burnRoom(spots, { k, kMin, below: [1, 2, 3].filter((s) => s < step).map(kOf), v, hard: [PIN], soft: panels, motion });
+    const r = SEAT.burnRoom(spots, { k, kMin, below: [1, 2, 3].filter((s) => s < step).map(kOf), v, hard: [PIN, ...panels], motion });
     const mins = (minsOf[`${sn} ${motion}`] ??= []); mins[step] = r.map((o) => (o.ok ? o.k : 0));
     sizesRow.push(`${sn} s${step} ${motion}: ${r.map((q) => (q.ok ? Math.round(q.k * S.z) : "-")).join("/")} px (table ${Math.round(k * S.z)})`);
-    const fault = (b, others) => (on2(b, PIN) > 0 ? "pin" : area2(b) - on2(b, v) > 1 ? "off" : panels.reduce((s, o) => s + on2(b, o), 0) > SEAT.SOFT_OK * area2(b) + 1 ? "panel" : others.some((o) => on2(b, o) > 1) ? "fire" : "");
+    const fault = (b, others) => (on2(b, PIN) > 0 ? "pin" : area2(b) - on2(b, v) > 1 ? "off" : panels.some((o) => on2(b, o) > 1) ? "panel" : others.some((o) => on2(b, o) > 1) ? "fire" : "");
     prevBlocks.forEach((b, i) => { const f = fault(b, prevBlocks.filter((_, j) => j !== i)); if ( f ) { badPrev++; if ( rows.length < 40 ) rows.push(`prev ${sn} s${step} ${motion} fire${i} ${f}`); } });
     r.forEach((q, i) => { cases++; if ( !q.ok ) { notLettered++; rows.push(`noroom ${sn} s${step} ${motion} fire${i} k ${k.toFixed(0)} block ${Math.round(q.box.x1 - q.box.x0)}x${Math.round(q.box.y1 - q.box.y0)} view ${Math.round(v.x1 - v.x0)}x${Math.round(v.y1 - v.y0)}`); return; }
       const f = fault(q.box, r.filter((o, j) => j !== i && o.ok).map((o) => o.box)); if ( f ) { bad++; rows.push(`NOW ${sn} s${step} ${motion} fire${i} ${f}`); }
@@ -528,7 +528,7 @@ await group("BURN", async () => {
   }
   if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n") + "\nrun sizes on screen: " + sizesRow.join("; "));
   ok(badPrev > 0, `the previous rule: a fire's run on the pin, a panel, off the view or on another fire's run in ${badPrev} fire x seat x step cases (${rows.filter((q) => q.startsWith("prev")).slice(0, 4).join("; ")})`);
-  ok(bad === 0, `now: every run's block whole in view, off the pin, at most an edge under panels, never on another fire's (${bad} faults; ${rows.filter((q) => q.startsWith("NOW") || q.startsWith("room")).slice(0, 3).join("; ")})`);
+  ok(bad === 0, `now: every run's block whole in view, off the pin and the panels, never on another fire's (${bad} faults; ${rows.filter((q) => q.startsWith("NOW") || q.startsWith("room")).slice(0, 3).join("; ")})`);
   ok(notLettered === 0, `the take's fires are lettered on both seats at every step (${cases - notLettered} of ${cases}; ${rows.filter((q) => q.startsWith("noroom")).join("; ")})`);
   const order = Object.entries(minsOf).filter(([, m]) => m[1].some((_, i) => !(m[1][i] <= m[2][i] + 1e-9 && m[2][i] <= m[3][i] + 1e-9)));
   ok(!order.length, `a higher step never letters a crowded seat's run smaller (${order.map(([s, m]) => s + " " + m.slice(1).map((x) => x.map(Math.round).join("/")).join(" ")).join("; ")})`);

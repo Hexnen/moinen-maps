@@ -344,7 +344,7 @@ group("CROWD", () => {
   // (THUNDERFIT added the map's pins after the words up: the same obstacles, plus the pins)
   // (MAPSFXSEAT: the event words up are the TABLE's - the ledger, the same on every seat - not what this seat drew)
   // (MAPRIDE: burnRooms keeps the run's block off the words up as off the panels)
-  ok(sfx.includes("const soft = [...uiBoxes(), ...ledger.boxes(now, now + 1000)]"), "CROWD a burning fire's phrases keep off the event words still up");
+  ok(sfx.includes("const soft = [...ledger.boxes(now, now + 1000)]"), "CROWD a burning fire's phrases keep off the event words still up");
 });
 
 /* WORD2 (engine 1.7.0): the map's voices use the engine's newer kinds where they fit; the thing hit gives the word its material */

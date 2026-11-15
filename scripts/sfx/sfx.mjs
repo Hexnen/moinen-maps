@@ -688,7 +688,9 @@ function burnRooms(want) {
     // inside that block - its `room` - and its phrases to the block's width - `maxWidth`)
     const now = sharedNow(), v0 = view(), z = canvas.stage?.scale?.x || 1, m = SEAT.SEAT_EDGE / z;
     const v = { x0: v0.x0 + m, y0: v0.y0 + m, x1: v0.x1 - m, y1: v0.y1 - m };
-    const soft = [...uiBoxes(), ...ledger.boxes(now, now + 1000)], hard = [...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
+    // (panels are hard for a run, not a 6 % share as for a word: 6 % of a run's tall block is a whole phrase hidden at its edge - live, the
+    // player's FOOOOOMF ran under the challenges panel)
+    const soft = [...ledger.boxes(now, now + 1000)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
     const maxShift = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45;
     for ( const [key, w] of want ) {
       const p = w.plan, sc = L?.prefs?.scale ?? 1, k = burnSize(p, w.live) * sc, arr = [], st = stepFor("fire");
