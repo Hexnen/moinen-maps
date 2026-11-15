@@ -48,8 +48,10 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(flashTimes(off, TICK).length === 0 && all(off).map((q) => q.ticks).join() === ticks, "tools: flashes off removes flash frames, timing unchanged");
     const big = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ capPx: 800 * PHOTO.bigVh + 1 }));
     ok(flashTimes(big, TICK).length === 0, "tools: photosensitivity guard: no flash on a big word");
+    /* ENGTABLE (1.9.16): the guard is no setting any more and cannot be turned off; before, `photosafe: false` kept a big word's flash.
+       Checked the other way round now (stricter): a `photosafe: false` that reaches the filter still drops the big word's flash */
     const unguarded = filterPlan(JSON.parse(JSON.stringify(f0)), {}, ctx({ prefs: { photosafe: false }, capPx: 700 }));
-    ok(flashTimes(unguarded, TICK).length === flashTimes(f0, TICK).length, "tools: guard off keeps flash frames");
+    ok(flashTimes(unguarded, TICK).length === 0, "tools: the guard cannot be turned off (photosafe false still drops a big word's flash)");
     /* rate: words started together cannot flash more than PHOTO.maxPerSec times a second on one client */
     /* (MOVE: a word may also flash on its exit, a second or more later: count the flashes in the busiest second, not in all) */
     const log = [], at = [];
@@ -233,7 +235,10 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const d = SETTINGS.movement;
     ok(!!d && d.type === "pick" && d.default === "smooth" && DEFAULT_MOTION === "smooth" && d.choices.join() === MOTION_MODES.join(), "mode: setting movement = smooth | stepped, default smooth");
     /* FONTSEL 1.9.7: the table also holds the invincible face (world, the GM's): the pinned list of table keys grows by exactly it */
-    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement,face" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: movement is the table's (world scope); every other setting stays this computer's");
+    /* ENGTABLE (1.9.16): every preference is the table's now (check-table.mjs). The LEGACY description keeps its old shape for
+       invincible-plus-ultra's mirror (movement, face world; the rest the old client keys), but the engine registers none of the old ones */
+    ok(d?.scope === "world" && pm.scopeOf("movement") === "world" && pm.WORLD_KEYS.join() === "movement,face" && pm.scopeOf("motion") === "client" && pm.scopeOf("impact") === "client", "mode: the legacy description keeps its shape for plus-ultra's mirror");
+    ok(pm.TABLE.movement.default === "smooth" && pm.TABLE.movement.choices.join() === MOTION_MODES.join() && pm.TABLE_KEYS.includes("movement"), "mode: movement is a table key (world, the GM's)");
     ok(clean("movement", "bogus") === "smooth" && clean("movement", "stepped") === "stepped" && cleanAll({}).movement === "smooth", "mode: a stored value outside the choices falls back to smooth");
     ok("LETR.Settings.movement.ByGM" in STRINGS.en && "LETR.Settings.movement.ByGM" in STRINGS.pl && "LETR.Settings.Groups.Table" in STRINGS.pl, "mode: words for the player's read-only row and the table group");
     const T = await import("./tools.mjs");
@@ -241,22 +246,22 @@ export async function run(ok, { plan, bank, fontsApi }) {
     const modes = []; const fakeL = { limits: {}, motionMode: (m) => { if ( m ) modes.push(m); return m; } };
     T.applyPrefs(fakeL, cleanAll({ movement: "stepped", limitScreen: 5 }));
     ok(modes.join() === "stepped" && fakeL.limits.screen === 5, `mode: applyPrefs hands the table's motion type to the engine (${modes.join()})`);
-    /* setPrefs: a player's save never writes the table's setting; a GM's does */
+    /* setPrefs (= setTable since ENGTABLE): a player's save writes nothing at all (every setting is the table's); a GM's does */
     const saved = globalThis.game, store = new Map(), sets = [];
     const fakeGame = (isGM) => ({ user: { isGM }, settings: { get: (ns, k) => (store.has(k) ? store.get(k) : DEFAULTS[k]), set: async (ns, k, v) => { sets.push(k); store.set(k, v); } } });
-    const keepEngine = T.state.engine;
+    const keepEngine = T.state.engine, keepPrefs = T.state.prefs, keepTable = T.state.table;
     try {
       T.state.engine = null;
       globalThis.game = fakeGame(false);
       await T.setPrefs({ movement: "stepped", scale: 1.5 });
-      ok(!sets.includes("movement") && sets.includes("scale"), `mode: a player's save leaves the table's motion type alone (wrote ${sets.join(",")})`);
+      ok(sets.length === 0, `mode: a player's save writes no setting (wrote ${sets.join(",") || "none"})`);
       globalThis.game = fakeGame(true); sets.length = 0;
       await T.setPrefs({ movement: "stepped" });
       ok(sets.includes("movement") && T.state.prefs.movement === "stepped", "mode: the GM's save writes it and this client reads it back");
-    } finally { globalThis.game = saved; T.state.prefs = { ...DEFAULTS }; T.state.engine = keepEngine; }
+    } finally { globalThis.game = saved; T.state.prefs = keepPrefs; T.state.table = keepTable; T.state.engine = keepEngine; }
     const tsrc = fs.readFileSync(new URL("./tools.mjs", import.meta.url), "utf8"), usrc = fs.readFileSync(new URL("./ui.mjs", import.meta.url), "utf8");
-    ok(/scope: scopeOf\(k\)/.test(tsrc) && /onChange: \(\) => readPrefs\(\)/.test(tsrc) && /L\.gridClock\?\.\(gridOffset\)/.test(tsrc), "mode: settings registered with their scope, re-read on change, stepped grid on the shared clock");
-    ok(/game\.user\?\.isGM \) return group\(k\)/.test(usrc) && /letr-s-ro/.test(usrc), "mode: the window gives the GM the control and a player the GM's choice as text");
+    ok(/scope: "world"/.test(tsrc) && !/scope: "client"/.test(tsrc) && /onChange: \(\) => readPrefs\(\)/.test(tsrc) && /L\.gridClock\?\.\(gridOffset\)/.test(tsrc), "mode: settings registered as world settings only, re-read on change, stepped grid on the shared clock");
+    ok(/if \( !gm \) \{ input = document\.createElement\("output"\)/.test(usrc) && /letr-s-ro/.test(usrc), "mode: the window gives the GM the control and a player the GM's choice as text");
   }
 
   /* FONTSEL (1.9.7): the invincible style's face is ONE setting the GM sets for the table (the owner: League Gothic by default, Anton
@@ -274,16 +279,16 @@ export async function run(ok, { plan, bank, fontsApi }) {
     ok(faces.join() === "anton", `face: applyPrefs hands the table's face to the engine (${faces.join()})`);
     const saved = globalThis.game, store = new Map(), sets = [];
     const fakeGame = (isGM) => ({ user: { isGM }, settings: { get: (ns, k) => (store.has(k) ? store.get(k) : DEFAULTS[k]), set: async (ns, k, v) => { sets.push(k); store.set(k, v); } } });
-    const keepEngine = T.state.engine;
+    const keepEngine = T.state.engine, keepPrefs = T.state.prefs, keepTable = T.state.table;
     try {
       T.state.engine = null;
       globalThis.game = fakeGame(false);
       await T.setPrefs({ face: "anton", scale: 1.25 });
-      ok(!sets.includes("face") && sets.includes("scale"), `face: a player's save leaves the table's face alone (wrote ${sets.join(",")})`);
+      ok(sets.length === 0, `face: a player's save writes no setting (wrote ${sets.join(",") || "none"})`);
       globalThis.game = fakeGame(true); sets.length = 0;
       await T.setPrefs({ face: "anton" });
       ok(sets.includes("face") && T.state.prefs.face === "anton", "face: the GM's save writes it and this client reads it back");
-    } finally { globalThis.game = saved; T.state.prefs = { ...DEFAULTS }; T.state.engine = keepEngine; }
+    } finally { globalThis.game = saved; T.state.prefs = keepPrefs; T.state.table = keepTable; T.state.engine = keepEngine; }
     /* a plan follows the face; the legacy styles never take it */
     const fa = { adv: (f, c) => bank.adv(f, c) };
     const pl = (o) => D.makePlan("KA-BOOM!", { mood: "boom", seed: 3, ...o }, fa, []);

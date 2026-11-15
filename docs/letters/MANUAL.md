@@ -939,27 +939,52 @@ Status: stable (TOOL, contract v6). [V] where marked, else [C].
 
 Registered once at `init` by the newest copy, whichever module(s) are active.
 
-**Client settings** (namespace `moinen-letters`; the button "Lettering settings" in the host module's settings tab opens the engine's
-window; `L.prefs` / `L.settings()` read them [V]):
+**Table settings** (1.9.16 ENGTABLE, owner's ruling «wszystko mg wybiera dla stołu»: every preference is the TABLE's: world scope,
+written only by the GM, applied live on every seat on its next word without a reload; namespace `moinen-letters`; the button
+"Lettering settings" in the host module's settings tab opens the engine's window; `L.table` = the table's values, `L.seat` = this
+screen's own signals, `L.prefs` / `L.settings()` = what THIS seat draws with; `L.setTable(partial)` writes (GM) [V node, check-table]):
 
-| key | values | effect on every word |
-|---|---|---|
-| `enabled` | on / off | off: `play` returns a handle already over; streams draw nothing |
-| `scale` | 0.5-2.5 | size multiplier after the legibility clamp |
-| `motion` | auto / full / gentle / reduced | the strongest reduction of caller, setting and OS wins; gentle = moves damped to 45 %, no smears |
-| `flashes` | on / off | the one-tick impact frame |
-| `photosafe` | on (default) / off | at most 2 flash frames per second, none on a word taller than 20 % of the viewport, colour plates held still; impact frames: every drawing that changes the scene counted, shared log, red at most 1 % of a drawing |
-| `impact` | full (default) / local / off | impact frames (`L.impact`, section 21a): all, only inside a panel round what is struck, or none; row "Impact frames" in the window since 1.8.2 [V node] |
-| `palette` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
-| `announce` | on / off | screen readers read each word (or `alt`) through one polite live region |
-| `limitScreen`, `limitWorld` | 1-32, 4-96 | `L.limits` |
+| key | stored in | values | effect on every word |
+|---|---|---|---|
+| `enabled` | `table` | on / off | off: `play` returns a handle already over; streams draw nothing |
+| `scale` | `table` | 0.5-2.5 | size multiplier after the legibility clamp |
+| `motion` | `table` | auto ("Full") / gentle / reduced | the strongest reduction of caller, table and the seat's OS wins; gentle = moves damped to 45 %, no smears; an old stored `full` reads as `auto` |
+| `flashes` | `table` | on / off | the one-tick flash frame; a seat in Foundry's photosensitive mode (`core.photosensitiveMode`) never gets it, whatever the table says |
+| `impact` | `table` | full (default) / local / off | impact frames (`L.impact`, section 21a); a photosensitive seat gets them inside a panel only |
+| `palette` | `table` | mood / contrast / cvd | contrast: white-yellow letters, black ink; cvd: colours remapped to the Okabe-Ito set |
+| `announce` | `table` | on / off | screen readers read each word (or `alt`) through one polite live region |
+| `limitScreen`, `limitWorld` | `table` | 1-32, 4-96 | `L.limits` |
+| `movement` | own key | smooth (default) / stepped | the invincible style's motion type (`L.motionMode`) |
+| `face` | own key | league (default) / anton | the invincible style's face (`L.invFace`); a call's `look.face` wins |
 
-**Table settings** (1.9.2 MODE, 1.9.7 FONTSEL; scope WORLD, written by the GM, same on every seat; group "Table (GM)" / "Stół (MG)" in the window):
+`table` is one world Object setting (so a GM's save is one write and one onChange on every seat); `movement` and `face` keep their
+own world keys from 1.9.2 / 1.9.7. **The photosensitivity guard is no setting**: always on, nobody can switch it off (at most 2 flash
+frames per second, none on a word taller than 20 % of the viewport, colour plates held still; impact frames counted on a shared log,
+red at most 1 % of a drawing). `photosafe: false` reaching the filter or `L.impact` changes nothing [V node]. The window shows it as a
+pinned "Always on" row.
 
-| key | values | effect |
-|---|---|---|
-| `movement` | smooth (default) / stepped | the invincible style's motion type ("Motion type" / "Rodzaj ruchu": "Smooth" / "Płynny", "Stepped" / "Skokowy"); the next word on every seat follows it without a reload (onChange -> `applyPrefs` -> `L.motionMode`), words already playing keep theirs; a player's window shows the GM's choice as text with "Set by the GM for the table", and a player's Save / Defaults never write it [V node] |
-| `face` | league (default) / anton | the invincible style's face (1.9.7 FONTSEL; "Typeface" / "Krój": "League Gothic", "Anton"); the same on every seat so every seat sees the same word shape (its width, where it fits in view, the cut of its O); the next word follows it without a reload (onChange -> `applyPrefs` -> `L.invFace`), words already playing keep theirs; a player sees the GM's choice as text and never writes it; a call's `look.face` wins; the legacy styles ignore it [V node: check-tools, check-fontsel --engine as GM and as a player] |
+What a seat's own system says still wins on that seat (`seatPrefs(table, seat)` in prefs.mjs): a table "Full" never overrides the
+OS's reduced motion; a photosensitive seat gets no flash frames. Both are read live (matchMedia change, `clientSettingChanged`).
+
+Who writes: only a GM (`game.user.isGM`). A player's `L.setTable` / `setPrefs` writes nothing and gets one notice ("chosen by the GM
+for the whole table"); any player write of a `moinen-letters.*` setting is cancelled quietly in `preCreateSetting` /
+`preUpdateSetting` [V node]. A setting deleted from the database falls back to the defaults on every seat (`deleteSetting` hook).
+
+The window: a GM sees controls in four groups (Words, Motion, Flashes and impact frames, Screen readers and limits), a banner
+"You choose for the whole table", "Defaults" (window only), "Try on my screen" (two sample words with the window's values, this
+seat only) and "Save for the table". A player opens the same window read-only: the GM's values as text, a lock banner, "Try". Both see
+"On this screen": whether this seat's reduced motion and photosensitive mode are on and what they change here. An open window
+follows the table live (a GM mid-edit keeps his edits until he saves or resets).
+
+Migration (once per world, marker world setting `tableMigrated` = 1, run on the first GM seat after `ready`): the table starts from
+invincible-plus-ultra's GMALL table (`invincible-plus-ultra.lettersTable`) if plus-ultra is active and that setting is stored, else from the GM's own old client
+values (`moinen-letters.<key>` in that browser's localStorage), else the defaults; the old `photosafe` value is dropped. Players' old
+client values stay in their browsers, unused; each player sees one notice saying the settings are now the GM's (skipped when
+plus-ultra's mirror is present: it tells them itself).
+
+Bridge to plus-ultra's mirror (while plus-ultra still carries GMALL-E1/7): on the GM's seat `table` <-> `invincible-plus-ultra.
+lettersTable` are kept equal both ways in one round (no loop). A player's seat writes neither. (So a GM who deletes `lettersTable` by hand while both run gets it written back with the table's values.) When plus-ultra drops its mirror the
+engine can drop `PU_KEY`, `bridgeIn`, `bridgeOut` and the LEGACY `SETTINGS` export in prefs.mjs (kept only for plus-ultra's checks).
 
 World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.
 
@@ -1065,6 +1090,9 @@ Status: stable list; edit as items close.
   smaller than two seats lets the run overflow downwards. Phrases are measured from their first picture: before it the old fixed
   seat is used for that frame. Echo and shed are skipped when the room is full, so a fire in a tight room sheds less.
 
+- (1.9.16) A call's explicit `reduced: false` still beats this seat's reduced motion in `resolveOpts` (as before ENGTABLE); only
+  planning calls pass it today (the dice splash stage, token reactions). The table setting itself never overrides the seat. Open
+  question for the owner (combat-questions, ENGTABLE).
 - (1.9.11) A seat compares its build only with the GM's; two players on different builds without a GM seat are not named. The
   clock needs Foundry's "time" socket answer; until the first answer `L.clock.ready()` is false and the old `serverTime` is used.
   `L.measure` returns this seat's box: a seat with its own reduced motion or another view size gets another box (the seat's own
@@ -1208,6 +1236,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   height and `room` for callers (5), limits (18), stage table; `check-sustain.mjs` (16).
 - 2026-11-15: RIMUNDER (1.9.12, `tactics-zones-rimunder`): section 13 "Rim under the lettering on the map" (`look.rim`, defaults,
   which calls change, fingerprint proof, cost), section 5 caller note, stage table, API index.
+- 2026-11-15: ENGTABLE (1.9.16, `tactics-zones-engtable`): section 15 rewritten: every preference is the table's (world, GM only,
+  live on every seat), seat signals (OS reduced motion, Foundry photosensitive mode) still win on their seat, the photosensitivity
+  guard always on, the read-only player window, migration and the plus-ultra bridge; section 18 limit on callers' `reduced: false`.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

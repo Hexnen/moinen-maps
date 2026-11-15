@@ -277,12 +277,11 @@ export function safety(plan, prefs = {}, env = {}) {
     plan.ticks = lead + ticks; plan.ms = plan.ticks * TICK;
     return plan;
   }
-  const photosafe = prefs.photosafe !== false;
+  /* ENGTABLE (1.9.16): the guard is always on; a `photosafe: false` (no setting carries one any more) changes nothing */
   if ( mode === "local" ) {
     const gentle = prefs.motion === "gentle";
     for ( const f of plan.frames ) { if ( f.full ) toSafe(f); f.stop = false; if ( gentle ) f.punch = 0; else f.punch *= 0.5; if ( f.back === "chroma" && gentle ) f.back = null; }
   }
-  if ( !photosafe ) return plan;
   /* the guard: flash drawings (full-field frames AND drawings that change the scene's brightness, even inside a panel) are rationed,
      per impact and per rolling second (shared with the words' flash frames) */
   const log = env.flashLog ?? [], now = env.now ?? 0, t0 = env.t0 ?? now;

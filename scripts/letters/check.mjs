@@ -210,6 +210,9 @@ await (await import("./check-marks.mjs")).run(ok, { bank, fontsApi });
 await (await import("./check-rim.mjs")).run(ok, { bank, fontsApi });
 /* 8e. tools (contract v6): settings, plan filters, authoring, networking, words (check-tools.mjs) */
 await (await import("./check-tools.mjs")).run(ok, { plan, bank, fontsApi });
+/* 8e2. ENGTABLE: every preference is the table's (world, the GM's, live on every seat; a seat's own reduced motion / photosensitive mode;
+   the guard always on; migration; maps alone / plus-ultra alone / both) on a two-seat fake Foundry (check-table.mjs) */
+await (await import("./check-table.mjs")).run(ok, { bank, fontsApi });
 /* 8f. motion: travel, choreography, frame rates, shards, push, echoes, escalation, glow, clean-up (check-move.mjs) */
 await (await import("./check-move.mjs")).run(ok, { bank, fontsApi });
 
