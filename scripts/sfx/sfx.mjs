@@ -2,17 +2,20 @@
      - a damage area entering (destruction display.enter, through sfx/bus.mjs): every client plays the same entry (the scene flag's
        entries, a preset's shared clock, a cinematic show, a Detonate), so every client letters it too;
      - the fire layer's strokes (fire.mjs; the same strokes and the same shared clock on every client): a fire catching (when its
-       flames SHOW on this client: fire.mjs tells the bus), flaring up, going out, an explosion, ground dust, an eraser dousing fire;
+       flames show: MAPSFXSEAT lettered at the shared moment + CATCH_SHOW_MS on every seat), flaring up, going out, an explosion, ground dust, an eraser dousing fire;
      - a burning fire's CONTINUOUS sound for as long as it burns: the engine's sustain (a phrase score; a smoulder: its quiet ambient
        mode), riding the flame front while it runs along its path, its level following the fire's level.
    Nothing is networked: the same events with the same seeds (the scene id + the event's key) give the same words everywhere; no
    per-client memory changes a word (FXLM 14).
    Words come from the engine's own vocabulary (L.word: the kind, loudness and duration of the sound), its look follows the sound, its
    motion the staging asked by sfx-core (a cave-in drops, a bomb shoves the words around it aside, a car's word rides with the car).
-   Placement on THIS client's screen: beside what it letters, off tokens, off the map's pins, off this client's interface panels, off
-   other words, measured by the box the engine will draw (THUNDERFIT, sfx-fit.mjs: the hold box from L.planFor, room for the
-   entrance's reach; an unlocated word - thunder - fitted whole into the view off the panels, smaller only when nothing holds it; a
-   bigger-step word with no clean place steps down toward today's size; one fire's spots never stand on each other).
+   Placement (MAPSFXSEAT: one picture for the whole table): planned ONCE from shared data only (sfx-table.mjs: a reference window and
+   zoom, tokens whose documents are not hidden, pins every player may see, the table's own word ledger, the shared clock), sized by the
+   engine's size model on that reference view (world size, the same everywhere), measured by the engine itself (L.measure: hold box +
+   reach in cap heights), beside what it letters, off tokens, pins and other words; played at the shared instant (startAt: a late seat
+   joins mid-life). Then the seat rule (sfx-seat.mjs seatFit: off / read / fit / shift, only where this seat needs it) and the seat's
+   own needs (scale setting, reduced motion, perf caps, "big only", what it may see). An unlocated word - thunder - is laid out once in
+   the reference window, then centred into this window off its panels. api.sfx.log() lists every call with its seat rule.
    Settings: "sfxLetters" (client: all / big only / off), "sfxLettersWorld" (the GM's switch for everyone), "sfxWords" (client: the
    word set, auto = the game's language), "sfxLayer"; SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (world, the
    GM's for the table, live: 0 none, 1 smaller, 2 today's size, 3 bigger; sfx-size.mjs; a player sees them read-only under
@@ -143,7 +146,7 @@ async function servingSizeFor(e) {
     const all = globalThis.MoinenLetters?.copies ?? [], m = e?.build?.module;
     const c = all.find((q) => q.version === e.version && (!m || String(q.base).includes(`/${m}/`))) ?? all.find((q) => q.version === e.version);
     if ( !c?.base ) return null;
-    const mod = await import(new URL("size.mjs", c.base).href);
+    const mod = await import(new URL("./size.mjs", c.base).href);
     return typeof mod.sizeFor === "function" ? mod.sizeFor : null;
   } catch { return null; }
 }
