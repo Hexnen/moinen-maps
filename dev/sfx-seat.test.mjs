@@ -479,6 +479,29 @@ await group("RIDE", async () => {
     ok(r.rules.includes("shift") || Math.hypot(keep[0].x - keep[1].x, keep[0].y - keep[1].y) < 1e-6, `${r.w.text}: its ${r.item.anchor} stays where the table tied it unless the whole way had to move (${r.rules})`); }
 });
 
+/* ---------------------------------------------------------------- MAINSIZE (MAPRIDE) */
+// The riders laid out per seat, the panels merged and the blocked sizes skipped (cost) must not weaken the main word: on the take's page and
+// seats, steps 1-3, the main word drawn now is the size the brief's base (f1d9491) drew, on the same side.
+await group("MAINSIZE", async () => {
+  const rows = [], bad = [];
+  for ( const [sn, S] of [["gm", REC.gm], ["p1", REC.p1]] ) for ( const step of [1, 2, 3] ) {
+    const sz = (base) => {
+      enterSeat(S);
+      const d = wdeps(step), tb = pageAt(step, false);
+      const ws = [...tb.values()].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y));
+      const TT = base ? BT : T, SS = base ? BS : SEAT;
+      const items = TT.seatItems(ws, d, { vw: S.W, vh: S.H, zoom: S.z, scale: 1 }), lay = SS.seatLayout(items, { view: viewOf(S), panels: S.ui.map(toScene(S)), pins: [PIN], tokens: [], zoom: S.z });
+      const m = items.find((q) => q.w.role === "main"), f = lay.get(m.key);
+      return { cap: f.cap, rules: f.rules.join("+") };
+    };
+    const n = sz(false), b = sz(true);
+    rows.push(`${sn} s${step} base ${b.cap.toFixed(1)} now ${n.cap.toFixed(1)} (${n.rules})`);
+    if ( n.cap < b.cap - 0.5 ) bad.push(rows.at(-1));
+  }
+  if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));
+  ok(!bad.length, `the main word is not smaller than the base drew it on the take's seats, steps 1-3 (${bad.join("; ") || rows.join("; ")})`);
+});
+
 /* ---------------------------------------------------------------- GROUND */
 await group("GROUND", () => {
   const fill = (r, g, b, n = 64 * 64) => { const a = new Uint8ClampedArray(n * 4); for ( let i = 0; i < n; i++ ) { a[i * 4] = r; a[i * 4 + 1] = g; a[i * 4 + 2] = b; a[i * 4 + 3] = 255; } return a; };

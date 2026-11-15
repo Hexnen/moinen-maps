@@ -212,9 +212,12 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
   if ( !view ) { for ( const it of items ?? [] ) out.set(it.key, { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }); return out; }
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
   const vw = Math.max(1, v.x1 - v.x0), vh = Math.max(1, v.y1 - v.y0);
-  // (MAPRIDE cost: the panels as the screen shows them - a row of macro slots or tool buttons a few px apart is one strip, no word stands
-  // in its gaps - far fewer rectangles to test on a crowded view)
-  panels = mergeRects(panels.filter((o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1), PANEL_GAP / Math.max(1e-4, zoom));
+  // (MAPRIDE cost: the standing words count the panels exactly - merged only where the union adds nothing: strips over the gaps covered
+  // free map and drew the player's blast word 7-10 % smaller, sfx-seat MAINSIZE. The riders - a way of 21 samples, the costliest
+  // search - take the panels as strips: a row of macro slots a few px apart is one, no road for a word; at worst a rider gives way more)
+  const inV = panels.filter((o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1);
+  const strips = mergeRects(inV, RIDE_PANEL_GAP / Math.max(1e-4, zoom), 1.3);
+  panels = mergeRects(inV, PANEL_GAP);
   const placed = [];
   const meet = (a, b) => !a || !b || (a[0] < b[1] && b[0] < a[1]);
   const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
@@ -241,7 +244,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // zoomed closer showed the blast's wave word half off its screen and the bomb's falling word under its panel; held inside the view by
     // a clamp, the wave then rode over the main word)
     if ( it.ride && (it.path?.length ?? 0) > 1 ) {
-      const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels, placed, meet });
+      const r = rideLayout(it, { u, sizes, v, hard: [...pins, ...tokens], panels: strips, placed, meet });
       out.set(it.key, { ...r.out, px: p.x, py: p.y });
       for ( const s of r.samples ) placed.push(s);
       continue;
@@ -685,10 +688,15 @@ export function freeIn(F, A) {
 }
 /** the directions the seat layout seeds its search with the nearest free move along (MAPRIDE cost) */
 export const SEAT_RAYS = 16;
-/** panels closer than this (screen px) are one strip when they fill most of their union (MAPRIDE cost) */
-export const PANEL_GAP = 12;
-/** rectangles closer than `gap` merged where their union is at most 1.3x their areas (pure, deterministic: same input, same output) */
-export function mergeRects(list, gap) {
+/** standing words: panels merged only where nothing is added (MAPRIDE cost) */
+export const PANEL_GAP = 0;
+/** riders: panels closer than this (screen px) are one strip when it fills most of their union (MAPRIDE cost) */
+export const RIDE_PANEL_GAP = 12;
+/** rectangles closer than `gap` merged where their union is at most `grow` x what the two cover (grow 1: exactly the two - one holds
+    the other, or they touch / overlap along a whole side - so the panels as counted do not change, only how many are tested) - pure,
+    deterministic. A union of 1.3x over gaps of 12 px covered free map and drew the player's blast word 7-10 % smaller than the base
+    (sfx-seat MAINSIZE): only the riders take that. */
+export function mergeRects(list, gap = 0, grow = 1) {
   const r = list.map((o) => ({ x0: o.x0, y0: o.y0, x1: o.x1, y1: o.y1 }));
   const ar = (o) => Math.max(0, o.x1 - o.x0) * Math.max(0, o.y1 - o.y0);
   for ( let again = true; again; ) {
@@ -697,7 +705,8 @@ export function mergeRects(list, gap) {
       const a = r[i], b = r[j];
       if ( a.x0 - gap > b.x1 || b.x0 - gap > a.x1 || a.y0 - gap > b.y1 || b.y0 - gap > a.y1 ) continue;
       const un = { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
-      if ( ar(un) > (ar(a) + ar(b)) * 1.3 && !(a.x0 <= b.x0 && a.y0 <= b.y0 && a.x1 >= b.x1 && a.y1 >= b.y1) && !(b.x0 <= a.x0 && b.y0 <= a.y0 && b.x1 >= a.x1 && b.y1 >= a.y1) ) continue;
+      const io = ar({ x0: Math.max(a.x0, b.x0), y0: Math.max(a.y0, b.y0), x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1) });
+      if ( ar(un) > (ar(a) + ar(b) - io) * grow + 1e-6 * Math.max(1, ar(un)) && !(a.x0 <= b.x0 && a.y0 <= b.y0 && a.x1 >= b.x1 && a.y1 >= b.y1) && !(b.x0 <= a.x0 && b.y0 <= a.y0 && b.x1 >= a.x1 && b.y1 >= a.y1) ) continue;
       r[i] = un; r.splice(j, 1); j = i; again = true;
     }
   }
