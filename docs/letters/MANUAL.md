@@ -951,13 +951,13 @@ seat only) and "Save for the table". A player opens the same window read-only: t
 follows the table live (a GM mid-edit keeps his edits until he saves or resets).
 
 Migration (once per world, marker world setting `tableMigrated` = 1, run on the first GM seat after `ready`): the table starts from
-invincible-plus-ultra's GMALL table (`invincible-plus-ultra.lettersTable`) if that setting exists, else from the GM's own old client
+invincible-plus-ultra's GMALL table (`invincible-plus-ultra.lettersTable`) if plus-ultra is active and that setting is stored, else from the GM's own old client
 values (`moinen-letters.<key>` in that browser's localStorage), else the defaults; the old `photosafe` value is dropped. Players' old
 client values stay in their browsers, unused; each player sees one notice saying the settings are now the GM's (skipped when
 plus-ultra's mirror is present: it tells them itself).
 
 Bridge to plus-ultra's mirror (while plus-ultra still carries GMALL-E1/7): on the GM's seat `table` <-> `invincible-plus-ultra.
-lettersTable` are kept equal both ways in one round (no loop). A player's seat writes neither. When plus-ultra drops its mirror the
+lettersTable` are kept equal both ways in one round (no loop). A player's seat writes neither. (So a GM who deletes `lettersTable` by hand while both run gets it written back with the table's values.) When plus-ultra drops its mirror the
 engine can drop `PU_KEY`, `bridgeIn`, `bridgeOut` and the LEGACY `SETTINGS` export in prefs.mjs (kept only for plus-ultra's checks).
 
 World setting `styles` (GM): saved named styles; hook `moinenLettersStyles` when they change.

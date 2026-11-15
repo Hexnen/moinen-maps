@@ -160,8 +160,8 @@
 .letr-s.is-player .letr-s-ro { padding: 0.1rem 0.55rem; border-radius: 999px; background: var(--letr-raise); border: 1px solid var(--letr-edge); white-space: nowrap; }
 .letr-s .letr-s-pin { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 .letr-s .letr-s-pin i { color: var(--letr-accent); }
-.letr-s-seat { margin: 0 0 0.6rem; padding: 0 0.2rem; }
-.letr-s-seat h4 { margin: 0 0 0.25rem; padding: 0; border: 0; font-size: 0.85rem; font-weight: 700; }
+.letr-s-seat { margin: 0 0 0.6rem; padding: 0.45rem 0.7rem 0.55rem; border: 1px solid var(--color-border-light-2, rgba(255,255,255,0.12)); border-radius: 8px; }
+.letr-s-seat h4 { margin: 0 0 0.3rem; padding: 0; border: 0; font-family: inherit; font-size: var(--font-size-14, 0.9rem); font-weight: 700; text-transform: none; letter-spacing: normal; line-height: 1.3; color: inherit; }
 .letr-s-seat ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.2rem; }
 .letr-s-seat li { display: flex; align-items: baseline; gap: 0.45rem; font-size: 0.82rem; color: var(--letr-muted); }
 .letr-s-seat li i { font-size: 0.7rem; opacity: 0.6; }

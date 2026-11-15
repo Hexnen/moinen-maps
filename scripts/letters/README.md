@@ -575,7 +575,7 @@ this seat draws with), `L.setTable(partial)` (GM; a player's call writes nothing
 
 The photosensitivity guard is NOT a setting (1.9.16): always on, `photosafe: false` changes nothing (at most 2 flash frames per
 second, none on a word taller than 20 % of the viewport, colour plates held still). Migration once per world (`tableMigrated`):
-plus-ultra's `lettersTable` if present, else the GM's old client values, else defaults; players' old values stay unused in their
+plus-ultra's `lettersTable` if plus-ultra is active and it is stored, else the GM's old client values, else defaults; players' old values stay unused in their
 browsers. While plus-ultra keeps its GMALL mirror, the GM's seat keeps `table` and `invincible-plus-ultra.lettersTable` equal.
 World setting `styles` (GM): the saved named styles. Read the values: `L.prefs` / `L.settings()`.
 
