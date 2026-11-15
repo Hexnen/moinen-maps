@@ -51,6 +51,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
 | HOLDS (a held invincible word lives as long as it stands, in the manner of its sound: echo, settle, hum, sag, slosh, rumble, breath; inside its placement; every seat alike; still under reduced motion) | 1.9.10 | API-CONTRACT 1.9.10 (v17) | `tactics-zones-holds` | pending merge (section 11a) |
 | ENGREG (plumbing: one copy rule on every seat with `L.build` / `L.seats()`; the table's own clock `L.clock` under the stepped grid and `L.net`; `ceil` reaches the size model; `L.measure`; a settle memo and faster mark rows) | 1.9.11 | API-CONTRACT 1.9.11 (v18) | `tactics-zones-engreg` | pending merge (sections 2, 5, 6, 8, 16, 17, 18, 20) |
+| RIMUNDER (an invincible word on the map gets an ink rim UNDER the whole lettering, letters and duplicate block; `look.rim` ink / paper / none; default ink in world space, none on the screen) | 1.9.12 | API-CONTRACT 1.9.12 | `tactics-zones-rimunder` | pending merge (sections 5, 13, 20) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -226,6 +227,12 @@ reused, so measuring costs nothing extra. `L.planFor` (tools, after `setup`) sti
 `planFor` by hand (`sizeOf().size` already contains `scale`: multiplying again doubles it). `null` = lettering off on this seat.
 Many words at once: 12 words measured and played in one frame cost ~20-33 ms (node; 1.9.10: 68-77 ms with sizeOf + planFor + play);
 spread a crowd over two frames if it must stay under 16 ms.
+
+**On the map, let the rim do the contrast (RIMUNDER 1.9.12).** An `invincible` world word gets an ink rim under its lettering by
+default (section 13); do not add your own light outline (`look.outline: "sticker"` covers the duplicate block) or a backdrop for
+contrast. Pass nothing to get it; `look: { rim: "none" }` only where a picture must stay exactly as before; `look: { rim: "paper" }`
+for a word that must also stand off a dark ground; a screen word that sits over the map can ask `look: { rim: "ink" }`. The rim reaches
+up to 0.07 cap (at least 2.5 px) past the letters: the hold box from `L.measure` does not include it, so leave that much air.
 
 **Stay in view and off the interface.**
 - On 1.6.0 the engine does NOT keep words inside the view [C]: a word placed at a token near the edge is cut. Clamp your own `at`
@@ -779,6 +786,28 @@ for later calls `L.lookStyle(name)` [V]. `look` keys still win over the style.
     Anton's frozen fingerprint changes on purpose (the owner wanted the defect gone in both faces): 624 of 1026 `invincible` +
     `face: "anton"` fingerprints differ, every one a word with a mark (none of the words without one); `comic` / `expressive`: 0 of
     2052 differ. 1.9.7 fails `check-marks.mjs` (22 of 26 checks).
+  - **Rim under the lettering on the map** (RIMUNDER 1.9.12, `look.rim`, [V] `check-rim.mjs`, renders and lane 5 live): ADVX 18 found a
+    word lettered on the MAP lost among the map's own drawings (low contrast on mid, bright and busy ground, under rain and fire
+    glow). The old opt-in light outline (`look.outline: "sticker"`) is stroked OVER the coloured duplicate block, which vanishes
+    (MAPSEAT's renders), so it is not the fix. A letterer's answer is the holding line: a rim round the WHOLE lettering, the letters
+    and their duplicate block together, painted UNDER them. It follows the outer outlines only (round joins; an O's hole and an A's
+    eye keep showing the ground), sweeps along the block's offset in one stroke, and starts where the keyline ends.
+    `look.rim: "ink"` (0.07 cap, at least 2.5 px, at most 16 px): an ink rim. It adapts to the ground by itself: on a dark floor ink
+    on dark is next to invisible (today's look), on bright, mid, busy or fire-lit ground it is the black edge that separates the word.
+    `look.rim: "paper"` (a paper band 0.05 cap, 2-12 px, with an ink line 0.022 cap, 1.25-4 px, round it; the knock-out of the impact
+    frames' kept word): opt-in for a word that must also stand off a dark ground; with the style's white or pale faces the letters
+    merge into the paper (renders), so it suits dark-faced words better. `look.rim: "none"` (or `false`): today's picture.
+    **Default** (`"auto"` or not given): `"ink"` for a word in world space (`space: "world"`, every world layer, the default
+    `overlay` included) without a backdrop; `"none"` on the screen layer. Not on a MOVE echo; the legacy styles ignore the option.
+    Which calls change: only `invincible` words with `space: "world"` (no `look.rim`, no backdrop): every picture of the word
+    (entrance, hold, exit, both faces, both motion types, reduced too) gets the rim, the picture grows by the rim's reach and
+    `plan.hand.halo` = `"ink"` is the only plan field added (letters, sizes, layout, timing unchanged). Proof (5610 plan + draw-log
+    fingerprints: comic / expressive / invincible league smooth / anton stepped / league stepped x 11 texts x every mood x
+    variants incl. `space: "world"`, `"screen"`, none, reduced, plus every vocabulary kind in two languages): 1314 differ, all of
+    them `invincible` + `space: "world"`, 0 of 4296 others; `check-rim.mjs` also shows a world word with `rim: "none"` drawing exactly
+    the screen word's plan and draw log. Cost: one stroke per band per picture; lane 5, 48 world words standing at once, recorder
+    clock off, 3 runs each: no frame over 25 ms with or without the rim (p99 16.8 ms both); a hold picture paints 0.05-0.2 ms slower
+    (0.29-0.45 -> 0.34-0.64 ms) and has 8-13 % more pixels.
   - **Smear**: outline echoes only, no pale filled copies (P15).
   - **Words** (P12, P13): "!!" on under a quarter of the vocabulary's words and never below loud 0.85; no diacritics; both checked.
 
@@ -1063,6 +1092,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `lookStyle`, `lookStyles` | v8 (1.6.0) | style `expressive` added in v9 (1.8.0) |
 | `motionMode`, `motionModes`; play options `kind`, `look.motion`; `w.play.vocabMotion` | 1.9.0 MOTION2 | pending merge, section 11a [V node] |
 | `invFace`, `invFaces`; play option `look.face`; setting `face` | 1.9.7 FONTSEL | pending merge, sections 13, 15 [V node] |
+| play option `look.rim` (`"ink"` / `"paper"` / `"none"` / `"auto"`); `plan.hand.halo` | 1.9.12 RIMUNDER | pending merge, sections 5, 13 [V node, renders, live lane 5] |
 | `chain`; `vocab.tails`, `vocab.chain`, `vocab.variants`, `vocab.hitMaterials`, `vocab.fireLevels`, `vocab.chains`; word options `material pieces intensity stage` | 1.7.1 KINDS1 | pending merge, section 9a [V node] |
 | `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
@@ -1120,6 +1150,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (ENGREG, 1.9.11, `tactics-zones-engreg`): which copy runs and `L.build` / `L.seats()` (2), measuring before placing
   with `L.measure` and the cost of planning many words at once (5), `ceil` (6), the table's clock `L.clock` (8), API index (20),
   stage table; `check-engreg.mjs` (16).
+- 2026-11-15: RIMUNDER (1.9.12, `tactics-zones-rimunder`): section 13 "Rim under the lettering on the map" (`look.rim`, defaults,
+  which calls change, fingerprint proof, cost), section 5 caller note, stage table, API index.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
