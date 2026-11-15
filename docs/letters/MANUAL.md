@@ -1711,7 +1711,7 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   stands off the art's own edge colour (a yellow-ringed portrait gets blue or paper, not yellow); (5) turned colours (negative, hue
   negative, hue cycle) never land in the pink band; (6) the figures' art is worked out at the call and for visible tokens while idle
   (`I.warm`), two drawings are painted ahead, and a flash or hit-stop drawing shown in a frame that ran long stays one more frame.
-  New: `I.seatMode()` (what this seat shows; `I.mode()` stays the table's), `I.warm(tokens?)`, `handle.trace`. `[V node]`
+  New: `I.seatMode()` (what this seat shows; `I.mode()` stays the table's), `I.warm(tokens?)`, `handle.trace`. `[V node, V render, V live]` Live (lane 5, 2026-11-15, GM 1600x900 at zoom 1 + Test Gracz 1 1366x768 at 0.3, then swapped; 60 fps film clock): hit, heavy, crit, crit without target, knock-down, crowd of 7 (one GM-hidden: never drawn on the player): every drawing shown on both seats at the same instants (within one 16.7 ms frame), no frame over 20 ms, the art worked out at the call in 0-31 ms before the start; a photosensitive seat played `local` at the same length, a reduced-motion seat one still at the blow. Item 2 (a knock-down losing its key drawing) did not reproduce with direct calls, before or after.
 
 **Frame types** (20): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`, and
 (1.9.20) `fig cracks`. Full-field:

@@ -203,6 +203,9 @@ one (the 2.5 % area cap); splashes, rings and residue without the figures covere
   and a flash or hit-stop drawing shown in a frame that then ran long (> 50 ms) stays one more display frame (`stats.held`). Each
   handle keeps `h.trace`: `[{ i, type, fig, at (ms after the start), frame (ms of the display frame that presented it) }]`.
 The gentle variant and reduced motion get none of this (no `cu`, no `kb`, rims only), exactly as before.
+Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps film clock): six impacts (hit, heavy, crit, crit
+without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
+same instants within one frame; no frame over 20 ms; the call's warm-up took 0-31 ms before the start (0 when the idle warm-up had run).
 
 ## Kinds
 
