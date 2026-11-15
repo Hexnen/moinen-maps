@@ -321,12 +321,17 @@ export function figTreat(e, f) {
   if ( !f?.fig || !e.figs?.length ) return null;
   const list = e.figs.filter((g) => g.sil && !(g.role === "target" && ENLARGED.has(f.type)));
   if ( !list.length ) return null;
-  let t = e.local ? "r" : f.fig;
-  if ( FIG_BRIGHT.has(t) ) {
-    let a = 0; for ( const g of list ) a += Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area);
-    if ( a > LIMITS.figArea * e.W * e.H ) t = "r";
-  }
-  return { t, list };
+  const t = e.local ? "r" : f.fig;
+  /* the area is shared out in order (the struck figure first, then the attacker, then the others): a figure whose art would take the
+     figures' area over the cap keeps the rim only */
+  let a = 0;
+  const each = list.map((g) => {
+    if ( !FIG_BRIGHT.has(t) ) return t;
+    const ga = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area);
+    if ( a + ga > LIMITS.figArea * e.W * e.H ) return "r";
+    a += ga; return t;
+  });
+  return { t, list, each, area: a };
 }
 /* one figure: ink line and lit rim round its true outline, then its art in the treatment */
 function drawFig(ctx, e, f, g, t, R) {
@@ -335,7 +340,7 @@ function drawFig(ctx, e, f, g, t, R) {
   const w = s.w, h = s.h;
   if ( (t === "i" || t === "p" || t === "k" || t === "o") && !P.pixels ) t = "r";
   /* the rim boils: its width and the angle of its copies change with every drawing (seeded) */
-  const rw = Math.max(1.5, Math.min(u * 0.012, Math.min(w, h) * 0.035 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.2, rw * 0.5);
+  const rw = Math.max(1.5, Math.min(u * 0.016, Math.min(w, h) * 0.045 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.2, rw * 0.5);
   const lit = rimColor(e), inkT = alphaTint(e, s, INK), litT = alphaTint(e, s, lit);
   ctx.save();
   ctx.translate(g.cx, g.cy);
@@ -362,7 +367,7 @@ function paintFigs(ctx, e, f) {
   const tr = figTreat(e, f);
   if ( !tr ) return;
   const R = rng((f.seed ^ 0x5bd1e995) >>> 0);
-  for ( const g of tr.list ) drawFig(ctx, e, f, g, tr.t, R);
+  tr.list.forEach((g, i) => drawFig(ctx, e, f, g, tr.each[i], R));
 }
 /* the outline of a figure as a ring (for the knock-back echoes), cached per figure, colour and width */
 function ringOf(e, s, color, wpx) {
@@ -577,9 +582,9 @@ const PAINT = {
     const u = unit(e), g = gain(e), R = rng(f.seed);
     const tgt = e.figs?.find((x) => x.role === "target" && x.sil);
     const tr = figTreat(e, f);
-    /* knock-back echoes: the struck figure's outline twice behind it along the blow, fading (only where its art may change: an outline
-       in the accent and one in ink) */
-    if ( tgt && e.dir != null && tr && tr.t !== "r" ) {
+    /* knock-back echoes: the struck figure's outline twice behind it along the blow, fading (thin outlines in the accent and in ink;
+       not in the gentle panel) */
+    if ( tgt && e.dir != null && tr && !e.local ) {
       const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03), d = Math.max(s.w, s.h) * 0.28 * g;
       const ra = ringOf(e, s, rimColor(e), wpx), rk = ringOf(e, s, INK, wpx * 1.8);
       for ( const [k, al] of [[2, 0.45], [1, 0.8]] ) {

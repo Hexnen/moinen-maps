@@ -82,13 +82,16 @@ export async function run(ok) {
     const env = (figs, o = {}) => ({ W, H, figs, local: null, ...o });
     const f = { type: "fig", fig: "i", seed: 1 };
     const small = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }]);
-    ok(figTreat(small, f).t === "i", "figures: a token of 100 px keeps its negative");
+    ok(figTreat(small, f).each[0] === "i", "figures: a token of 100 px keeps its negative");
     const big = env([{ role: "target", cx: 800, cy: 450, sil: sil(320), area: 0.78 }]);
-    ok(figTreat(big, f).t === "r", "figures: a token of 320 px on a 1600 x 900 view (over figArea) gets the rim only");
+    ok(figTreat(big, f).each[0] === "r", "figures: a token of 320 px on a 1600 x 900 view (over figArea) gets the rim only");
     const many = env([0, 1, 2, 3].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(140), area: 0.78 })));
-    ok(figTreat(many, f).t === "r", "figures: four tokens that together cover more than figArea get the rim only");
-    ok(figTreat({ ...small, local: { r: 100 } }, f).t === "r", "figures: the gentle panel draws rims only");
-    ok(figTreat(small, { ...f, fig: "o" }).t === "o" && figTreat(big, { ...f, fig: "o" }).t === "o", "figures: their own colours are no change of their art (no cap)");
+    const tm = figTreat(many, f);
+    ok(tm.each[0] === "i" && tm.each.includes("r") && tm.area <= LIMITS.figArea * 1600 * 900, `figures: four tokens share the area cap, the struck one first, the rest get the rim (${tm.each}, ${(tm.area / (1600 * 900) * 100).toFixed(2)} %)`);
+    for ( const n of [1, 2, 3, 5, 8] ) for ( const w of [40, 90, 150, 260] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
+      ok(tt.area <= LIMITS.figArea * 1600 * 900 + 1e-6, `figures: ${n} figures of ${w} px: art changes over ${(tt.area / (1600 * 900) * 100).toFixed(2)} % of the view (cap ${LIMITS.figArea * 100} %)`); }
+    ok(figTreat({ ...small, local: { r: 100 } }, f).each.every((x) => x === "r"), "figures: the gentle panel draws rims only");
+    ok(figTreat(small, { ...f, fig: "o" }).each[0] === "o" && figTreat(big, { ...f, fig: "o" }).each[0] === "o", "figures: their own colours are no change of their art (no cap)");
     ok(figTreat(small, { ...f, fig: undefined }) === null && figTreat(env([]), f) === null, "figures: no treatment or no figure = nothing");
     for ( const t of ENLARGED ) ok(figTreat(small, { ...f, type: t }) === null, `figures: ${t} shows the struck figure enlarged: no second copy at its place`);
     const two = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }, { role: "from", cx: 300, cy: 450, sil: sil(100), area: 0.78 }]);
