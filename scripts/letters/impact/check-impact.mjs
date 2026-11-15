@@ -164,7 +164,8 @@ export async function run(ok) {
       const q = punchAt(p, i, k);
       if ( !p.frames[i].punch ) { ok(q === null, "impact: a drawing without punch moves"); continue; }
       ok(Math.hypot(q.x, q.y) <= LIMITS.punchMax + 1e-9 && q.s >= 1 && (q.s - 1) / 2 >= Math.hypot(q.x, q.y) - 1e-9, `impact: punch ${i}/${k} beyond the limit or past its zoom margin`);
-      if ( k === 0 ) ok(q.x > 0 && Math.abs(q.y) < 1e-9, "impact: the first kick goes along the blow");
+      /* IMPACT3: a drawing marked kick -1 recoils AGAINST the blow (the frame shakes); every other punch still kicks along it first */
+      if ( k === 0 ) ok((p.frames[i].kick < 0 ? q.x < 0 : q.x > 0) && Math.abs(q.y) < 1e-9, "impact: the first kick goes along the blow (a kick back against it)");
     }
     ok(p.frames.some((f) => f.punch > 0) && p.frames.some((f) => f.stop), "impact: a critical punches and holds");
   }
@@ -360,6 +361,8 @@ export async function run(ok) {
     ok(r.status === 0, `impact life: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 400) : ""}`);
     /* 10. KEEPBOX: seats with different frame timing, clocks, delays and private words draw the same pictures from the same calls */
     await (await import("./check-seats.mjs")).run(ok);
+    /* 11. IMPACT3: the figures take part (ladders, safety of every new effect, seats, settings, cost) */
+    await (await import("./check-figures.mjs")).run(ok);
   }
 }
 

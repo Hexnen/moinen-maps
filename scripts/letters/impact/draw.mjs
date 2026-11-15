@@ -4,7 +4,8 @@
            local: null | { r }, panel: { r } (a local change of the scene), redOk, makeCanvas, ctx2d }
    Rule of the look: flat colour, hard shapes, and every ink shape carries a keyline of the opposite value, so it reads on any map
    (a dark busy scene as much as a pale one). */
-import { INK, PAPER, FRAMES, LIMITS, isRed, safeColor } from "./plan.mjs";
+import { INK, PAPER, FRAMES, LIMITS, isRed, safeColor, SAFE_RED, FIG_BRIGHT } from "./plan.mjs";
+import { rng } from "../rng.mjs";
 import * as G from "./shapes.mjs";
 
 const TAU = Math.PI * 2;
@@ -223,6 +224,163 @@ function sil(ctx, e, o) {
   return true;
 }
 
+/* ---------- IMPACT3 (1.9.20): the figures take part ----------
+   The way a hand-animated impact cut reads: the fighters themselves change at the instant of the hit (their colours flip to the
+   negative, jump to a flat posterised palette, or stand in their own colours against a negative world), a hard rim of light runs on
+   their outline on the side the blow comes from, and the frame shakes and holds while their palette jumps. On a map seen from above
+   the fighters are the tokens: every figure (env.figs: the struck token, the attacker, the tokens a caller names in `also`; only those
+   this seat may see) is drawn at its own place, size and turn on the screen from its own art, never enlarged, never a box round it.
+   Pure pixel helpers (invPixels, postPixels, redSafePixels) work on RGBA arrays; node checks run them. */
+const SAFE_RGB = [0xb0, 0x28, 0x40], SAFE_L = 0.299 * SAFE_RGB[0] + 0.587 * SAFE_RGB[1] + 0.114 * SAFE_RGB[2];
+/* saturated red (R / (R+G+B) >= 0.7, the guard's rule) becomes the deep crimson SAFE_RED at the pixel's own lightness: a figure's
+   negative never shows saturated red (a cyan costume inverts to red), whatever its art */
+export function redSafePixels(o) {
+  for ( let i = 0; i < o.length; i += 4 ) {
+    const r = o[i], g = o[i + 1], b = o[i + 2], s = r + g + b;
+    if ( !(o[i + 3] > 0) || s <= 0 || r / s < 0.7 ) continue;
+    const k = Math.min(255 / SAFE_RGB[0], (0.299 * r + 0.587 * g + 0.114 * b) / SAFE_L);
+    o[i] = Math.round(SAFE_RGB[0] * k); o[i + 1] = Math.round(SAFE_RGB[1] * k); o[i + 2] = Math.round(SAFE_RGB[2] * k);
+  }
+  return o;
+}
+/* the art's colour negative (alpha kept) */
+export function invPixels(d) {
+  const o = new Uint8ClampedArray(d.length);
+  for ( let i = 0; i < d.length; i += 4 ) { o[i] = 255 - d[i]; o[i + 1] = 255 - d[i + 1]; o[i + 2] = 255 - d[i + 2]; o[i + 3] = d[i + 3] > 40 ? 255 : 0; }
+  return redSafePixels(o);
+}
+/* the art in its own colours (alpha made hard, red made safe) */
+export function origPixels(d) {
+  const o = new Uint8ClampedArray(d);
+  for ( let i = 3; i < o.length; i += 4 ) o[i] = o[i] > 40 ? 255 : 0;
+  return redSafePixels(o);
+}
+/* the art posterised to three flat tones by its own lightness (ink, the accent, paper; the darkest 38 % ink, the next 34 % accent):
+   inside a round portrait the cut-away background goes ink, so the head and shoulders stand out */
+export function postPixels(d, w, h, alpha, cut, accent) {
+  const n = w * h, o = new Uint8ClampedArray(n * 4), L = new Float32Array(n), vals = [];
+  const fig = cut ?? alpha;
+  for ( let i = 0; i < n; i++ ) { L[i] = lumOf(d, i * 4); if ( fig[i] ) vals.push(L[i]); }
+  vals.sort((a, b) => a - b);
+  const q = (p) => (vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * p))] : 128);
+  const t1 = q(0.38), t2 = Math.max(t1 + 1, q(0.72));
+  const ink = [0x0b, 0x0b, 0x10], paper = [0xff, 0xfd, 0xf2];
+  for ( let i = 0; i < n; i++ ) {
+    if ( !alpha[i] ) continue;
+    const c = !fig[i] ? ink : L[i] < t1 ? ink : L[i] < t2 ? accent : paper;
+    o[i * 4] = c[0]; o[i * 4 + 1] = c[1]; o[i * 4 + 2] = c[2]; o[i * 4 + 3] = 255;
+  }
+  return redSafePixels(o);
+}
+const hexRgb = (c) => { const m = /^#([0-9a-f]{6})/i.exec(String(c)); return m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) : [255, 212, 0]; };
+/* the pictures of one figure's art (worked out once per picture, shared by every impact on it) */
+function figPix(e, s) {
+  const sh = sharedOf(s), sk = skey(s, "figpix");
+  e._figs ??= new Map();
+  if ( e._figs.has(s) ) return e._figs.get(s);
+  if ( sh?.has(sk) ) { const v = sh.get(sk); e._figs.set(s, v); return v; }
+  const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
+  const w = Math.max(2, Math.round(s.sw * k)), h = Math.max(2, Math.round(s.sh * k));
+  let P = { w, h, pixels: false, area: 0.8 };
+  try {
+    const c = e.makeCanvas(w, h), x = ctx2d(e, c);
+    x.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, 0, 0, w, h);
+    const img = typeof x.getImageData === "function" ? x.getImageData(0, 0, w, h) : null;
+    if ( img?.data?.length === w * h * 4 ) {
+      const d = img.data, n = w * h, alpha = new Uint8Array(n);
+      let on = 0; for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { alpha[i] = 1; on++; }
+      const m = figureMask(d, w, h);
+      const put = (rgba) => { const cv = e.makeCanvas(w, h), cx = ctx2d(e, cv), id = cx.createImageData(w, h); id.data.set(rgba); cx.putImageData(id, 0, 0); return cv; };
+      P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null,
+        inv: put(invPixels(d)), orig: put(origPixels(d)), ink: put(inkPixels(d, w, h, alpha, false)), post: new Map(), put };
+    }
+    c.width = 0; c.height = 0;
+  } catch { P = { w, h, pixels: false, area: 0.8 }; }
+  e._figs.set(s, P); sh?.set(sk, P);
+  return P;
+}
+/* the figure's whole outline (its alpha, not the cut-out) in one flat colour: needs no pixel read */
+function alphaTint(e, s, color) {
+  const sh = sharedOf(s), sk = skey(s, `atint:${color}`);
+  if ( sh?.has(sk) ) return sh.get(sk);
+  const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
+  const c = e.makeCanvas(Math.max(2, Math.round(s.sw * k)), Math.max(2, Math.round(s.sh * k))), x = ctx2d(e, c);
+  try { x.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, 0, 0, c.width, c.height); } catch { return null; }
+  x.globalCompositeOperation = "source-in"; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
+  sh?.set(sk, c);
+  return c;
+}
+/* the accent that lights the rims (seeded per impact: tone a or b; never saturated red under the guard) */
+export const rimColor = (e) => { const c = e.rimTone === "b" ? e.tone.b : e.tone.a; return e.redOk ? c : isRed(c) ? (isRed(e.tone.b) ? PAPER : e.tone.b) : c; };
+/* which figures and what they show on this drawing, on this seat:
+   -> null (no figures' part) | { t (r i p k o), list: [fig] }. A treatment that changes the brightness of the figures' own art (i, p, k)
+   is drawn only while all of them together cover at most LIMITS.figArea of the view (a seat zoomed close onto a big token gets the
+   rim only), only from art this seat can read, and never in the gentle variant (safety() already made those r) */
+export const ENLARGED = new Set(["shadow", "glare", "swap"]);
+export function figTreat(e, f) {
+  if ( !f?.fig || !e.figs?.length ) return null;
+  const list = e.figs.filter((g) => g.sil && !(g.role === "target" && ENLARGED.has(f.type)));
+  if ( !list.length ) return null;
+  const t = e.local ? "r" : f.fig;
+  /* the area is shared out in order (the struck figure first, then the attacker, then the others): a figure whose art would take the
+     figures' area over the cap keeps the rim only */
+  let a = 0;
+  const each = list.map((g) => {
+    if ( !FIG_BRIGHT.has(t) ) return t;
+    const ga = Math.abs(g.sil.w * g.sil.h) * (g.area ?? figPix(e, g.sil).area);
+    if ( a + ga > LIMITS.figArea * e.W * e.H ) return "r";
+    a += ga; return t;
+  });
+  return { t, list, each, area: a };
+}
+/* one figure: ink line and lit rim round its true outline, then its art in the treatment */
+function drawFig(ctx, e, f, g, t, R) {
+  const s = g.sil, P = figPix(e, s), u = unit(e);
+  const step = Number.isFinite(e.step) ? e.step : 3;
+  const w = s.w, h = s.h;
+  if ( (t === "i" || t === "p" || t === "k" || t === "o") && !P.pixels ) t = "r";
+  /* the rim boils: its width and the angle of its copies change with every drawing (seeded) */
+  const rw = Math.max(1.5, Math.min(u * 0.016, Math.min(w, h) * 0.045 * (1 + 0.16 * step))) * R.f(0.85, 1.15), iw = Math.max(1.2, rw * 0.5);
+  const lit = rimColor(e), inkT = alphaTint(e, s, INK), litT = alphaTint(e, s, lit);
+  ctx.save();
+  ctx.translate(g.cx, g.cy);
+  ctx.rotate(s.rot ?? 0);
+  if ( g.flipX || g.flipY ) ctx.scale(g.flipX ? -1 : 1, g.flipY ? -1 : 1);
+  /* the side the blow comes from, in the figure's own frame */
+  const da = e.dir != null ? e.dir + Math.PI - (s.rot ?? 0) : null;
+  const lx = da != null ? Math.cos(da) * (g.flipX ? -1 : 1) : 0, ly = da != null ? Math.sin(da) * (g.flipY ? -1 : 1) : 0;
+  const a0 = R.f(0, Math.PI * 2);
+  const ring = (img, r, sx = 0, sy = 0) => { if ( !img ) return; for ( let i = 0; i < 12; i++ ) { const a = a0 + (i / 12) * Math.PI * 2; ctx.drawImage(img, -w / 2 + Math.cos(a) * r + sx, -h / 2 + Math.sin(a) * r + sy, w, h); } };
+  ring(inkT, rw + iw, lx * rw * 0.7, ly * rw * 0.7);
+  ring(litT, rw, lx * rw * 0.9, ly * rw * 0.9);
+  let art = null;
+  if ( t === "i" ) art = P.inv;
+  else if ( t === "k" ) art = P.ink;
+  else if ( t === "p" ) { art = P.post.get(lit); if ( !art && P.pixels ) { art = P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER ? e.tone.a : lit)))); P.post.set(lit, art); } }
+  else if ( P.pixels ) art = P.orig;
+  if ( art ) ctx.drawImage(art, -w / 2, -h / 2, w, h);
+  else { try { ctx.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, -w / 2, -h / 2, w, h); } catch {} }
+  ctx.restore();
+}
+/* the figures' part of a drawing (painted last, over the drawing's own ink) */
+function paintFigs(ctx, e, f) {
+  const tr = figTreat(e, f);
+  if ( !tr ) return;
+  const R = rng((f.seed ^ 0x5bd1e995) >>> 0);
+  tr.list.forEach((g, i) => drawFig(ctx, e, f, g, tr.each[i], R));
+}
+/* the outline of a figure as a ring (for the knock-back echoes), cached per figure, colour and width */
+function ringOf(e, s, color, wpx) {
+  const key = `ring:${color}:${wpx.toFixed(1)}:${s.w.toFixed(0)}x${s.h.toFixed(0)}`, sh = sharedOf(s), sk = skey(s, key);
+  if ( sh?.has(sk) ) return sh.get(sk);
+  const m = Math.ceil(wpx + 2), c = e.makeCanvas(Math.max(2, Math.round(s.w + 2 * m)), Math.max(2, Math.round(s.h + 2 * m))), x = ctx2d(e, c);
+  const tint = alphaTint(e, s, color); if ( !tint ) return null;
+  for ( let i = 0; i < 10; i++ ) { const a = (i / 10) * Math.PI * 2; x.drawImage(tint, m + Math.cos(a) * wpx, m + Math.sin(a) * wpx, s.w, s.h); }
+  x.globalCompositeOperation = "destination-out"; x.drawImage(tint, m, m, s.w, s.h);
+  const out = { c, m }; sh?.set(sk, out);
+  return out;
+}
+
 /* ---------- parts shared by several frames ---------- */
 /* speed lines along the blow, or focus lines to the subject. Every ink line has a paper keyline and every paper line an ink one, so
    they read on a dark busy scene as on a pale one */
@@ -417,7 +575,48 @@ const PAINT = {
     const small = s.blobs.slice(0, -2).map(([x, y, r]) => [x, y, r * 0.5]);
     discs(ctx, small, PAPER, u * 0.003); discs(ctx, small, e.tone.a);
   },
-  rest() { /* a beat of nothing (the still drawing of reduced motion waits for the blow's instant) */ }
+  rest() { /* a beat of nothing (the still drawing of reduced motion waits for the blow's instant) */ },
+  /* IMPACT3: the held drawing of the hit: the figures (painted after, by paintFigs) with the struck one's knock-back echoes behind it
+     along the blow and flares thrown off the point of contact; the scene untouched */
+  fig(ctx, e, f) {
+    const u = unit(e), g = gain(e), R = rng(f.seed);
+    const tgt = e.figs?.find((x) => x.role === "target" && x.sil);
+    const tr = figTreat(e, f);
+    /* knock-back echoes: the struck figure's outline twice behind it along the blow, fading (thin outlines in the accent and in ink;
+       not in the gentle panel) */
+    if ( tgt && e.dir != null && tr && !e.local ) {
+      const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03), d = Math.max(s.w, s.h) * 0.28 * g;
+      const ra = ringOf(e, s, rimColor(e), wpx), rk = ringOf(e, s, INK, wpx * 1.8);
+      for ( const [k, al] of [[2, 0.45], [1, 0.8]] ) {
+        const x = tgt.cx + Math.cos(e.dir) * d * k, y = tgt.cy + Math.sin(e.dir) * d * k;
+        ctx.save(); ctx.globalAlpha = al; ctx.translate(x, y); ctx.rotate(s.rot ?? 0);
+        if ( rk ) ctx.drawImage(rk.c, -s.w / 2 - rk.m, -s.h / 2 - rk.m);
+        if ( ra ) ctx.drawImage(ra.c, -s.w / 2 - ra.m, -s.h / 2 - ra.m);
+        ctx.restore();
+      }
+    }
+    /* flares: wedges thrown off the point of contact, outward from the figure (ink with a paper keyline, an accent core) */
+    const R0 = Math.max(e.R, u * 0.03);
+    const out = Math.hypot(e.hx - e.cx, e.hy - e.cy) > 1 ? Math.atan2(e.hy - e.cy, e.hx - e.cx) : e.dir != null ? e.dir + Math.PI : R.f(0, Math.PI * 2);
+    const n = 6 + Math.min(6, Math.round((Number.isFinite(e.step) ? e.step : 3) * 1.2));
+    const ink = [], acc = [];
+    for ( let i = 0; i < n; i++ ) {
+      const a = out + R.f(-1.25, 1.25), len = R0 * R.f(0.7, 1.9) * g, wd = R0 * R.f(0.06, 0.14);
+      const x0 = e.hx + Math.cos(a) * R0 * 0.1, y0 = e.hy + Math.sin(a) * R0 * 0.1, px = -Math.sin(a), py = Math.cos(a);
+      const tri = [x0 + px * wd, y0 + py * wd, x0 - px * wd, y0 - py * wd, x0 + Math.cos(a) * len, y0 + Math.sin(a) * len];
+      ink.push(tri);
+      if ( i % 2 === 0 ) acc.push([x0 + px * wd * 0.45, y0 + py * wd * 0.45, x0 - px * wd * 0.45, y0 - py * wd * 0.45, x0 + Math.cos(a) * len * 0.62, y0 + Math.sin(a) * len * 0.62]);
+    }
+    fillPolys(ctx, ink, INK, PAPER, u * 0.0028);
+    fillPolys(ctx, acc, rimColor(e));
+    burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.42, fill: PAPER, stroke: INK, spikes: 11, long: 2 });
+  },
+  /* the cracks and shards of `shatter` with the scene left alone (a later drawing of a hit, after the flashes are spent) */
+  cracks(ctx, e, f) {
+    const u = unit(e), c = G.cracks(f.seed, { cx: e.hx, cy: e.hy, r: floorOf(e, 0.5, 9) * gain(e), w: Math.min(u * 0.022, Math.max(e.R > 0 ? e.R * 0.4 : u, u * 0.008)) * gain(e), n: 10 });
+    for ( const p of c.cracks ) shape(ctx, p, PAPER, INK, u * 0.004);
+    for ( const p of c.shards ) shape(ctx, p, INK, PAPER, u * 0.004);
+  }
 };
 const tearAngle = (e, f) => e.dir ?? ((f.seed % 180) * Math.PI) / 180;
 
@@ -453,9 +652,10 @@ export function paintFrame(ctx, e0, f) {
     const p = panelOf(e, f);
     ctx.beginPath(); path(ctx, p); ctx.clip();
     fn(ctx, e, f);
+    paintFigs(ctx, e, f);
     ctx.restore(); ctx.save();
     if ( f.back ) { ctx.beginPath(); path(ctx, p); ctx.lineJoin = "miter"; ctx.miterLimit = 3; ctx.lineWidth = unit(e) * 0.008; ctx.strokeStyle = INK; ctx.stroke(); }
-  } else fn(ctx, e, f);
+  } else { fn(ctx, e, f); paintFigs(ctx, e, f); }
   ctx.restore();
   return true;
 }

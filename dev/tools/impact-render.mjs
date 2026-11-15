@@ -4,6 +4,8 @@
 // Spec (JSON, optional; default = every frame type held, then every kind at four strengths):
 //   { "items": [ { "label": "crit", "fn": "play" | "show", "type": "slam", "args": { "kind": "crit", "magnitude": 1.7, "dir": 20, "subject": "tok" } } ] }
 //   "subject": "tok" = the test figure, "tok2" = the small one, "word" = a lettered word; { "fx", "fy" } = a point (viewport fractions).
+// --art fig|round|square|light (IMPACT3): the struck token's art (a cut-out figure, a round portrait, a square portrait with dark art, a round
+//   portrait with light art); --tok its size in px; --figfrom 1 passes the attacker "tok2" as an element (it takes part as a figure).
 // --keep "KA-THOOM!" (KEEPBOX): a LETR word (and its number, --keepnum "-3") lettered over the figure UNDER the impact layer (like a world
 //   word in the scene) and passed to every item as `keep`: shows how a kept word reads through every drawing. --keepsize = its size (px).
 // Output: <out>/<nn>-<label>/f##.png (one per tick), <out>/<nn>-<label>.png (the strip), <out>/frames.png (sheet of the single frame
@@ -85,6 +87,35 @@ figure("tok2", 54, W * 0.24, H * 0.44, ["#1d4fa8", "#e7e7ea", "#5a3a22"]);
   c.fillStyle = "#c8102e"; c.fillRect(78, 98, 100, 12);                                               // mask band
   c.restore(); c.lineWidth = 10; c.strokeStyle = "#d8c27a"; c.beginPath(); c.arc(128, 128, 122, 0, 7); c.stroke(); }
 if ( q.get("round") ) document.getElementById("tok").style.display = "none";
+/* IMPACT3: more test tokens for the figures' part: --art square (a SQUARE portrait with dark art) | light (a ROUND portrait with light,
+   pale art) | round | fig (default); they replace the struck token "tok" in the specs. The attacker "tok2" stays a cut-out figure. */
+{ const art = q.get("art"), size = +(q.get("tok") ?? 120);
+  if ( art === "square" || art === "light" ) {
+    const t = document.createElement("canvas"); t.id = "tokA"; t.width = t.height = 256; document.body.insertBefore(t, document.getElementById("under"));
+    Object.assign(t.style, { position: "fixed", pointerEvents: "none", width: size + "px", height: size + "px", left: (W * 0.56 - size / 2) + "px", top: (H * 0.5 - size / 2) + "px" });
+    const c = t.getContext("2d");
+    if ( art === "square" ) {
+      c.fillStyle = "#14161c"; c.fillRect(0, 0, 256, 256);
+      const g = c.createRadialGradient(128, 90, 10, 128, 110, 170); g.addColorStop(0, "#3a2f4a"); g.addColorStop(1, "#0d0d12"); c.fillStyle = g; c.fillRect(6, 6, 244, 244);
+      c.fillStyle = "#2a2433"; c.beginPath(); c.ellipse(128, 270, 120, 92, 0, 0, 7); c.fill();
+      c.fillStyle = "#5b4636"; c.beginPath(); c.ellipse(128, 120, 46, 58, 0, 0, 7); c.fill();
+      c.fillStyle = "#101014"; c.beginPath(); c.ellipse(128, 86, 56, 40, 0, Math.PI, 0); c.fill(); c.fillRect(70, 84, 18, 70); c.fillRect(168, 84, 18, 70);
+      c.fillStyle = "#c9b23a"; c.fillRect(104, 112, 16, 6); c.fillRect(136, 112, 16, 6);
+      c.lineWidth = 10; c.strokeStyle = "#3b3346"; c.strokeRect(5, 5, 246, 246);
+    } else {
+      c.save(); c.beginPath(); c.arc(128, 128, 122, 0, 7); c.clip();
+      c.fillStyle = "#eef1f4"; c.fillRect(0, 0, 256, 256);
+      c.fillStyle = "#9ec7e6"; c.beginPath(); c.ellipse(128, 262, 112, 80, 0, 0, 7); c.fill();
+      c.fillStyle = "#f6dcc4"; c.beginPath(); c.ellipse(128, 118, 50, 60, 0, 0, 7); c.fill();
+      c.fillStyle = "#f0d070"; c.beginPath(); c.ellipse(128, 76, 58, 36, 0, Math.PI, 0); c.fill(); c.fillRect(70, 74, 16, 56); c.fillRect(170, 74, 16, 56);
+      c.fillStyle = "#4a6b8a"; c.fillRect(104, 112, 14, 6); c.fillRect(138, 112, 14, 6); c.fillRect(118, 152, 22, 4);
+      c.restore(); c.lineWidth = 10; c.strokeStyle = "#c8ccd4"; c.beginPath(); c.arc(128, 128, 122, 0, 7); c.stroke();
+    }
+    document.getElementById("tok").style.display = "none";
+  }
+  if ( art === "round" ) { document.getElementById("tok").style.display = "none"; document.getElementById("tok3").style.display = "block"; }
+}
+const TOKMAIN = q.get("art") === "square" || q.get("art") === "light" ? "tokA" : q.get("art") === "round" || q.get("round") ? "tok3" : "tok";
 const { createImpact } = await import("/eng/impact/index.mjs");
 const prefs = JSON.parse(q.get("prefs"));
 const I = createImpact({ get prefs() { return prefs; } }, null); window.I = I;
@@ -99,8 +130,13 @@ if ( q.get("keep") ) {
   window.__keep.push(L.play(q.get("keep"), { ...o, at: { x: W * 0.56, y: H * 0.5 - ts / 2 - size * 0.55 } }));
   if ( q.get("keepnum") ) window.__keep.push(L.play(q.get("keepnum"), { ...o, seed: "keepbox#n", size: size * 0.8, at: { x: W * 0.56 + ts * 0.62 + size * 0.5, y: H * 0.5 - ts * 0.1 } }));
 }
-const fx = (v) => (v === "tok" || v === "tok2" || v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
-window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( window.__keep.length && a.keep !== false ) a.keep = window.__keep.length > 1 ? window.__keep : window.__keep[0]; if ( a.from ) a.from = fx(a.from); if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(); a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+const fx = (v) => (v === "tok" ? document.getElementById(TOKMAIN) : v === "tok2" || v === "tok3" ? document.getElementById(v) : v && typeof v === "object" && ("fx" in v) ? { x: v.fx * W, y: v.fy * H } : v);
+window.__run = (it) => { const a = { ...(it.args ?? {}) }; a.subject = fx(a.subject); if ( window.__keep.length && a.keep !== false ) a.keep = window.__keep.length > 1 ? window.__keep : window.__keep[0]; if ( a.from ) a.from = fx(a.from);
+  /* IMPACT3: an element attacker stays an element (it takes part as a figure on an engine that knows figures); its direction is passed as
+     dir too, so an older engine draws the same blow */
+  if ( typeof a.from?.getBoundingClientRect === "function" ) { const r = a.from.getBoundingClientRect(), s = a.subject?.getBoundingClientRect?.() ?? (a.subject && Number.isFinite(a.subject.x) ? { left: a.subject.x, top: a.subject.y, width: 0, height: 0 } : null);
+    if ( s && a.dir == null ) a.dir = Math.atan2(s.top + s.height / 2 - (r.top + r.height / 2), s.left + s.width / 2 - (r.left + r.width / 2)) * 180 / Math.PI;
+    if ( q.get("figfrom") !== "1" ) a.from = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
   const h = it.fn === "show" ? I.show(it.type, a) : I.play(a); window.__h = h;
   return { alive: h.alive, mode: h.mode, ms: h.plan?.ms, frames: h.plan?.frames.map((f) => [f.type, f.ticks, f.full ? "F" : "", f.stop ? "s" : "", f.punch ? "p" : ""].join("")), guard: h.plan?.guard }; };
 window.__done = true;
@@ -133,7 +169,7 @@ try {
   await s.send("Page.enable"); await s.send("Runtime.enable");
   const logs = []; s.on("Runtime.consoleAPICalled", (e) => { if ( e.type === "error" || e.type === "warning" ) logs.push(e.args.map((a) => a.value ?? a.description).join(" ")); });
   s.on("Runtime.exceptionThrown", (e) => logs.push("EXC " + (e.exceptionDetails?.exception?.description ?? e.exceptionDetails?.text)));
-  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}${arg("keep") ? `&keep=${encodeURIComponent(arg("keep"))}&keepnum=${encodeURIComponent(arg("keepnum", ""))}&keepsize=${arg("keepsize", "56")}` : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
+  await s.send("Page.navigate", { url: `http://127.0.0.1:${srv.address().port}/?bg=${BG}&mode=${MODE}&tok=${arg("tok", "120")}${arg("round") ? "&round=1" : ""}${arg("art") ? `&art=${arg("art")}` : ""}${arg("figfrom") ? "&figfrom=1" : ""}${arg("keep") ? `&keep=${encodeURIComponent(arg("keep"))}&keepnum=${encodeURIComponent(arg("keepnum", ""))}&keepsize=${arg("keepsize", "56")}` : ""}&prefs=${encodeURIComponent(JSON.stringify(PREFS))}` });
   const ev = async (x) => { const r = await s.send("Runtime.evaluate", { expression: x, awaitPromise: true, returnByValue: true }); if ( r.result?.exceptionDetails ) logs.push("EVAL " + r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
   for ( let i = 0; i < 400 && !(await ev("window.__done===true")); i++ ) { await ev("window.__advance(10).then(()=>true)"); await new Promise((r) => setTimeout(r, 30)); }
   if ( arg("keep") ) await ev("window.__advance(1500).then(()=>true)");   // the kept word has landed and holds

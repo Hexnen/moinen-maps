@@ -56,6 +56,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | SUSTAINGAP (a sustained sound reads as one run: phrases seated by their own measured ink, never piled; echo and shed beyond the run's edge; the run inside the view and a caller's `room`; `startAt` on every seat; stream syllables in staggered lanes; a word drawn in by parts no longer thrown away by decaying holds) | 1.9.15 | API-CONTRACT 1.9.15 | `tactics-zones-sustaingap` | pending merge (sections 10, 12, 18) |
 | ENGVIEW (one table picture from the public API: an explicit `view` for sizeOf / measure / play / stream / sustain; `L.measure` stand / inkReach / ink / rim / life; `L.streamUnit`; legacy sustain on `startAt`; `L.impact.tierOf` / `stepOf` / `tiers` / `seriesBoost`; `ceilK` named as unread) | 1.9.18 | API-CONTRACT 1.9.18 (v22) | `tactics-zones-engview` | pending merge (sections 5, 6, 6a, 8, 10, 12, 18, 20) |
 | ENGDROP (no bridge to plus-ultra's old mirror, no legacy settings description; migration reads plus-ultra's old copy from its document; an older plus-ultra handled; the settings window redesigned) | 1.9.19 | API-CONTRACT 1.9.19 (v23) | `tactics-zones-engdrop` | pending merge (section 15) |
+| IMPACT3 (the tokens take part in the impact frames: negative, posterised, inked, own colours, lit rims on their true outline, echoes, flares; ladders rebuilt in hand-drawn timing inside the guard; `also`, `figures`, per-frame `fig` / `kick`) | 1.9.20 | API-CONTRACT 1.9.20 (v24) | `tactics-zones-impact3` | pending merge (section 21a) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -1568,6 +1569,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (MAPSAME, moinen-maps caller `tactics-zones-mapsame`, no engine change): section 5 "the same picture on every seat" (one
   table side for every word at every step, the main word's side chosen on shared probe seats, one envelope per seat with the steps
   drawn inside it, the grid scan, the layout made ahead in an idle moment, off-view fire runs); `dev/sfx-same.test.mjs`.
+- 2026-11-15: IMPACT3 (1.9.20, `tactics-zones-impact3`): section 21a (the tokens take part in the impact frames: figure treatments,
+  `fig` / `cracks`, the rebuilt ladders, the figures' area cap, `also` / `figures` / `fig` / `kick`, caller lessons); impact README
+  "The figures" and "Kinds"; `check-figures.mjs`.
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
@@ -1625,8 +1629,27 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   drawings: now every drawing passed by less than 4 ticks shows for one frame; (4) the guard runs also for a call shown late or not
   visible on this seat. `check-seats.mjs`: seats at 60 / 144 / 30 with stalls / 20 fps, different clocks and delays, the GM with
   private numbers, agree on all 16 calls (before: 11 differed). Limits unchanged. `[V node]`
+- (1.9.20 IMPACT3) The tokens take part (owner: more like sakuga MAD, colour inversions ON the tokens, accents on their edges, more
+  effects, more dynamic). The struck `subject`, the attacker (`from`) and any `also` tokens are drawn by the impact layer at their own
+  place, size, turn and flip, from their own art, and each drawing says what happens to them (`fig`): `r` a lit rim on the figure's
+  TRUE outline (ink outside, the accent inside, thicker on the side of the blow), `i` its colour negative, `p` posterised to ink /
+  accent / paper, `k` inked black and white, `o` its own colours (it stands out in colour on a negative or black frame). Two new frame
+  types: `fig` (the figures held, knock-back echoes along the blow, flares from the contact point) and `cracks` (`shatter`'s ink without
+  the scene's change). Every ladder except `word` rebuilt in hand-drawn timing: a lead-in tick, the contact, the hit-stop HELD on the
+  figures while their palette jumps on ones with the frame shaking (`kick: -1` = a shove back against the blow), the release on twos,
+  rims dying out; a seed swaps the order of the palette jumps, so blows of one strength differ. Each ladder has at most 2 flash
+  drawings by design (a lone impact is never thinned). The figures' brightness changes (`i p k`) cover together at most 2.5 % of the
+  view on any drawing (`LIMITS.figArea`, under WCAG's small safe area of 2.78 %), target first; past that a figure gets the rim: a big
+  token at a close zoom shows rims only. The gentle variant and reduced motion draw rims only. A token is drawn on a seat only when
+  that seat may see it (a GM-hidden token never on a player's, its outline neither). Caller options: `also: [tokens]`, `figures:
+  false | "rim"` (lower only), and in your own `frames` a step's `fig` and `kick`. Tables per step and kind: the impact README
+  "The figures" and "Kinds". `[V node, V render, V live]` Live (lane 5, GM + Test Gracz 1, 60 fps): identical drawings on both
+  seats frame by frame; no frame over 16.7 ms inside any directly called impact; a photosensitive seat drew `local` with rims while
+  the GM drew `full`. Caller notes from the take: a crowd in plus-ultra passes only its heaviest target (the others could be `also`);
+  no maps caller plays an impact for a map blast today.
 
-**Frame types** (18): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`. Full-field:
+**Frame types** (20): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`, and
+(1.9.20) `fig cracks`. Full-field:
 `slam shadow glare swap window` and `tear` (half the frame inverted). `ink` and `shatter` change the scene only inside a jagged panel
 of at most 20 % of the view round the blow (1.8.2; before, the whole view).
 
@@ -1645,7 +1668,10 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
   the windows of every planned call, on every seat alike; the stronger one cuts the others at its start).
 - Film check (1.9.1): the five-blow ladder on dark, mid-grey and bright scenes gave at most 1.5 whole-picture flashes in any second
   (WCAG limit 3); reduced motion 0.5. `[V live]`
-- The user can switch the guard off on their own client (`photosafe`); no caller option can.
+- The user can switch the guard off on their own client (`photosafe`); no caller option can. (1.9.16 ENGTABLE: the guard is no
+  setting any more and always on; this line is history.)
+- (1.9.20) The figures: brightness-changing art (`i p k`) at most 2.5 % of the view per drawing in all, never a flash by itself;
+  rims only on a gentle or reduced seat; red in a figure's art drawn as the safe crimson; the rim's accent never red. `[V node]`
 
 **Cost.** IMPACT measured live 2026-11-13 (1600x900, GM seat): no animation frame over 25 ms through any frame type or whole impact;
 one drawing paints in 1.6 to 6.9 ms; two seats on the shared clock changed drawings within 6 ms `[V live]`. 1.9.1 (film clock off):
@@ -1662,6 +1688,8 @@ WORDS give one 62 ms frame when planned together (open, section 18). Numbers: th
 - The guard decides per client what is drawn; the timing is the same everywhere. Do not offer a setting that skips it; for a module's
   own "fewer effects" pass `gentle: true`.
 - A world-space word under a slam is inverted with the scene; a word on the `screen` layer stays on top of an `over: "ui"` impact.
+- (1.9.20) Pass the attacker as `from` (a token) and the other struck tokens as `also` so they take part; pass `figures: "rim"` where
+  the art must never change (a portrait in a dialogue panel), `figures: false` where the impact must not draw on tokens at all.
 
 **Looking at it.** Offline: `node dev/tools/impact-render.mjs --out <dir>` (moinen-maps; one headless browser, light slot; `--bg
 night|map|bright|dark|light`, `--round 1` = a round portrait token, `--spec`). Live: `L.impact.gallery({ subject: token, dir: 20 })`.

@@ -40,7 +40,9 @@ over), `"off"` (switched off on this client).
 | `series` | (1.9.1) the blow's place in a series (0, 1, 2, ...): each later blow is drawn `I.series.step` (0.15) magnitude stronger, at most `I.series.max` (4) steps; the guard is unchanged |
 | `over` | `"scene"` (default: over the map, under bars and windows, z 4) or `"ui"` (over every window, one under the lettering's `screen` layer, so a word on that layer stays on top); `z` or `parent` (an element) override |
 | `tone` / `colors` | accent pair: `hero fire blood volt toxic void dust`, or `colors: [accent, second]` (a power's own colours). Ink and paper are fixed |
-| `frames` | your own sequence instead of the kind's: `["shadow", { type: "slam", ticks: 2, punch: 1, stop: false }, "dots"]` (the limits still apply) |
+| `frames` | your own sequence instead of the kind's: `["shadow", { type: "slam", ticks: 2, punch: 1, stop: false }, "dots"]` (the limits still apply). 1.9.20: a step may carry `fig` (`"r" "i" "p" "k" "o"`, what the figures do in that drawing, see "The figures") and `kick: -1` (that drawing's shove goes BACK against the blow, so a punch then a kick shakes the frame). A sequence without any `fig` gets one worked out from its peak: rims before it, own colours on it, then the negative, then posterised, rims after |
+| `also` | (1.9.20) more tokens that take part as figures (the other tokens a crowd blow struck, a thrower): up to 8 figures in all with `subject` and `from`; each one only on a seat that may see it |
+| `figures` | (1.9.20) `false`: no figure is drawn (the new ladders without the tokens taking part); `"rim"`: rims only, the art never changed. Can only lower |
 | `hitstop`, `punch` | `false` turns the hold / the shove off for this call; `punch: 0.5` scales it |
 | `vision` | `"none"`: show it even when the subject token is not visible to this user (and take a hidden `from` token's direction) |
 | `reduced` | `true`: this caller's own reduced-motion setting. A caller can only LOWER: `true` reduces; `false` (or nothing) leaves the OS reduced-motion switch in charge (1.8.2; before, `false` overruled the OS). Only the client's own Motion setting `full` overrules the OS |
@@ -85,6 +87,8 @@ fatal, cut, energy }`, `{ type: "roll", crit }`, `{ type: "blast" | "landing", a
 | `ring` | a thick broken shock band in the accent with ink and paper keylines, chunks thrown off its rim, ticks running outward, a halftone rim in the second colour (flattened for `landing`) | |
 | `fade` | last drawing: the star's afterimage as a hollow outline, puffs of dust thrown along the blow, thin ticks, accent specks | |
 | `rest` | nothing (a wait: the still drawing of reduced motion waits for the blow's instant with it) | |
+| `fig` | (1.9.20) the figures held on the frame with the blow on them: two knock-back echoes (outlines of the struck figure along the blow, fainter further back), ink and accent flares out of the contact point, a small paper star; the scene untouched | |
+| `cracks` | (1.9.20) `shatter`'s ink (cracks running out, shards, a star) WITHOUT the scene's change: a rung after a slam that must not spend a flash | |
 
 A drawing may also carry `stop` (hit-stop: the canvas ticker is held, so tokens, weather and effects stand still under the frame) and
 `punch` (the board element is shoved along the blow and settles in two steps). Both are undone at the next drawing, at the end, and
@@ -100,6 +104,41 @@ A picture that cannot be read (another origin) falls back to its alpha and a fil
 
 Every ink shape carries a keyline of the opposite value: speed and focus lines too (1.8.2), so they read on a dark busy map.
 
+## The figures (1.9.20 IMPACT3)
+
+The tokens themselves take part. On every drawing of a kind's ladder (and of a caller's own `frames`) the struck `subject`, the attacker
+(`from`) and any `also` tokens are drawn by the impact layer at their own place, size, turn and flip on this screen, from their own
+art (the token's texture read once into a software canvas of at most 256 px, cached per picture and shared by every impact). What a
+drawing does to them is its `fig`:
+
+| fig | what the figure does |
+|---|---|
+| `r` rim | a lit rim on its TRUE outline (the art's alpha, not a disc or a box): an ink line outside, the accent inside it, both a little thicker on the side the blow comes from, boiling a little from tick to tick (seeded); the art untouched |
+| `i` negative | the art's colour negative inside the rim (a warm face goes cyan, a dark coat white) |
+| `p` posterised | the art cut to three flat tones: ink, the impact's accent, paper (by its own light and dark thirds; the cut-away portrait background inked) |
+| `k` inked | the art inked hard black and white, like the `shadow` frame's figure, at its true place and size |
+| `o` own colours | the art in its own colours with the rim: on the scene's negative or a black field the figure stands out as the one thing in colour |
+
+The rim's accent is one of two tones chosen by the seed, never red under the guard; a red pixel in a figure's negative or posterised art
+is drawn as `SAFE_RED`. Frames that already show the subject enlarged (`shadow`, `glare`, `swap`) leave the struck figure to themselves
+and still draw the others. The ladders put the palette jumps on ONES under the hit-stop (each held tick a new palette) and release on
+twos; a seed swaps the order of the negative and the posterised jump, so two blows of the same strength do not cut alike.
+
+Safety of the figures (on top of the table below): `i`, `p`, `k` change brightness, so on every drawing the figures that get them may
+cover together at most `LIMITS.figArea` = 2.5 % of the view (their own alpha area at this screen's size; shared out target first, then
+the attacker, then the rest); a figure past it gets the rim. That is under the small safe area of WCAG 2.3.1 (a 341 x 256 px square on
+a 1024 x 768 screen = 2.78 %), so a figure's palette jump is never a flash by itself and takes no flash slot. A big token at a close
+zoom therefore shows rims, not the negative: by design. The gentle variant (photosensitive seat, `local`, `gentle: true`) and reduced
+motion draw rims only; `figures: "rim"` asks the same of one call.
+
+Who is drawn: a token passes the same visibility rule as the impact's subject on this seat (a GM-hidden token is never drawn, its outline
+neither, on a player's seat; a token out of the player's sight neither). A hidden attacker gives neither a direction nor a figure (as
+before for the direction). What is drawn where differs per seat only as the seat's own pan and zoom; the plan (what each drawing does
+to the figures, which rim tone) is a function of the call, the same on every seat.
+
+Known limit: the figure is drawn from the token's place when the impact is set up; a token moving or posed by another effect DURING
+the 83-500 ms of the impact is not followed (the figure stays where the blow found it, which reads as the held frame).
+
 ## Kinds
 
 `hit` (hero yellow), `heavy` (fire; cracks, a shock ring), `crit` (hero; chromatic split after the slam, a colour frame, the torn window at
@@ -107,6 +146,36 @@ the top), `blast` (fire; radial, a white frame first), `slash` (blood; smear, th
 above, flattened rings, cracks), `ko` (blood; the longest hold on the struck figure), `shock` (volt; chromatic split first), `word` (behind
 a lettered word). Each has SIX strengths (`KINDS[kind].steps`; `tiers` is kept as a view of four of them); no two strengths of a kind
 draw the same, and the strongest are longer and hold longer. `I.gallery()` plays them all.
+
+1.9.20 IMPACT3 rebuilt every ladder except `word` in hand-drawn timing (the owner: more like sakuga MAD, colour inversions on the
+tokens, accents on their edges, more effects, more dynamic). Ticks / flash drawings / hit-stop ticks per step 0..5:
+
+| kind | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| hit | 2/0/0 | 4/0/0 | 5/1/0 | 9/2/4 | 10/2/3 | 12/2/4 |
+| heavy | 3/0/0 | 5/0/0 | 5/2/0 | 9/2/4 | 10/2/3 | 12/2/4 |
+| crit | 4/1/0 | 5/1/0 | 6/1/0 | 10/2/4 | 11/2/4 | 12/2/4 |
+| blast | 3/0/0 | 4/0/0 | 4/2/0 | 7/2/1 | 9/2/1 | 12/2/4 |
+| slash | 2/0/0 | 4/0/0 | 6/0/0 | 7/1/4 | 9/2/4 | 12/2/4 |
+| landing | 2/0/0 | 4/0/0 | 5/1/0 | 7/1/1 | 9/2/1 | 12/2/3 |
+| ko | 4/1/0 | 5/1/0 | 6/1/0 | 8/2/4 | 11/2/4 | 12/2/4 |
+| shock | 2/0/0 | 4/0/0 | 4/1/0 | 6/1/1 | 9/2/1 | 12/2/3 |
+
+What each step does now (every kind follows it with its own drawings):
+- steps 0-1 (graze, scratch): the scene untouched; the star at the figure's rim, the figure lit at its edge, at step 1 flipped to its
+  negative for one tick, then held with its rim. 1.9.19 showed a star only.
+- step 2 (solid): the panel goes black and white with the figure IN ITS OWN COLOURS on it, then the figure's negative, then posterised
+  with a kick back (the frame shakes); a halftone fan, rims dying. 1.9.19: the panel, a star, the fan.
+- step 3 (strong): a lead-in tick (lines, the figure rimmed or inked), the black frame with the inked figure held under the hit-stop, the
+  scene's negative with the figure standing out in colour, the figure held as a negative (hit-stop), then posterised with cracks, a
+  splash or a colour split on a kick back; rims fade. 1.9.19: the same frames without the figures, shorter, one shove.
+- step 4 (heavy): as 3, plus two palette jumps on ones under the hit-stop (negative, posterised) with the frame shaking, a colour split,
+  a ring or halftone, the posterised figure held.
+- step 5 (the whole set): 12 ticks, 3 or 4 of them held; the critical's: lines, the torn window with the figure in colour (held), the
+  negative slam, the negative then posterised figure (held, shaking), the colour split, the figure back in its own colours, halftone,
+  the ring, rims fading. Pinned as the most spectacular rung of all (`check-figures.mjs`).
+Every ladder is designed with at most two flash drawings, so on a lone impact the guard never has to thin it (a series may still be
+thinned by the rolling second, as before).
 
 The ladder the owner named, as `I.pick` gives it (check-impact.mjs pins it: every rung different, each with more force than the last):
 
@@ -188,6 +257,16 @@ ladder scratch -> hit -> heavy -> knock-down -> critical called at once, zoom 0.
 | words and impacts | max 62 ms (the word frame above), 35 and 33 ms at the two loudest words; impacts add nothing measurable |
 | one critical scheduled 1.5 s ahead | paint 22-23 ms in total, spread; no frame over 25 ms |
 
+Re-measured 2026-11-15 (1.9.20 IMPACT3, lane 5, two seats GM + Test Gracz 1 on one chrome-headless-shell at 60 fps on the film
+clock, 1600x900, The Warehouse at zoom 0.75, both modules, another agent's test suite running on the same machine): 20 impacts (the
+hit ladder 0..5, heavy / slash / shock / landing / ko at 1.6, four plus-ultra criticals, a knock-down, a crowd, a critical with four
+`also` figures, a hidden attacker, a map blast). Every animation frame in the window of every directly called impact, the critical
+with five figures included, was 16.7 ms on both seats (no frame over one film tick). The plus-ultra criticals show one 100-117 ms
+frame just BEFORE the impact call, in the splash's own work (the same frame was 133-467 ms on 1.9.19 in earlier takes), none inside
+the impact. Both seats got the same drawings at the same instant (60 fps frame sheets: identical frame by frame; the hidden
+attacker: the player's drawing radial, by design). Cost of the figures: one 256 px software copy per token picture, cached and shared;
+at most 3 x 26 + 4 extra draw calls per drawing (check-figures).
+
 ## Integration recipes
 
 - **Dice-roll splash (critical).** `I.play({ kind: "crit", magnitude: 1.7, subject: splashPanelElement, over: "ui", seed: message.id,
@@ -223,4 +302,7 @@ and with `motion: reduced`.
 - Offline with a kept word (1.9.9): `--keep "KA-THOOM!" --keepnum "-3" --keepsize 56` letters the word (and its number) over the figure
   under the impact layer, like a world word, and passes it to every item as `keep`; `report.json` then holds `keepRects`.
 - Checks: `node scripts/letters/impact/check-impact.mjs` (also section 8f of `check.mjs`); `check-seats.mjs` (run from it) = several
-  simulated seats fed the same calls must draw the same pictures.
+  simulated seats fed the same calls must draw the same pictures; `check-figures.mjs` (run from it, 1.9.20) = the figure ladders, the
+  guard on every new effect at every step and mode, the area cap, red, seats, hidden tokens, the settings, draw cost.
+- Offline with the figures (1.9.20): `--art fig|round|square|light` (the struck token's art), `--tok <px>` (its size), `--figfrom 1`
+  (the attacker takes part as a figure).
