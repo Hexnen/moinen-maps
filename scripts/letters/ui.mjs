@@ -441,7 +441,7 @@ class Settings extends ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: "moinen-letters-settings", tag: "form", classes: ["letr-app", "letr-settings"],
     window: { title: "LETR.Settings.Title", icon: "fa-solid fa-burst", contentClasses: ["standard-form"] },
-    position: { width: 560, height: "auto" },
+    position: { width: 600, height: "auto" },
     form: { handler: Settings.#save, submitOnChange: false, closeOnSubmit: true },
     actions: { reset: Settings.#reset, try: Settings.#try }
   };
