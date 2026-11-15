@@ -379,6 +379,21 @@ takes no `scale` (pass the stepped syllable unit as `size`: the engine's unit is
 today's words stay byte-identical (SFXSIZE proved it with a play log of every option for a fixed firing, base vs new: 8 of 8 equal).
 (Engine wish, not needed for SFXSIZE: honour `ceilK` in `sizeCtx`, or give `L.sizeOf` the word's hold-box width.)
 
+**A caller's fit: place a word by the box the engine will draw** (moinen-maps THUNDERFIT, 2026-11-15) [V node + lane, C]: a placement
+that boxes a word by a share of its text length (`0.8 x chars + 0.6` cap heights) is wrong by up to 2 x for the invincible style (League
+Gothic is narrow): live the close strike's KRA-KA-GRRRRRAWOOM!! got a box twice its real width at one moment and ran off the window and
+under the panels at another, because the screen word was drawn at its rank's share of the view height (`fit: "screen"`, unclamped)
+while its spot was clamped by the box of the WORLD word (engine-clamped). What works:
+- the real box: `L.planFor(text, opts).plan` (installed by the tools at setup; absent in node and if the tools did not install: then
+  `L._plan` + `L._settle`), `plan._holdBox` {w, h} in drawn cap heights (the engine's size x `plan.sizeK`), times `L.sizeOf(text,
+  opts).size x sizeK` = the drawn cap height (`size` already includes the `scale` setting: do not multiply by `L.prefs.scale` again);
+- room for the entrance: the engine keeps the word's REACH in the view (`keepInView`, reach = the track's reach + 0.18 units), and the
+  reach is wider than the hold box: measured over the map's words, the reach of a slam's contact pose is up to 1.33 x the box (hold box
+  x 1.08 + 0.3 cap wide, x 1.12 + 0.25 cap tall), a rise up to 1.37 x its height, the others up to 1.13 x. A word fitted by its box
+  alone next to the view edge is pushed back by the engine onto what it was placed off: fit the box x that reach factor into the view;
+- a `fit: "screen"` word has no width ceiling: make it smaller yourself when its reach is wider than the view (or the free stretch
+  between the panels), and only then.
+
 ## 7. Layers and who sees a word
 Status: stable. [R] for the draw order, [V] for the ids.
 
@@ -951,6 +966,11 @@ Status: stable list; edit as items close.
   (a moving letter may come closer than the gap for a drawing). The tucked lead-in's hyphen still overlaps the first body letter by
   design (P7); a body that starts with L would put that hyphen into the L's stem at the top (not seen in the vocabulary; question
   KERNEX-1). [V node]
+- `L.sustain` seats (fire, crowd lines): the next phrase's seat is spaced by 1.15 x the CURRENT phrase's cap size (`em = cur.size`,
+  without the mood's `sizeK`), while a phrase's drawn box is about 1.85 em tall: a phrase entering overlaps the one leaving by 30-49 %
+  of its height at every size (moinen-maps THUNDERFIT, node sim over the fire's phrases). Callers cannot fix it (`spread` moves only x,
+  `maxWidth` is not passed to the phrases). Engine request THUNDERFIT-E1: space the seats by the drawn phrase box
+  (`size x sizeK x holdBox.h` + a gap). [V node]
 - Not exercised by this manual's node runs: layer draw order, elevation, fog/vision on a real canvas, the designer window, the
   Shift+L box, socket transport between real clients, `L.registerFont` with a real file.
 
@@ -1034,6 +1054,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   impact's second, no drawing skipped; `check-seats.mjs`; impact-render `--keep`), the stage table.
 - 2026-11-15 (SFXSIZE, moinen-maps caller `tactics-zones-sfxsize`, no engine change): rulings "everything is the GM's for the table" and
   the map lettering's size sliders (14); "A caller's size step" (6).
+- 2026-11-15 (THUNDERFIT, moinen-maps caller `tactics-zones-thunderfit`, no engine change): "A caller's fit" (6: the real box from
+  `L.planFor`, the reach factors, unclamped screen words); the sustain seat overlap (18, request THUNDERFIT-E1).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

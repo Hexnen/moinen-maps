@@ -119,7 +119,11 @@ export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (
   if ( !specs.some(grows) ) return placed;
   const n = specs.filter((w) => w.text || w.stream).length, hasMain = specs.some((w) => w.role === "main");
   const mainOk = (r) => !hasMain || isClean(r.find((q) => q.role === "main")?.pen);
-  const score = (r, i) => (mainOk(r) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && isClean(q.pen)).length - i * 0.5;
+  // (no size gives a clean place: the one that covers least - live, a step-3 blast word with no clean place anywhere stood at its full
+  // stepped size over the party portraits; at today's size it covered less. A single word: its own penalty decides)
+  const lead = (r) => (hasMain ? r.find((q) => q.role === "main") : r.length === 1 ? r[0] : null);
+  const dirt = (r) => { const m = lead(r); return m && !isClean(m.pen) ? Math.min(9, (m.pen?.pen ?? 0) * 4) : 0; };
+  const score = (r, i) => (mainOk(r) ? 1000 : 0) + r.length * 10 + r.filter((q) => q.role !== "main" && isClean(q.pen)).length - i * 0.5 - dirt(r);
   const full = (r) => mainOk(r) && r.length >= n;
   if ( full(placed) ) return placed;
   let best = { r: placed, s: score(placed, 0) };
@@ -129,4 +133,30 @@ export function ladderPlace(specs, ctx, { place, grows = () => false, resize = (
     if ( sc > best.s ) best = { r, s: sc };
   }
   return best.r;
+}
+
+/**
+ * A riding word's way (points { x, y, ms } in scene px) kept whole inside the view `v` and off the panels `ui` (pure): each point after
+ * the first is held where the word's box (`bw` x `bh`) times its reach `rk` stays `m` inside the view, and a point whose box would stand
+ * on a panel is drawn back along the way toward the start until it does not (the start point too is held inside the view). Live
+ * (THUNDERFIT): a blast's wave word rode out past the left edge and under the controls column. A way that is clean already is returned
+ * as it is (the same points: today's picture).
+ */
+export function rideFit(path, v, ui = [], bw = 0, bh = 0, rk = REACH.other, m = 0) {
+  if ( !v || !Array.isArray(path) || !path.length ) return path;
+  const hx = Math.min((bw * rk) / 2 + m, (v.x1 - v.x0) / 2), hy = Math.min((bh * rk) / 2 + m, (v.y1 - v.y0) / 2);
+  const inV = (q) => ({ x: clamp(q.x, v.x0 + hx, v.x1 - hx), y: clamp(q.y, v.y0 + hy, v.y1 - hy) });
+  const hit = (q) => hitOf(boxAt(q.x, q.y, bw, bh), ui, null) > 1e-6;
+  const p0 = { ...path[0], ...inV(path[0]) };
+  let changed = p0.x !== path[0].x || p0.y !== path[0].y;
+  const out = [p0];
+  for ( let i = 1; i < path.length; i++ ) {
+    const q = path[i]; let c = inV(q);
+    if ( hit(c) ) {
+      for ( let f = 0.9; f >= -1e-9; f -= 0.1 ) { const t = { x: p0.x + (c.x - p0.x) * f, y: p0.y + (c.y - p0.y) * f }; if ( !hit(t) || f < 0.05 ) { c = t; break; } }
+    }
+    if ( c.x !== q.x || c.y !== q.y ) changed = true;
+    out.push({ ...q, x: c.x, y: c.y });
+  }
+  return changed ? out : path;
 }

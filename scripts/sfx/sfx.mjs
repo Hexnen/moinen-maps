@@ -9,7 +9,10 @@
    per-client memory changes a word (FXLM 14).
    Words come from the engine's own vocabulary (L.word: the kind, loudness and duration of the sound), its look follows the sound, its
    motion the staging asked by sfx-core (a cave-in drops, a bomb shoves the words around it aside, a car's word rides with the car).
-   Placement on THIS client's screen: beside what it letters, off tokens, off this client's interface panels, off other words.
+   Placement on THIS client's screen: beside what it letters, off tokens, off the map's pins, off this client's interface panels, off
+   other words, measured by the box the engine will draw (THUNDERFIT, sfx-fit.mjs: the hold box from L.planFor, room for the
+   entrance's reach; an unlocated word - thunder - fitted whole into the view off the panels, smaller only when nothing holds it; a
+   bigger-step word with no clean place steps down toward today's size; one fire's spots never stand on each other).
    Settings: "sfxLetters" (client: all / big only / off), "sfxLettersWorld" (the GM's switch for everyone), "sfxWords" (client: the
    word set, auto = the game's language), "sfxLayer"; SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (world, the
    GM's for the table, live: 0 none, 1 smaller, 2 today's size, 3 bigger; sfx-size.mjs; a player sees them read-only under
@@ -461,7 +464,10 @@ function pageWord(p, w, t, waited = 0) {
   if ( w.wave ) {
     const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)],
       ui: uiBoxes(), v, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
-    spec.path = wr.ride; spec.x = wr.ride[0].x; spec.y = wr.ride[0].y;
+    // (THUNDERFIT: the way is chosen by a penalty only - live it ran past the left edge and under the controls column: it is held whole
+    // inside the view and off the panels, its reach counted)
+    const zm = canvas.stage?.scale?.x || 1;
+    spec.path = FIT.rideFit(wr.ride, v, uiBoxes(), spec.bw ?? G, spec.bh ?? G * 0.4, FIT.REACH.other, FIT.EDGE / zm); spec.x = spec.path[0].x; spec.y = spec.path[0].y;
     // (a pressure front: the word travels upright - leaning along a downward way it read as a fallen column - and is gone soon after
     // the front breaks up, live it stood at the reach for two seconds and took the debris words' places)
     spec.orient = "none"; spec.stopAt = t + w.wave.rim + 180;
@@ -574,7 +580,8 @@ function screenPlace(text, o, today, fixed) {
   const rk = FIT.reachOf(o.in), kv = FIT.viewFit(b.bw * rk, b.bh * rk, W, H);
   uiBoxes();
   const want = fixed ? { x: fixed.fx * innerWidth, y: fixed.fy * innerHeight } : today;
-  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, rk, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: uiCache.rects ?? [] });
+  // (the map's pins are in the way too: live, the strike's word stood on the scene's skull pin)
+  const r = FIT.screenFit({ today: kv >= 1 ? today : null, want, bw: b.bw * kv, bh: b.bh * kv, rk, view: { x0: 0, y0: 0, x1: W, y1: H }, ui: [...(uiCache.rects ?? []), ...pinRects()] });
   const k = kv * r.k, w2 = b.bw * k / 2, h2 = b.bh * k / 2;
   return { x: r.x, y: r.y, k, hit: r.hit, box: { x0: Math.round(r.x - w2), y0: Math.round(r.y - h2), x1: Math.round(r.x + w2), y1: Math.round(r.y + h2) } };
 }
@@ -758,6 +765,13 @@ function pinBoxes(v) {
     } catch { /* a note being redrawn */ }
   }
   return out;
+}
+/** THUNDERFIT: this seat's visible pins on the screen (client px), for the unlocated words */
+function pinRects() {
+  try {
+    const st = canvas.stage, rc = canvas.app.view.getBoundingClientRect();
+    return pinBoxes(view()).map((b) => { const a = st.toGlobal({ x: b.x0, y: b.y0 }), c = st.toGlobal({ x: b.x1, y: b.y1 }); return { x0: rc.left + a.x, y0: rc.top + a.y, x1: rc.left + c.x, y1: rc.top + c.y }; });
+  } catch { return []; }
 }
 /** the placement's view of this seat now: the view, its panels, tokens, pins and the words up */
 const placeCtx = () => { const v = view(); return { view: v, ui: uiBoxes(), tokens: tokenBoxes(v), pins: pinBoxes(v), alive: [...alive].map((a) => a.box) }; };

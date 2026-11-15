@@ -7,6 +7,7 @@
 //   FIT      the pure fitting: free runs, today's spot kept when clean, the nearest clean spot, smaller only when nothing holds it
 //   PINS     note pins are obstacles like tokens; with no pins the placement is today's, decision for decision (base commit)
 //   LADDER   a step-3 word that finds no clean place takes a smaller size, never under today's; at step 2 nothing changes
+//   RIDE     a blast's wave word rides inside the view and off the panels; a clean way is today's
 //   BURN     one fire's spots never stand on each other; a small fire is crowded by the bigger phrases; today's spots kept where they fit
 //   STEP2    today's step is today's picture wherever it was not broken (the pure parts, against the base commit)
 import assert from "node:assert/strict";
@@ -144,6 +145,26 @@ await group("LADDER", () => {
   ok(/function placeFit\(specs, ctx\) \{\n  return FIT\.ladderPlace\(specs, ctx, \{ place: C\.place, grows: \(w\) => !!w\.text && !w\.stream && !w\.path && stepFor\(grpOf\(w\)\) > SZ\.SIZE_DEFAULT,/.test(sfx), "only a word at a BIGGER step than today's climbs down the ladder");
   ok(/if \( step > SZ\.SIZE_DEFAULT && Number\.isFinite\(fitK\) && fitK < 1 \) px = z\.px \+ \(px - z\.px\) \* Math\.max\(0, fitK\);/.test(sfx), "the ladder's share is a share of the EXTRA size (0 = today's drawn size)");
   if ( V ) console.log("LADDER", { tried, cleanAt3, cleanAny, dropsBefore, dropsAfter });
+});
+
+/* ---------------------------------------------------------------- RIDE (pure): a wave word's way */
+await group("RIDE", () => {
+  const v = { x0: 1000, y0: 1000, x1: 2600, y1: 1900 }, ui = [{ x0: 1000, y0: 1000, x1: 1088, y1: 1900 }];
+  // (a way inside the view and off the panels is today's, the same array)
+  const clean = [{ x: 1800, y: 1400, ms: 0 }, { x: 1600, y: 1400, ms: 300 }, { x: 1500, y: 1400, ms: 400 }];
+  ok(FIT.rideFit(clean, v, ui, 300, 80, 1.15, 16) === clean, "a clean way is left as it is");
+  // (live: the wave rode out to the left past the edge and under the controls column)
+  const out = [{ x: 1800, y: 1400, ms: 0 }, { x: 1250, y: 1400, ms: 300 }, { x: 1050, y: 1400, ms: 400 }];
+  const r = FIT.rideFit(out, v, ui, 300, 80, 1.15, 16);
+  ok(r.every((q) => q.x - 300 * 1.15 / 2 >= v.x0 + 16 - 1e-6 && FIT.hitOf({ x0: q.x - 150, y0: q.y - 40, x1: q.x + 150, y1: q.y + 40 }, ui, null) === 0), "a way past the edge and under a panel is held inside the view, off the panel");
+  ok(r.map((q) => q.ms).join() === "0,300,400" && r[2].x < r[0].x, "its times and its direction are kept");
+  ok(/spec\.path = FIT\.rideFit\(wr\.ride, v, uiBoxes\(\)/.test(sfx), "the runtime fits the wave's way");
+  // (the ladder with no clean size takes the size that covers least, not the biggest)
+  const pen = (p) => ({ off: 0, pui: p, tok: 0, pin: 0, wrd: 0, sub: 0, pen: p });
+  const fake = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.6 : w.fitK > 0.4 ? 0.4 : 0.1) }));
+  const r2 = FIT.ladderPlace([{ role: "main", text: "KA-BOOM" }], {}, { place: fake, grows: () => true, resize: (w, f) => ({ ...w, fitK: f }) });
+  ok(r2[0].fitK === 0, "a step-3 main word with no clean place anywhere stands at the size that covers least");
+  ok(/ui: \[\.\.\.\(uiCache\.rects \?\? \[\]\), \.\.\.pinRects\(\)\]/.test(sfx), "an unlocated word keeps off the map's pins too");
 });
 
 /* ---------------------------------------------------------------- BURN (pure) */
