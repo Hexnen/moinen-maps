@@ -160,6 +160,8 @@ await group("RIDE", () => {
   ok(r.map((q) => q.ms).join() === "0,300,400" && r[2].x < r[0].x, "its times and its direction are kept");
   ok(/spec\.path = FIT\.rideFit\(wr\.ride, v, \[\.\.\.uiBoxes\(\), \.\.\.pinBoxes\(v\), \.\.\.\(p\.mainBox \? \[p\.mainBox\] : \[\]\)/.test(sfx), "the runtime fits the wave's way (off the panels, the pins, the main word)");
   ok(/\.\.\.\[\.\.\.alive\]\.map\(\(a\) => a\.box\)\.filter\(Boolean\), \.\.\.pinBoxes\(v\)\], em = burnSize/.test(sfx), "a burning fire's spots keep off the pins");
+  ok(/PG\.waveRide\([^
+]*\.\.\.pinBoxes\(v\)\],/.test(sfx), "the wave's way is chosen off the pins");
   // (the ladder with no clean size takes the size that covers least, not the biggest)
   const pen = (p) => ({ off: 0, pui: p, tok: 0, pin: 0, wrd: 0, sub: 0, pen: p });
   const fake = (specs) => specs.map((w) => ({ ...w, pen: pen(w.fitK === undefined ? 0.6 : w.fitK > 0.4 ? 0.4 : 0.1) }));

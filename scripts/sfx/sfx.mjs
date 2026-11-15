@@ -462,9 +462,9 @@ function pageWord(p, w, t, waited = 0) {
   }
   // the wave rides out the free way on this screen: away from the main word as placed here, off the panels, inside the view
   if ( w.wave ) {
-    const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)],
+    const v = view(), wr = PG.waveRide(w.wave.at, w.wave.r0, w.wave.reach, w.wave.rim, { avoid: [...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean), ...pinBoxes(v)],
       ui: uiBoxes(), v, wb: { w: spec.bw ?? G, h: spec.bh ?? G * 0.4 } });
-    // (THUNDERFIT: the way is chosen by a penalty only - live it ran past the left edge and under the controls column: it is held whole
+    // (THUNDERFIT: the pins weigh in the way's choice (live the wave rode across the scene's skull pin); the way is chosen by a penalty only - live it ran past the left edge and under the controls column: it is held whole
     // inside the view and off the panels, its reach counted)
     const zm = canvas.stage?.scale?.x || 1;
     spec.path = FIT.rideFit(wr.ride, v, [...uiBoxes(), ...pinBoxes(v), ...(p.mainBox ? [p.mainBox] : []), ...[...alive].map((a) => a.box).filter(Boolean)], spec.bw ?? G, spec.bh ?? G * 0.4, FIT.REACH.other, FIT.EDGE / zm);
