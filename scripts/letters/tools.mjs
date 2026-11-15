@@ -17,12 +17,17 @@ import { STRINGS } from "./strings.mjs";
 import * as A from "./author.mjs";
 import * as N from "./net.mjs";
 import { COLORS, TICK, MOODS, MOOD_IDS } from "./design.mjs";
+import { makeClock } from "./clock.mjs";
+import { sameBuild } from "./registry.mjs";
 
 export const NS = "moinen-letters";
 const LOG = "LETR |";
 export const state = {
   prefs: { ...DEFAULTS }, styles: A.makeStyles(), fromWorld: new Set(), flashLog: [], host: null, engine: null, base: null,
-  live: null, liveQ: [], liveT: 0, gate: N.rateGate(30), net: new Map(), warned: new Set()
+  live: null, liveQ: [], liveT: 0, gate: N.rateGate(30), net: new Map(), warned: new Set(),
+  /* ENGREG: the table's clock (clock.mjs; Foundry's serverTime until the first answer) and the builds the seats run */
+  clock: makeClock({ ping: (cb) => game.socket.emit("time", (t) => cb(t?.serverTime)), fallback: () => globalThis.game?.time?.serverTime }),
+  seats: new Map(), helloGate: N.rateGate(4), reg: null
 };
 const osReduced = () => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 const t = (k, d) => globalThis.game?.i18n?.format?.(`LETR.${k}`, d ?? {}) ?? k;
@@ -46,6 +51,8 @@ export function install(L, base) {
       capPx, vh, preview: !!h?.still, impacts: state.impactWins });
   });
   ext.start.push(announce);
+  /* ENGREG: L.measure gets this seat's settings like planFor (no flash budget touched) */
+  ext.preview?.push((plan, o) => filterPlan(plan, o ?? {}, { prefs: state.prefs, colors: COLORS, TICK, flashLog: [], preview: true, capPx: 0, vh: 1 }));
   /* a stream with a style: the style's mood, palette, colours and motion under the stream's own options (one hand for all syllables) */
   const stream0 = L.stream;
   L.stream = (o = {}) => {
@@ -69,7 +76,14 @@ export function install(L, base) {
     saveStyle, deleteStyle,
     palettes: () => Object.keys(COLORS), motionNames: A.motionNames,
     net: netApi(L),
-    letterNow, designer: openDesigner, openSettings, planFor: (text, opts) => planFor(L, text, opts)
+    letterNow, designer: openDesigner, openSettings, planFor: (text, opts) => planFor(L, text, opts),
+    /* ENGREG: the table's clock, the same instant on every seat (server ms): now(), toPage(serverMs) -> this page's performance.now(),
+       toServer(pageMs), offset(), error() (ms, the bound of this seat's error), ready(), state() */
+    clock: Object.freeze({ now: () => state.clock.serverNow(), toPage: (s) => state.clock.toPage(s), toServer: (p) => state.clock.toServer(p),
+      offset: () => state.clock.offset(), error: () => state.clock.error(), ready: () => state.clock.ready(), state: () => state.clock.state() }),
+    /* ENGREG: the engine build each seat runs ([{ user, name, gm, version, hash, module, same }]: same = the GM's build); a seat that
+       runs another build than the GM's is named on the GM's seat and on its own */
+    seats: () => seatsList()
   });
   return L;
 }
@@ -173,11 +187,16 @@ function announce(h) {
 }
 
 /* ---------- networking ---------- */
-const sharedNow = () => { const s = game.time?.serverTime; return Number.isFinite(s) ? s : Date.now(); };
-/* MODE: shared clock minus this page's clock, for the stepped grid. Date.now() / serverTime tick in whole ms, so the raw difference
-   jitters by about 1 ms from call to call: keep the last value until it drifts by more than 4 ms (a clock re-sync) */
+/* ENGREG (1.9.11): the shared clock is the engine's own minimum-filter clock (clock.mjs) once it has an answer; before that Foundry's
+   game.time.serverTime as before */
+const sharedNow = () => state.clock.serverNow();
+/* MODE: shared clock minus this page's clock, for the stepped grid. ENGREG: the clock's own offset (it changes only when a better
+   answer comes or the clock jumped). Before the first answer: serverTime minus performance.now(), which ticks in whole ms and jitters
+   by about 1 ms: kept until it drifts by more than 4 ms */
 let gridOff0 = null;
 function gridOffset() {
+  const o = state.clock.offset();
+  if ( o != null ) return o;
   const v = sharedNow() - performance.now();
   if ( gridOff0 == null || Math.abs(v - gridOff0) > 4 ) gridOff0 = v;
   return gridOff0;
@@ -235,6 +254,9 @@ function keep(id, x) {
 function stopLocal(id, o) { const x = state.net.get(id); if ( !x ) return; if ( Array.isArray(x) ) x.forEach((h) => h.stop(o)); else x.stop(o); }
 
 function onSocket(raw, senderId) {
+  /* ENGREG: a seat's build (any user may send it; it carries no word) */
+  const hi = N.checkHello(raw);
+  if ( hi ) { onHello(hi, senderId); return; }
   const m = N.checkMsg(raw);
   if ( !m || !state.engine ) return;
   /* GM only (TOOL-8): a word from a sender who is not a GM user is dropped (a modified client cannot push words) */
@@ -271,8 +293,41 @@ function onSocket(raw, senderId) {
   } catch ( e ) { console.warn(`${LOG} net word failed`, e); }
 }
 
+/* ---------- ENGREG: which build every seat runs ----------
+   At ready every seat sends its build (version, content hash, module of the copy) once; the GM's seat answers a newcomer with its
+   own. A player's seat compares with the GM's, the GM's seat with every player's: a different build is named once on that seat
+   (console + notification), so the table never runs two engines' behaviour without anyone knowing. */
+const myBuild = () => state.reg?.build ?? (state.engine ? { version: state.engine.version, hash: null, module: null } : null);
+function sendHello(reply = false) {
+  const b = myBuild(); if ( !b ) return;
+  emit(N.helloMsg(b, globalThis.game?.user?.id, isGM(), reply));
+}
+function onHello(m, senderId) {
+  if ( !senderId || senderId !== m.user || !state.helloGate(`h:${senderId}`, Date.now()) ) return;
+  const u = globalThis.game?.users?.get?.(senderId), gm = !!u?.isGM;
+  state.seats.set(senderId, { user: senderId, name: u?.name ?? senderId, gm, version: m.version, hash: m.hash, module: m.module, at: Date.now() });
+  /* a newcomer gets the GM's build back (once per hello; the answer itself is not answered) */
+  if ( isGM() && !m.reply ) sendHello(true);
+  const mine = myBuild();
+  if ( !mine || sameBuild(mine, m) ) return;
+  if ( !(isGM() || gm) ) return;   // players compare only with the GM
+  const k = `build:${senderId}:${m.version}:${m.hash}`;
+  if ( state.warned.has(k) ) return; state.warned.add(k);
+  const short = (b) => `${b.version}${b.hash ? ` (${String(b.hash).slice(0, 6)})` : ""}`;
+  const text = t("Seats.Differ", { name: u?.name ?? senderId, theirs: short(m), mine: short(mine) });
+  console.warn(`${LOG} ${text}`);
+  try { globalThis.ui?.notifications?.warn(text); } catch {}
+}
+function seatsList() {
+  const mine = myBuild(), me = globalThis.game?.user;
+  const gmB = isGM() ? mine : [...state.seats.values()].find((s) => s.gm) ?? null;
+  const rows = [{ user: me?.id ?? null, name: me?.name ?? null, gm: isGM(), version: mine?.version ?? null, hash: mine?.hash ?? null, module: mine?.module ?? null, self: true }];
+  for ( const s of state.seats.values() ) if ( s.user !== me?.id ) rows.push({ ...s });
+  return rows.map((r) => ({ ...r, same: gmB ? sameBuild(gmB, r) : null }));
+}
+
 /* for the node checks (check-tools.mjs): the sender and the receiver without Foundry */
-export const _net = { netApi, onSocket };
+export const _net = { netApi, onSocket, sendHello, seatsList, state };
 
 /* ---------- GM: letter this now ---------- */
 /* at the selected tokens (one word each, different hands) or at a world point (the cursor), shown to everyone */
@@ -318,14 +373,17 @@ export function init(REG) {
     tok.tools.moinenLetters = { name: "moinenLetters", order: 90, title: "LETR.Designer.Open", icon: "fa-solid fa-burst", button: true, visible: true,
       onChange: () => openDesigner() };
   });
+  state.reg = REG;
   Hooks.once("setup", () => {
     readPrefs();
     syncStyles();
-    REG.engine();                         // created now (fonts load in the background), so the filters are on before the first word
-    install(REG._engine);
+    const p = REG.engine();               // created now (fonts load in the background), so the filters are on before the first word
+    if ( REG._engine ) install(REG._engine); else p?.then?.(() => install(REG._engine));   // ENGREG: a carrier still loading
   });
   Hooks.once("ready", () => {
     game.socket?.on(channel(), onSocket);
+    state.clock.start();                  // ENGREG: the table's clock (a burst of "time" pings, then one every 10 s)
+    setTimeout(() => sendHello(false), 500);
     syncStyles();
     document.addEventListener("pointermove", (e) => { state.mouse = { x: e.clientX, y: e.clientY }; }, { passive: true });
   });

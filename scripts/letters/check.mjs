@@ -254,5 +254,13 @@ await (await import("./impact/check-impact.mjs")).run(ok);
   ok(r.status === 0, `fontsel engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
 }
 
+/* 13. ENGREG: which copy wins (one rule, L.build, seats' builds), the table's clock, a caller's ceiling share, L.measure, many words
+   planned in one frame (settle memo identical to a fresh settle) (own process; `--engine <older letters>` shows each point failing) */
+{
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("./check-engreg.mjs", import.meta.url)), "--engine"], { encoding: "utf8", timeout: 600000 });
+  for ( const f of (r.stdout ?? "").split("\n").filter((l) => l.startsWith("FAIL")) ) console.log(f);
+  ok(r.status === 0, `engreg engine: ${(r.stdout ?? "").trim().split("\n").at(-1)} ${r.stderr ? r.stderr.slice(0, 300) : ""}`);
+}
+
 console.log(`letters: ${n} checks, ${failed} failed`);
 process.exit(failed ? 1 : 0);

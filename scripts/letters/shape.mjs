@@ -87,16 +87,26 @@ export function ovalRing(font, bank) {
    keeps one, slightly tighter rhythm. Sizes, the baseline and the prefix are already set (layoutPlan); the words of a line keep
    their word gap. Deterministic, pure. */
 export const KERN = { rows: 40, open: 0.12, touch: -0.02, preOverlap: 0.015, same: 0.85 };
+/* ENGREG (1.9.11): the rows sorted once and each edge visits only the rows it spans (binary search), instead of every edge testing
+   every row: the KERNEX comb holds a row per outline corner (hundreds), and this was most of a word's planning time. The same rows
+   get the same x from the same expression, so the result is identical. */
 function rowExtents(cs, ys) {
-  const mn = ys.map(() => Infinity), mx = ys.map(() => -Infinity);
-  for ( const c of cs ) for ( let i = 0, n = c.length; i < n; i += 2 ) {
-    const j = (i + 2) % n, x1 = c[i], y1 = c[i + 1], x2 = c[j], y2 = c[j + 1];
+  /* a row's extents depend on its height only: work on the sorted heights, then read each asked row back by its height */
+  const n = ys.length, all = Float64Array.from(ys).sort();
+  let u = 0; for ( let k = 0; k < n; k++ ) if ( k === 0 || all[k] !== all[u - 1] ) all[u++] = all[k];   // equal heights once (clamped rows repeat)
+  const sy = all.subarray(0, u), mnS = new Float64Array(u).fill(Infinity), mxS = new Float64Array(u).fill(-Infinity);
+  const first = (v) => { let a = 0, b = u; while ( a < b ) { const m = (a + b) >> 1; if ( sy[m] < v ) a = m + 1; else b = m; } return a; };
+  for ( const c of cs ) for ( let i = 0, len = c.length; i < len; i += 2 ) {
+    const j = (i + 2) % len, x1 = c[i], y1 = c[i + 1], x2 = c[j], y2 = c[j + 1];
     if ( y1 === y2 ) continue;
     const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
-    for ( let k = 0; k < ys.length; k++ ) { const y = ys[k]; if ( y < lo || y >= hi ) continue; const x = x1 + (y - y1) * (x2 - x1) / (y2 - y1); if ( x < mn[k] ) mn[k] = x; if ( x > mx[k] ) mx[k] = x; }
+    for ( let q = first(lo); q < u && sy[q] < hi; q++ ) { const y = sy[q]; const x = x1 + (y - y1) * (x2 - x1) / (y2 - y1); if ( x < mnS[q] ) mnS[q] = x; if ( x > mxS[q] ) mxS[q] = x; }
   }
+  const mn = new Array(n), mx = new Array(n);
+  for ( let k = 0; k < n; k++ ) { const q = first(ys[k]); mn[k] = mnS[q]; mx[k] = mxS[q]; }
   return { mn, mx };
 }
+export const _rowExtents = rowExtents;   // for the checks
 /* letter i's outline placed in the line (before the envelope), its advance box starting at x */
 export function placedShape(plan, bank, i, x = 0) {
   const L = plan.layout.letters[i], base = baseGeometry(plan, bank)[i];
@@ -333,10 +343,14 @@ export const isMark = (ch) => MARK.re.test(ch ?? "");
 const isInk = (ch) => /[\p{L}\p{N}]/u.test(ch ?? "");
 /* the clearance between mark m and letter j in the hold picture: the smallest gap (word units) on the mark's `side` of the letter
    (+1: the mark stands right of it, -1: left), over the rows the rule constrains; Infinity when no row is constrained */
-export function markGap(plan, bank, geo, j, m, side) {
+export function markGap(plan, bank, geo, j, m, side, enough = Infinity) {
   const Ls = plan.layout.letters, h = Ls[j].s, lean = leanOf(plan, Ls[j]), c = Math.cos(-lean), s = Math.sin(-lean);
   const turn = (cs) => mapCs(cs, (x, y) => [x * c - y * s, x * s + y * c]);
   const A = turn(geo.get(j)), M = turn(geo.get(m)), ba = bbox(A), bm = bbox(M), band = MARK.band * h, dz = MARK.dz * h;
+  /* ENGREG (1.9.11): every row's gap is at least the gap of the two boxes on that side (a row's ink lies inside its box); when that
+     already gives the caller `enough` room the rows are not walked (settleMarks only asks whether the gap is short) */
+  const lb = side > 0 ? bm.x0 - ba.x1 : ba.x0 - bm.x1;
+  if ( lb >= enough ) return lb;
   /* rows: an even comb plus every corner height of either outline (the closest point of two polygons lies on a corner's row), just
      inside each corner so a horizontal edge counts */
   const ys = []; for ( let k = 0; k < MARK.rows; k++ ) ys.push(bm.y0 + (bm.y1 - bm.y0) * (k + 0.5) / MARK.rows);
@@ -390,7 +404,7 @@ export function settleMarks(plan, bank) {
     const geo = holdGeo(plan, bank), need = new Map();
     for ( const [j, m, side, mv] of pairs ) {
       if ( !geo.has(j) || !geo.has(m) ) continue;
-      const d = gapOf(j) - markGap(plan, bank, geo, j, m, side);
+      const d = gapOf(j) - markGap(plan, bank, geo, j, m, side, gapOf(j));
       if ( d > 1e-5 ) need.set(mv, Math.max(need.get(mv) ?? 0, d));
     }
     if ( !need.size ) break;
@@ -423,9 +437,18 @@ function altGlyph(plan, bank, i, ch) {
    along the line, or down the column for its rows. Null when nothing changes (a big picture, a face without optical sizes, no
    size given, no font bank). */
 export function opticalSize(plan, S, gs = 1, bank = null) {
-  const os = faceOpticalSize(plan, S, gs, bank);
-  return plan.hand.style === "invincible" && S > 0 && bank ? markMinPx(plan, S * gs, bank, os) : os;
+  /* ENGREG (1.9.11): the same for every picture of a word painted at the same size (it reads the settled hold layout, not the
+     picture's pose), so it is worked out once per size of a settled plan instead of once per picture (the mark pairs' row walks
+     were most of a word's first frame). Keyed on the settled centre: a re-settle (a bent path) starts a new table. */
+  const tab = S > 0 && bank && plan._center ? (OPTICAL.get(plan._center) ?? OPTICAL.set(plan._center, new Map()).get(plan._center)) : null;
+  const key = tab ? `${S}|${gs}` : null;
+  if ( tab?.has(key) ) return tab.get(key);
+  const fos = faceOpticalSize(plan, S, gs, bank);
+  const os = plan.hand.style === "invincible" && S > 0 && bank ? markMinPx(plan, S * gs, bank, fos) : fos;
+  tab?.set(key, os);
+  return os;
 }
+const OPTICAL = new WeakMap();
 /* KERNEX: at a small picture the mark's gap (settleMarks: the hand's gap, in cap heights) can shrink under a pixel and the antialiased
    edges join the mark to its letter again (a 26 px "E!" fused its dot to the foot). Below MARK.px pixels at the closest shared row the
    mark moves away by the shortfall, in this picture only (the plan and its checks are unchanged). */
@@ -456,7 +479,9 @@ function markMinPx(plan, px, bank, os) {
      it), so every letter stays where its plan put it */
   for ( const [j, m, side] of pairs.sort((a, b) => (a[2] - b[2]) || (a[2] > 0 ? a[1] - b[1] : b[1] - a[1])) ) {
     const [l, r] = side > 0 ? [j, m] : [m, j];
-    const g = closestRow(shape(l), shape(r));
+    const sl = shape(l), sr = shape(r);
+    if ( bbox(sr).x0 - bbox(sl).x1 >= MARK.px / px ) continue;   // ENGREG: no row can be closer than the boxes (nothing to move)
+    const g = closestRow(sl, sr);
     if ( !Number.isFinite(g) ) continue;
     const d = MARK.px / px - g;
     if ( !(d > 1e-6) ) continue;
@@ -578,6 +603,79 @@ export function pictureGeometry(plan, bank, p, S = 0) {
 /* the hold picture's box sets the word's centre: every picture is placed relative to it (the anchor never jumps) */
 export function settleCenter(plan, bank) {
   if ( plan._center ) return plan._center;
+  /* ENGREG (1.9.11): the same fresh plan is settled once per font bank. A caller that measures a word (L.measure / L.planFor /
+     L.sizeOf) and then plays it, or several seats' worth of identical calls on one page, paid the whole settle (kerning, the
+     reader, the marks: 1-7 ms warm a word, 20 ms cold) each time; a dozen words planned in one frame made a 60 ms frame. The memo
+     keys on the plan's whole content, so only an identical plan reuses a result, and it hands back exactly what the settle made. */
+  const memo = SETTLE.on ? settleMemoOf(plan, bank) : null;
+  if ( memo?.hit ) { SETTLE.reused++; return plan._center; }
+  settleFresh(plan, bank);
+  SETTLE.fresh++;
+  memo?.keep();
+  return plan._center;
+}
+export const SETTLE_MEMO_MAX = 400;
+/* the memo's switch and counters (checks: identical with it off; one fresh settle per word for a measure + play) */
+export const SETTLE = { on: true, fresh: 0, reused: 0 };
+const MEMO_SLOT = "§settle";
+const isPlain = (v) => { const p = Object.getPrototypeOf(v); return p === Object.prototype || p === Array.prototype || p === null; };
+const hasHidden = (o) => !!o && typeof o === "object" && Object.getOwnPropertyNames(o).some((k) => !Object.prototype.propertyIsEnumerable.call(o, k) && !(Array.isArray(o) && k === "length"));
+/* a value written so that only equal values give equal text (NaN, Infinity, undefined, Maps, functions: no memo) */
+function serial(v, bad) {
+  return JSON.stringify(v, (k, x) => {
+    if ( typeof x === "number" ) return Number.isFinite(x) ? x : `§n:${x}`;
+    if ( x === undefined ) return "§u";
+    if ( typeof x === "string" ) return x.startsWith("§") ? `§s:${x}` : x;
+    if ( typeof x === "function" || typeof x === "symbol" || typeof x === "bigint" ) { bad.on = true; return null; }
+    if ( x && typeof x === "object" && (!isPlain(x) || hasHidden(x)) ) { bad.on = true; return null; }
+    return x;
+  }) ?? "§u";
+}
+/* the memo of one bank (cleared with the bank's own cache when a font is added); null when this plan cannot be memoised */
+function settleMemoOf(plan, bank) {
+  if ( !bank?.cache || hasHidden(plan) || hasHidden(plan.layout) ) return null;   // a re-settle (bent path) or a plan with caches
+  const bad = { on: false }, keys = Object.keys(plan), before = keys.map((k) => serial(plan[k], bad));
+  if ( bad.on ) return null;
+  const key = keys.map((k, i) => `${k}=${before[i]}`).join("\n");
+  let memo = bank.cache.get(MEMO_SLOT);
+  if ( !memo ) { memo = new Map(); bank.cache.set(MEMO_SLOT, memo); }
+  const got = memo.get(key);
+  if ( got ) {
+    memo.delete(key); memo.set(key, got);   // most recently used last
+    applySettled(plan, got);
+    return { hit: true };
+  }
+  return {
+    hit: false,
+    keep() {
+      const set = {}, del = [];
+      const was = new Map(keys.map((k, i) => [k, before[i]]));
+      for ( const k of Object.keys(plan) ) { const s = serial(plan[k], { on: false }); if ( was.get(k) !== s ) set[k] = plan[k]; }
+      for ( const k of keys ) if ( !(k in plan) ) del.push(k);
+      let snap;
+      try { snap = structuredClone(set); } catch { return; }
+      memo.set(key, { set: snap, del, center: plan._center.slice(), base: plan._base, kerned: !!plan.layout?._kerned });
+      while ( memo.size > SETTLE_MEMO_MAX ) memo.delete(memo.keys().next().value);
+    }
+  };
+}
+/* the settle's result written onto a fresh plan: the same objects keep their identity (a remembered hand), filled with copies */
+function applySettled(plan, got) {
+  const fresh = structuredClone(got.set);
+  for ( const [k, v] of Object.entries(fresh) ) {
+    const cur = plan[k];
+    if ( Array.isArray(cur) && Array.isArray(v) ) { cur.length = 0; cur.push(...v); }
+    else if ( cur && v && typeof cur === "object" && typeof v === "object" && !Array.isArray(cur) && !Array.isArray(v) ) {
+      for ( const q of Object.keys(cur) ) delete cur[q];
+      Object.assign(cur, v);
+    } else plan[k] = v;
+  }
+  for ( const k of got.del ) delete plan[k];
+  Object.defineProperty(plan, "_center", { value: got.center.slice(), enumerable: false, configurable: true, writable: true });
+  if ( got.base ) Object.defineProperty(plan, "_base", { value: got.base, enumerable: false, configurable: true });
+  if ( got.kerned && plan.layout ) Object.defineProperty(plan.layout, "_kerned", { value: true, enumerable: false, configurable: true });
+}
+function settleFresh(plan, bank) {
   Object.defineProperty(plan, "_center", { value: [0, 0], enumerable: false, configurable: true, writable: true });
   if ( plan.hand.kern ) kernOptical(plan, bank);   // LOOK2 (P18): pair-aware spacing before the reader checks the word
   if ( plan.hand.legible !== false ) settleOcclusion(plan, bank);

@@ -50,6 +50,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | KERNEX (punctuation never reads as a diacritic of its neighbour: a mark keeps the hand's gap from every letter beside, under or over it; at least 1.5 px in small pictures; both faces) | 1.9.8 | API-CONTRACT 1.9.8 (v15) | `tactics-zones-kernex` | pending merge (sections 13, 18) |
 | KEEPBOX (impact frames: identical calls give identical pictures on every seat, also in a rapid or overlapping series, at other frame rates, with dropped frames and with a seat's private words; a kept word drawn ON the impact with a rim round its letters, no box) | 1.9.9 | API-CONTRACT 1.9.9 | `tactics-zones-keepbox` | pending merge (section 21a) |
 | HOLDS (a held invincible word lives as long as it stands, in the manner of its sound: echo, settle, hum, sag, slosh, rumble, breath; inside its placement; every seat alike; still under reduced motion) | 1.9.10 | API-CONTRACT 1.9.10 (v17) | `tactics-zones-holds` | pending merge (section 11a) |
+| ENGREG (plumbing: one copy rule on every seat with `L.build` / `L.seats()`; the table's own clock `L.clock` under the stepped grid and `L.net`; `ceil` reaches the size model; `L.measure`; a settle memo and faster mark rows) | 1.9.11 | API-CONTRACT 1.9.11 (v18) | `tactics-zones-engreg` | pending merge (sections 2, 5, 6, 8, 16, 17, 18, 20) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -109,9 +110,25 @@ The engine makes no sound. Audio is deferred by the owner: default silent; a lat
 Status: stable.
 
 The same folder `scripts/letters/` ships in two modules: **moinen-maps (canonical copy)** and **invincible-plus-ultra (vendored
-copy)**. Each loaded copy registers in `globalThis.MoinenLetters`; the highest VERSION wins (ties: the more recently synced content,
-from `stamp.mjs`, with a console warning) and every caller uses that ONE engine instance: one font cache, one limit on words at
-once, one memory of recent hands, one vocabulary. [C]
+copy)**. Each loaded copy registers in `globalThis.MoinenLetters` and every caller uses ONE engine instance: one font cache, one
+limit on words at once, one memory of recent hands, one vocabulary. [C]
+
+**Which copy runs (ENGREG 1.9.11, `registry.mjs`; the same rule on every seat)** [V node]:
+1. The choice is made once, after Foundry's `init` (every active module's scripts are in the page then) and after every ACTIVE
+   carrier's copy is registered (a missing one is imported from `modules/<id>/scripts/letters/index.mjs` next to the first copy).
+   Before 1.9.11 the first caller decided: a call before `init`, or a registry object made by an older copy that loaded first, could
+   fix the older engine for the whole session.
+2. The highest VERSION wins; equal VERSIONs with different content: the more recently synced (`stamp.mjs` `at`, console warning);
+   equal content: the canonical module's copy. Content only, so seats that loaded the same files run the same engine.
+3. The page says what it runs: `L.build` (also `MoinenLetters.build`) = `{ version, hash, at, module, why, copies: [{ version, hash,
+   module }] }`. At `ready` every seat sends its build to the table (a `hello` on the lettering socket; it carries no word, so a
+   player may send it); the GM's seat answers a newcomer. A seat whose build differs from the GM's is named once, on the GM's seat
+   and on its own (console + notification: "reload the seat with the older one"). `L.seats()` lists `[{ user, name, gm, version,
+   hash, module, same }]` (`same` = the GM's build).
+   During an update of ONE module the two copies differ: the newer one runs everywhere once each seat has reloaded; a seat that kept
+   the old page (no reload, a cached file) is the one `L.seats()` names.
+4. Code that imports single engine files from its own copy (`../letters/impact/plan.mjs`, `../letters/size.mjs`, ...) gets ITS
+   copy's numbers, not the running engine's: read them from `L` (`L.sizeModel`, `L.impact.steps`) when they matter at runtime.
 
 ```js
 // module code (either module): path relative to your file
@@ -127,7 +144,8 @@ const L = await globalThis.MoinenLetters.engine();
 const L = globalThis.MoinenLetters ? await MoinenLetters.engine() : null;
 ```
 
-A copy registered after the engine was already created is used only after a reload (console warning). [C]
+A copy registered after the engine was already created is used only after a reload (console warning); with the rule above that
+happens only when a module is loaded lazily after `setup`. [C]
 
 ## 3. Quick start
 Status: stable.
@@ -199,6 +217,15 @@ Status: stable as advice; items marked (engine) change when MOVE merges.
 
 Three blind reviews watched the first callers (token reactions, the dice-roll splash, map destruction and fire) on recordings. Every
 mistake below happened. Avoid them in any new caller.
+
+**Measure before you place (ENGREG 1.9.11)** [V node]: `const m = L.measure(text, opts)` with the SAME options you will pass to
+`L.play` gives `m.hold` (the rest picture's ink box), `m.reach` (how far the entrance and hold go from the centre) and `m.box` /
+`m.reachBox` round the point, in the word's own space (world units for `space: "world"`, CSS px for screen), planned with this
+seat's settings. Place by `reachBox` (nothing sweeps outside it), then call `L.play(text, opts)` with the moved `at`: the settle is
+reused, so measuring costs nothing extra. `L.planFor` (tools, after `setup`) still gives the raw plan; do not combine `L.sizeOf` with
+`planFor` by hand (`sizeOf().size` already contains `scale`: multiplying again doubles it). `null` = lettering off on this seat.
+Many words at once: 12 words measured and played in one frame cost ~20-33 ms (node; 1.9.10: 68-77 ms with sizeOf + planFor + play);
+spread a crowd over two frames if it must stay under 16 ms.
 
 **Stay in view and off the interface.**
 - On 1.6.0 the engine does NOT keep words inside the view [C]: a word placed at a token near the edge is cut. Clamp your own `at`
@@ -378,7 +405,16 @@ Measure the box you place with the same options. A `fit: "screen"` word is uncla
 takes no `scale` (pass the stepped syllable unit as `size`: the engine's unit is `sizeOf(..., { fit: "world" }).natural * 0.62`) and
 `L.sustain` takes `size`; both stay under the engine's clamp. At the default step pass the options untouched (the same object), so
 today's words stay byte-identical (SFXSIZE proved it with a play log of every option for a fixed firing, base vs new: 8 of 8 equal).
-(Engine wish, not needed for SFXSIZE: honour `ceilK` in `sizeCtx`, or give `L.sizeOf` the word's hold-box width.)
+(Engine wish, not needed for SFXSIZE: honour `ceilK` in `sizeCtx`, or give `L.sizeOf` the word's hold-box width.) Both done in
+1.9.11 (below): `ceil` and `L.measure`.
+
+**A caller's ceiling share: `ceil` (ENGREG 1.9.11)** [V node]: `ceil` (0..1] is this word's share of the engine's size ceiling (the
+legible clamp's top: height, width over the word's real shape, the crowd's share), e.g. `ceil: 0.6` for a main word that must leave
+room round it. It also works on `L.sizeOf`, `L.measure`, `L.stream` (per syllable) and travels with `L.net`. The older name `ceilK`
+never reached the size model (`sizeCtx` passed none) and STILL does not: callers that pass it today (the map: `CEIL_K` per role,
+ranked words `ceilK: 1`) draw exactly what they drew (432 role/size/zoom calls and the SFXSIZE bomb capture replayed on 1.9.10 and
+1.9.11: identical sizes and plans). To make the share real, rename it to `ceil` in the call, and expect smaller words where the
+clamp held them.
 
 ## 7. Layers and who sees a word
 Status: stable. [R] for the draw order, [V] for the ids.
@@ -420,6 +456,17 @@ Status: stable.
 - Module code that letters game events (a roll, a hit) usually runs on every client already and does not need `L.net`: call `L.play`
   on each client with the same seed.
 - Own socket: send `L.net.sharedNow()` and pass `L.net.local(sentShared)` (`{ delay }` or `{ startAt }`) to `L.play`. [C]
+- **The table's clock `L.clock` (ENGREG 1.9.11, `clock.mjs`)** [V node]: the engine's own NTP-style clock on Foundry's "time" socket
+  (no other module needed): a burst of six pings at `ready`, one every 10 s, a burst again when the tab becomes visible; the offset
+  of the FASTEST answer among the last two minutes is kept (half its round trip bounds the error: ~1 ms on a local server). An answer
+  that cannot agree with the kept one (server restarted, tab slept, clock jumped) starts the estimate again; a page clock that stood
+  still against the wall clock (> 50 ms) is corrected at once. `L.clock.now()` (server ms), `toPage(serverMs)` (this page's
+  `performance.now()`: what `startAt` / `blowAt` take), `toServer(pageMs)`, `offset()`, `error()` (ms), `ready()`, `state()`.
+  It drives the stepped grid (`L.gridClock`'s default) and `L.net.sharedNow()`. Before it: Foundry's `game.time.serverTime`
+  (Cristian's algorithm on `Date.now()`, the mean of the last four pings, every 30 s): one late answer moved a seat by tens of ms for
+  30 s (node: a seat with one 60 ms answer was 52 ms off; now every seat within 1 ms). Values are on the server's clock (counted from
+  the server's start, like `serverTime`), never epoch ms. plus-ultra's `scripts/shared-clock.mjs` is the same method; a caller that
+  drives `L.gridClock` with it keeps working.
 - Transport: socket `module.<host>` (host = moinen-maps when active, else invincible-plus-ultra), messages `{ t: "letr", v: 1, op }`. [C]
 
 ## 9. The vocabulary: `L.word`, `L.sfx`, flows, numbers
@@ -869,7 +916,10 @@ node scripts/letters/sync.mjs --check     # this copy matches MANIFEST.json and 
 node scripts/letters/sync.mjs --check <other module>/scripts/letters    # and both copies are equal
 ```
 Suites: `check.mjs` (core), `check-life.mjs` (lifecycle on a simulated clock), `check-words.mjs` (vocabulary rules incl. the
-dictionary rule and reviewed syllables), `check-tools.mjs`, `check-look.mjs` (L1-L16, legibility), (1.5.0) `check-move.mjs`.
+dictionary rule and reviewed syllables), `check-tools.mjs`, `check-look.mjs` (L1-L16, legibility), (1.5.0) `check-move.mjs`,
+(1.9.11) `check-engreg.mjs --engine [other letters folder]` (copy rule, seats, the clock on four simulated seats incl. a late answer,
+a restarted server and a sleeping tab, `ceil`, `L.measure`, the settle memo equal to a fresh settle; on 1.9.10 15 of its 19 engine
+checks fail).
 moinen-maps runs them as `dev/letters.test.mjs`, invincible-plus-ultra as `scripts/sweep-checks/letters.mjs` [C]. Never weaken a check
 to make it pass; add one for every behaviour you add.
 
@@ -904,7 +954,8 @@ Status: stable.
 
 1. Edit ONLY the canonical copy: `moinen-maps/scripts/letters/`. Never edit the vendored copy in invincible-plus-ultra by hand.
 2. Bump `VERSION` in `engine.mjs` for every engine change (copies with the same VERSION but different content fall back to the more
-   recently synced one, with a warning; do not rely on it).
+   recently synced one, with a warning; do not rely on it). The full rule and how a page reports what it runs: section 2 (`L.build`,
+   `L.seats()`).
 3. Update the engine README (option tables), the API contract's change list, this manual (section map at the top), and add node
    checks.
 4. `node scripts/letters/check.mjs` -> 0 failed.
@@ -933,6 +984,11 @@ Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest t
 
 ## 18. Known limits
 Status: stable list; edit as items close.
+
+- (1.9.11) A seat compares its build only with the GM's; two players on different builds without a GM seat are not named. The
+  clock needs Foundry's "time" socket answer; until the first answer `L.clock.ready()` is false and the old `serverTime` is used.
+  `L.measure` returns this seat's box: a seat with its own reduced motion or another view size gets another box (the seat's own
+  picture differs the same way).
 
 - Size drift repaints: a world word's size follows zoom and the number of world words alive (`alive` in the size model); a drift
   over 15 % repaints its pictures. On lane 5 this was most of a 1.9.0 word's 5-9 paintings. [V live]
@@ -1011,6 +1067,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `impact` (`play prepare plan pick show gallery stopAll mode setMode kinds frames tones limits stats busy`) | 1.7.2 IMPACT | section 21a; `steps` and the opts `gentle` (and the stricter `reduced`) since 1.8.2; `series`, opts `blowAt keep keepPad series`, `plan.peakMs` since 1.9.1 |
 | `contactAt(handleOrPlan, startAt?)`, handle getter `h.contactAt`, `plan.contactMs`; play option `flash: false` (also through `L.net`) | 1.9.1 FIN-ENGINE | pending merge; sections 4 and 21a [V node, V live] |
 | `gridClock(fn \| null)`; setting `movement` (world); tools `applyPrefs` | 1.9.2 MODE | pending merge; sections 11a and 15 [V node] |
+| `build` (also `MoinenLetters.build`), `seats()`, `clock` (`now toPage toServer offset error ready state`), `measure(text, opts)`; play option `ceil` | 1.9.11 ENGREG | pending merge; sections 2, 5, 6, 8 [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -1060,6 +1117,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   the map lettering's size sliders (14); "A caller's size step" (6).
 - 2026-11-15 (HOLDS, 1.9.10, `tactics-zones-holds`): held words live as long as they stand (11a: cause, the lives per family,
   timing, limits, seats, reduced, stepped, cost), the stage table; `check-holds.mjs`.
+- 2026-11-15 (ENGREG, 1.9.11, `tactics-zones-engreg`): which copy runs and `L.build` / `L.seats()` (2), measuring before placing
+  with `L.measure` and the cost of planning many words at once (5), `ceil` (6), the table's clock `L.clock` (8), API index (20),
+  stage table; `check-engreg.mjs` (16).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

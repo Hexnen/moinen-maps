@@ -176,6 +176,10 @@ is drawn big. Screen words follow window resizes the same way.
   letters readable as pixel letters.
 
 `L.sizeOf(text, opts)` returns what a word would get now: `{ size, px, natural, clamp: null|"floor"|"ceil"|"width", fit, sizeK }`.
+`L.measure(text, opts)` (1.9.11) returns the box the word will really take before it is placed: `{ hold {w,h}, reach {l,r,u,d}, box,
+reachBox, unit, px, size, clamp, contactMs, plan }` in the word's own space (world units / CSS px), planned like `L.play` with this
+seat's settings; the `L.play` of the same call reuses the work. `ceil` (0..1], 1.9.11) is a word's share of the size ceiling; the
+older `ceilK` is accepted and ignored, as before (manual 6).
 `L.gallery({ part: "sizes" })` shows one word across spans, footprints and magnitudes while the view zooms out, in and back.
 
 ## Motion: how the pictures move
@@ -185,7 +189,8 @@ timeline of `comic` / `expressive`). A sound-family table (18 families, a row pe
 hold length from the sound's duration, rate, moving letters, travel) gives each word a pose track; the word is painted once and the
 sprite / box is moved every display frame (`look.motion: "smooth"`, default) or its drawn channels step on one shared grid of the
 shared clock (`"stepped"`). The default is the GM's table setting `movement` (1.9.2 MODE: world scope, smooth by default, it drives
-`L.motionMode(name)`); the stepped grid runs on the world's clock (`L.gridClock`) so every seat strikes on the same instant; a call's
+`L.motionMode(name)`); the stepped grid runs on the table's clock (`L.gridClock`, by default `L.clock`, 1.9.11: the engine's own minimum-round-trip clock
+on Foundry's time socket, about 1 ms between seats) so every seat strikes on the same instant; a call's
 `look.motion` beats the setting, reduced motion beats both. Pictures carry a `key`; same key = one painting. Rules and numbers:
 manual 11a; checks: `check-motion2.mjs`.
 
@@ -589,6 +594,9 @@ GM: `L.letterNow(text, opts)` shows a word to everyone at the selected tokens (o
 default the cursor); the keybinding "Letter this now" (Shift+L) opens a small box at the cursor for it. `L.designer({ text })`
 opens the designer window (also: the burst button in the token controls); `L.openSettings()` the settings window.
 `L.planFor(text, opts)` -> `{ plan, opts }`: the plan this client would show (style, settings and filters applied).
+`L.build` -> `{ version, hash, at, module, why, copies }`: the engine copy this page runs and why (1.9.11, manual 2); `L.seats()` the
+builds the other seats announced (`same` = the GM's); a different build is named once on the console and in a notification.
+`L.clock` -> `{ now, toPage, toServer, offset, error, ready, state }`: the table's clock (server ms; manual 8).
 
 ## Look (contract v8, LOOK; v9, LOOK2 1.8.0): styles, sound -> look, lines, backdrops, accent, legibility
 **Styles.** Three whole hands, `L.lookStyles` = `["comic", "invincible", "expressive"]`.

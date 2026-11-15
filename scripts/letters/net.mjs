@@ -21,7 +21,7 @@
 
 export const OP_KEYS = ["mood", "sound", "space", "at", "size", "magnitude", "area", "span", "token", "scale", "fit", "maxWidth", "anchor", "from",
   "seed", "hold", "tempo", "rotation", "colors", "palette", "style", "font", "hand", "avoid", "layer", "zIndex", "loop", "in", "out", "holdKind",
-  "pixel", "alt", "dir", "delay", "vision", "elevation", "kind", "vocabMotion", "flash"];   // MOTION2: the kind picks the invincible motion; FIN-ENGINE: flash: false (a caller's impact on the contact)
+  "pixel", "alt", "dir", "delay", "vision", "elevation", "kind", "vocabMotion", "flash", "ceil"];   // ENGREG: ceil (a caller's share of the size ceiling)   // MOTION2: the kind picks the invincible motion; FIN-ENGINE: flash: false (a caller's impact on the contact)
 export const STREAM_KEYS = ["text", "syllables", "to", "every", "beats", "count", "duration", "life", "travel", "spread", "loud", "swing", "manual"];
 export const MAX_TEXT = 160;
 
@@ -85,6 +85,18 @@ export function checkMsg(m) {
   }
   if ( m.op === "stream" ) return { ...m, opts: { ...(m.opts ?? {}), text: m.opts?.text != null ? txt(m.opts.text) : undefined } };
   return m;
+}
+
+/* ENGREG (1.9.11): a seat's build ({ t: "letr", v: 1, op: "hello", user, gm, reply, version, hash, module }); carries no word, so any
+   user may send it (TOOL-8 is about words). Older engines drop it (checkMsg knows no "hello"). */
+export function helloMsg(build, user, gm = false, reply = false) {
+  return { t: "letr", v: 1, op: "hello", user: String(user ?? ""), gm: !!gm, reply: !!reply,
+    version: String(build?.version ?? "").slice(0, 24), hash: build?.hash == null ? null : String(build.hash).slice(0, 32), module: build?.module == null ? null : String(build.module).slice(0, 64) };
+}
+export function checkHello(m) {
+  if ( !m || typeof m !== "object" || m.t !== "letr" || m.op !== "hello" ) return null;
+  if ( typeof m.user !== "string" || !m.user || m.user.length > 64 || typeof m.version !== "string" || !/^\d+(\.\d+){0,3}$/.test(m.version) ) return null;
+  return { user: m.user, gm: !!m.gm, reply: !!m.reply, version: m.version, hash: typeof m.hash === "string" ? m.hash.slice(0, 32) : null, module: typeof m.module === "string" ? m.module.slice(0, 64) : null };
 }
 
 /* senders over their rate: at most `n` messages per second each (a runaway macro does not flood every client) */

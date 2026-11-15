@@ -15,29 +15,55 @@ import { STAMP } from "./stamp.mjs";
 import * as tools from "./tools.mjs";
 import { attachImpact } from "./impact/index.mjs";   // IMPACT hook 1/3: impact frames (scripts/letters/impact/), L.impact
 
-const REG = (globalThis.MoinenLetters ??= {
-  copies: [],
-  _engine: null,
-  /* the newest registered copy (VERSION, then FXLE F14: the more recently synced content); created once, on first use */
-  async engine() {
-    if ( !this._engine ) {
-      const best = this.copies.slice().sort((a, b) => cmpVer(b.version, a.version) || String(b.stamp?.at ?? "").localeCompare(String(a.stamp?.at ?? "")))[0];
-      const twin = this.copies.find((c) => c !== best && cmpVer(c.version, best.version) === 0 && c.stamp?.hash && best.stamp?.hash && c.stamp.hash !== best.stamp.hash);
-      if ( twin ) console.warn(`LETR | two copies of engine ${best.version} differ; using the more recently synced one (${best.base}). Bump VERSION when the engine changes.`);
-      this._engine = best.create(best.base);
-      try { best.impact?.(this._engine, best.tools); } catch ( e ) { console.warn("LETR | impact frames not attached", e); }   // IMPACT hook 2/3
-    }
-    await this._engine.ready();
-    return this._engine;
-  },
-  get version() { return this._engine?.version ?? null; }
-});
+import { RULE, CARRIERS, cmpVer, chooseCopy, buildOf, carrierUrl, moduleOf } from "./registry.mjs";
 
-function cmpVer(a, b) {
-  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
-  for ( let i = 0; i < 3; i++ ) if ( (pa[i] || 0) !== (pb[i] || 0) ) return (pa[i] || 0) - (pb[i] || 0);
-  return 0;
+/* ENGREG (1.9.11): the registry object is shared by every copy in the page; its methods came from whichever copy loaded first, so
+   an older first copy decided with its older rule. A copy with a newer rule installs its methods while no engine was made yet.
+   The rule itself (registry.mjs): chosen once, after "init" and after every active carrier's copy is in; highest VERSION, then the
+   more recently synced content (stamp?.at), then the canonical module; L.build / MoinenLetters.build say what the page runs. */
+const REG = (globalThis.MoinenLetters ??= { copies: [], _engine: null });
+const hasHooks = () => typeof globalThis.Hooks?.once === "function";
+/* every active module's scripts are loaded before Foundry calls "init" (they are static script tags of the page) */
+const initDone = () => !hasHooks() || !!REG._initSeen || typeof globalThis.game?.modules?.get === "function";
+const activeCarriers = () => { try { return CARRIERS.filter((id) => globalThis.game?.modules?.get?.(id)?.active); } catch { return []; } };
+const missingCarriers = () => activeCarriers().filter((id) => !REG.copies.some((c) => moduleOf(c.base) === id));
+function makeNow(reg) {
+  const { best, why, warn } = chooseCopy(reg.copies);
+  if ( !best ) return null;
+  if ( warn ) console.warn(`LETR | ${warn}`);
+  reg._engine = best.create(best.base);
+  reg._build = buildOf(best, reg.copies, why);
+  try { Object.defineProperty(reg._engine, "build", { value: reg._build, enumerable: true, configurable: true }); } catch {}
+  try { best.impact?.(reg._engine, best.tools); } catch ( e ) { console.warn("LETR | impact frames not attached", e); }   // IMPACT hook 2/3
+  return reg._engine;
 }
+const methods = {
+  /* the engine this page runs (the rule above); created once, on first use. Synchronous when everything is in (Foundry's setup and
+     later), else it waits for "init" and imports the missing carriers' copies first */
+  engine() {
+    if ( !this._engine && initDone() && !missingCarriers().length ) makeNow(this);
+    if ( !this._engine ) {
+      this._choosing ??= (async () => {
+        if ( !initDone() ) await new Promise((r) => Hooks.once("init", r));
+        for ( const id of missingCarriers() ) {
+          const url = carrierUrl(this.copies[0]?.base, id);
+          if ( url ) { try { await import(url); } catch ( e ) { console.warn(`LETR | the lettering engine copy of ${id} did not load`, e); } }
+        }
+        if ( !this._engine ) makeNow(this);
+      })();
+      return this._choosing.then(() => this._engine?.ready()).then(() => this._engine);
+    }
+    return this._engine.ready().then(() => this._engine);
+  },
+  get version() { return this._engine?.version ?? null; },
+  /* what this page runs: { version, hash, at, module, why, copies: [{ version, hash, module }] } (null before the choice) */
+  get build() { return this._build ?? null; }
+};
+if ( (REG.rule ?? 1) < RULE && !REG._engine ) {
+  for ( const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(methods)) ) Object.defineProperty(REG, k, { ...d, configurable: true, enumerable: true });
+  REG.rule = RULE;
+}
+if ( hasHooks() && !REG._initHooked ) { REG._initHooked = true; Hooks.once("init", () => { REG._initSeen = true; }); }
 
 const BASE = new URL("./", import.meta.url).href;
 if ( !REG.copies.some((c) => c.base === BASE) ) {
@@ -50,7 +76,7 @@ if ( !REG.copies.some((c) => c.base === BASE) ) {
 if ( !REG.toolsHooked && globalThis.Hooks?.once ) {
   REG.toolsHooked = true;
   Hooks.once("init", () => {
-    const best = REG.copies.filter((c) => c.tools).sort((a, b) => cmpVer(b.version, a.version) || String(b.stamp?.at ?? "").localeCompare(String(a.stamp?.at ?? "")))[0];
+    const best = chooseCopy(REG.copies.filter((c) => c.tools)).best;   // the same rule as the engine (registry.mjs; tie-break stamp?.at)
     try { best?.tools.init(REG); } catch ( e ) { console.warn("LETR | tools not registered", e); }
   });
 }
