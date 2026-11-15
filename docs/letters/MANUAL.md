@@ -54,6 +54,7 @@ Keep the section titles stable: other documents and the agent skill link to them
 | ENGWORDS (both deny lists over both languages: `crossRefusal`, `CROSS`; the words that read as a word of the other language replaced, pl KA-DUMP -> KA-DUUM ...) | 1.9.13 | API-CONTRACT 1.9.13 | `tactics-zones-engwords` | pending merge (sections 9, 14, 20) |
 | RIMUNDER (an invincible word on the map gets an ink rim UNDER the whole lettering, letters and duplicate block; `look.rim` ink / paper / none; default ink in world space, none on the screen) | 1.9.12 | API-CONTRACT 1.9.12 | `tactics-zones-rimunder` | pending merge (sections 5, 13, 20) |
 | SUSTAINGAP (a sustained sound reads as one run: phrases seated by their own measured ink, never piled; echo and shed beyond the run's edge; the run inside the view and a caller's `room`; `startAt` on every seat; stream syllables in staggered lanes; a word drawn in by parts no longer thrown away by decaying holds) | 1.9.15 | API-CONTRACT 1.9.15 | `tactics-zones-sustaingap` | pending merge (sections 10, 12, 18) |
+| ENGVIEW (one table picture from the public API: an explicit `view` for sizeOf / measure / play / stream / sustain; `L.measure` stand / inkReach / ink / rim / life; `L.streamUnit`; legacy sustain on `startAt`; `L.impact.tierOf` / `stepOf` / `tiers` / `seriesBoost`; `ceilK` named as unread) | 1.9.18 | API-CONTRACT 1.9.18 (v22) | `tactics-zones-engview` | pending merge (sections 5, 6, 6a, 8, 10, 12, 18, 20) |
 | WORD2, OUTL | - | - | - | planned (see "What is about to change") |
 
 Contents
@@ -63,6 +64,7 @@ Contents
 4. `L.play`: options, handle, lifecycle
 5. Placing and timing words (lessons from three caller reviews)
 6. Size
+6a. One table picture from the public API (ENGVIEW 1.9.18)
 7. Layers and who sees a word
 8. Several clients and networking
 9. The vocabulary: `L.word`, `L.sfx`, flows, numbers
@@ -235,6 +237,14 @@ default (section 13); do not add your own light outline (`look.outline: "sticker
 contrast. Pass nothing to get it; `look: { rim: "none" }` only where a picture must stay exactly as before; `look: { rim: "paper" }`
 for a word that must also stand off a dark ground; a screen word that sits over the map can ask `look: { rim: "ink" }`. The rim reaches
 up to 0.07 cap (at least 2.5 px) past the letters: the hold box from `L.measure` does not include it, so leave that much air.
+Since 1.9.18 read it from the engine instead: `L.measure(...).standBox` already holds the rim, keyline, duplicate block and a held
+word's life, `inkReachBox` the entrance too, `m.rim` / `m.life` the numbers alone (section 6a); no copy of 0.07 / 2.5 / 16 px / 0.6
+needed.
+
+**One picture on every seat (ENGVIEW 1.9.18).** Plan where and how big on shared data, not on this seat's window: pass the table's
+reference `view` to `L.sizeOf` / `L.measure` (and to `L.play` / `L.stream` / `L.sustain` when every seat should also draw that size),
+`startAt` from the shared clock, and keep away from things by `m.standBox` (standing) and `m.inkReachBox` (arriving). Worked examples
+and the list of what each caller may drop: section 6a.
 
 **Stay in view and off the interface.**
 - On 1.6.0 the engine does NOT keep words inside the view [C]: a word placed at a token near the edge is cut. Clamp your own `at`
@@ -429,6 +439,102 @@ never reached the size model (`sizeCtx` passed none) and STILL does not: callers
 ranked words `ceilK: 1`) draw exactly what they drew (432 role/size/zoom calls and the SFXSIZE bomb capture replayed on 1.9.10 and
 1.9.11: identical sizes and plans). To make the share real, rename it to `ceil` in the call, and expect smaller words where the
 clamp held them.
+**ENGREG-1 (1.9.18): `ceilK` says so.** The behaviour stays (sizes as without it), but a caller who passes `ceilK` to `L.play`,
+`L.sfx`, `L.sizeOf`, `L.measure`, `L.stream` or `L.sustain` now gets ONE console warning per page ("option ceilK is NOT read ...
+pass `ceil`"), and `L.measure` lists it: `m.unread = ["ceilK"]`. The engine's own streams no longer pass a `ceilK` to their syllables
+(that internal 0.55 was never read either; sizes unchanged, fingerprint-proven). [V node]
+
+## 6a. One table picture from the public API (ENGVIEW 1.9.18)
+Status: pending merge (`tactics-zones-engview`). [V node: `check-engview.mjs`, check.mjs section 15; headless two-seat demos]
+
+The owner's standard: every seat sees the same picture at the same moment, and lettering never covers what it describes. A caller
+plans that picture ONCE on data every seat shares (a reference window and zoom, the event's clock, the event's tokens) and asks the
+engine, never a copy of its tables. 1.9.18 gives the missing pieces; each is a new option or field, so no existing call changes
+(plan, draw and frame-by-frame runtime fingerprints of the callers' calls equal before and after).
+
+**1. An explicit view (map E3).** `view: { vw, vh, zoom, alive, dpr }` on `L.sizeOf`, `L.measure`, `L.play` / `L.sfx`, `L.stream`,
+`L.sustain`: the size model sizes the word for THAT view instead of this seat's window, zoom and words up. `vw` = usable width and `vh`
+= height (CSS px) of the reference window, `zoom` = its canvas scale (world words), `alive` = world words already up in the shared
+plan (the crowd's share; default 0), `dpr` = device pixels per CSS px for the keyline's and rim's pixel floors (default 1). A field
+left out is this seat's live value, except `alive` and `dpr`. A bad field is ignored with one warning. `L.sizeOf(...).view` and
+`L.measure(...).view` echo the view used. A view naming this seat's own values reproduces the call without one.
+```js
+const TABLE = { vw: 1600, vh: 900, zoom: 0.43, alive: plan.length };      // the map's reference view, the same on every seat
+const z = L.sizeOf("KA-BOOM!", { space: "world", at, magnitude: 1.4, area: 300, seed, view: TABLE });  // same z.size on every seat
+const m = L.measure("KA-BOOM!", { space: "world", at, magnitude: 1.4, area: 300, seed, view: TABLE }); // same boxes on every seat
+L.play("KA-BOOM!", { space: "world", at, magnitude: 1.4, area: 300, seed, view: TABLE });  // drawn at the table's size, also when this seat zooms
+```
+Played with a view, a world word keeps the table's size in scene px (it no longer follows this seat's zoom for the clamp). A caller
+whose rule is "each seat draws its own size" (the map since MAPSFXSEAT2) plans with the view and plays without it. Pass the event's
+`area` as given: the engine's reading (a number or `{ radius }` = radius; `{ w, h }`, `{ width, height }` or bounds = half the larger
+side) is what sizes the
+word; a caller's own area arithmetic may differ (the map's does for `{ w, h }`). [V node: three seats 1600x900 z1 / 1366x768 z0.9 dpr 2
+with 14 words up / 2560x1300 z0.25: one size, one hold box, one stand box]
+
+**2. The standing footprint and the entrance reach (plus-ultra CALLERS-E1).** `L.measure` adds, on first read (a caller that does not
+read them pays nothing; the old fields are unchanged): `stand` / `standBox` (how far the standing word's INK goes over its whole hold:
+hold poses, the life of a held word, keyline, second outline, rim of a world word, duplicate block, a hold picture's backdrop or
+effects), `inkReach` / `inkReachBox` (the same from the first entrance drawing on: entrance poses and travel, entrance smear, letters
+drawn in from their own offsets), `ink` (cap heights of ink round the letters' box at rest), `rim` (cap heights the rim reaches past
+the outline at the drawn size; 0 without one: screen words, `look.rim: "none"`, legacy styles) and `life` (`{ xy, s }` of a held word's
+life, null when it has none, e.g. reduced motion). All in the word's space, from its centre, turned by `rotation`; pixel floors count at
+unit x zoom x dpr (the view's, else this seat's).
+```js
+const m = L.measure(text, { ...opts, view: TABLE });
+const keepOut = m.standBox;          // what the standing word covers: place it so this misses the token / pin
+const arriving = m.inkReachBox;      // what the entrance sweeps over (a slam, a drop-in) before it stands
+```
+Measured against the ink each painted picture lays down (a recording context's bounds in the sprite's real transform, every frame)
+for 76 words (8 texts x both faces x both motion types x world / screen, turned, zoomed, the legacy style): no hold frame's ink
+outside `standBox` and no frame's ink outside `inkReachBox` by more than 2 px (the recorder's own over-estimate of mitred strokes);
+median air 0.14 cap. The bare hold box `m.box` missed the standing ink for 74 of the 76. [V node]
+
+**3. Streams honour a caller's reference size (map E4).** `L.stream` takes `view` and `scale` like a word; `L.streamUnit(opts)` names
+what the syllables are played with: `{ unit, sizeOf(i, loud), fit, view }` (`unit` = `size` when given, else the engine's syllable unit:
+the model's natural size x 0.62; syllable i is played with `unit x (0.85 + 0.25 loud) x (1.15 for the first)`, then clamped like a word
+unless `fit: "world"`).
+```js
+const u = L.streamUnit({ kind: "gunfire", space: "world", at, magnitude: 0.6, area: 80, view: TABLE });
+const tallest = u.sizeOf(0, 1);      // plan room with the engine's own numbers (no 0.62 / 0.85 / 1.15 copies)
+L.stream({ kind: "gunfire", lang, space: "world", at, beats, magnitude: 0.6, area: 80, view: TABLE, seed, startAt });
+```
+Lanes (staggered syllables) still use this seat's view rect unless `keepInView: false`. [V node: same syllable sizes on three seats;
+`scale: 0.5` gives each syllable what `L.sizeOf` gives that word with the same options]
+
+**4. A lasting sound on the event's clock (map E2).** `startAt` (this page's time of the event's start, e.g. `L.clock.toPage(serverMs)`)
+now works in every style: the legacy `comic` / `expressive` sustain decides each phrase from the seed at its own instant too (it had
+no clock). A seat joining late decides the phrases it missed (the same seeded choices, not drawn) and joins the one still up; from the
+first phrase that starts after it joined it shows the same phrases at the same places as a seat on time (with `view`: the same sizes;
+positions within a device pixel). A `level` function is called with the phrase's age in ms since `startAt`: read that argument (`level:
+(ms) => fire.levelAt(start + ms)`), not "now". In the node runs a level reading "now" gave the same words (the run's timing comes from
+the sound's flow, and a missed phrase is not drawn), but only the argument is the same number on every seat.
+```js
+const startAt = L.clock.toPage(event.serverStart);
+const run = L.sustain({ kind: "fire", lang, space: "world", at, seed: event.id, startAt, view: TABLE, level: (ms) => event.levelAt(ms) });
+```
+The phrase a seat on time is already fading out when the late seat joins is not drawn there (the first ~150 ms after joining may lack
+one fading word). [V node: invincible, comic, expressive; two seats, page clocks 2.64 s apart, other windows and zooms; live: section 21
+change log]
+
+**5. The impact's strength ladders (plus-ultra `tierOf`).** `L.impact.tierOf(m)` (0..3 at `L.impact.tiers` = [0.35, 0.85, 1.35]),
+`L.impact.stepOf(m)` (0..5 at `L.impact.steps`), `L.impact.seriesBoost(n)`. A plan's tier is `tierOf(min(2, magnitude +
+seriesBoost(series)))`, the same as `L.impact.plan(...).tier` for every magnitude 0..2 and series 0 / 1 / 3. [V node]
+```js
+const tier = L.impact.tierOf(Math.min(2, mag + L.impact.seriesBoost(series)));   // no hand copy of 0.35 / 0.85 / 1.35
+```
+
+**6. What each caller may drop or pass (not done in the callers: their own branches).**
+| caller | today | with 1.9.18 |
+|---|---|---|
+| map sfx-seat.mjs / sfx.mjs | imports the running copy's `size.mjs` through `MoinenLetters.copies` (`refSize`, `engineSizeFor`) | `L.sizeOf` / `L.measure` with `view` (drop the import) |
+| map sfx-size.mjs | `STREAM_UNIT` 0.62, `STREAM_CEIL` 0.55 mirrors | `L.streamUnit(...)`; drop `STREAM_CEIL` (never read); pass `ceil` for a share |
+| map startBurn | `L.sustain` without `startAt`, `level: () => p.level(sharedNow())` | pass `startAt` and `view`; read the level's ms argument |
+| map playStream | `L.stream` with `startAt`, `beats` | add `view` (and `scale` if it steps sizes) |
+| map ranked / role words | `ceilK` | rename to `ceil` to make the share real (sizes change), or drop it (nothing changes, no warning) |
+| plus-ultra tokenreact/pure.mjs `STAND`, `standPad`; splash/letter-plan.mjs `STAND`, `roomOf` | mirrors of LIFE_REACH, INV_RIM, keyline | `m.standBox` / `m.stand`, `m.inkReachBox`, `m.rim`, `m.life`; check-callers sections I / K / W / M then pin nothing |
+| plus-ultra splash/impact-plan.mjs `tierOf` | hand copy of the thresholds | `L.impact.tierOf` / `tiers` / `seriesBoost` |
+The engine's stand includes the duplicate block and a hold picture's extras, which plus-ultra's mirror leaves out: a caller switching
+to `m.standBox` places with slightly larger boxes (a caller's picture change, made on the caller's branch).
 
 ## 7. Layers and who sees a word
 Status: stable. [R] for the draw order, [V] for the ids.
@@ -460,6 +566,9 @@ Status: stable.
   reduced-motion setting do not change a seeded hand. [R] Pass `from` as an angle, not a point (a point is converted with this
   client's pixels). [R]
 - `startAt` is THIS page's `performance.now()`; it differs per client: never send it. Send a shared time instead.
+- (1.9.18) A seat-equal plan: size and measure with an explicit `view` (the table's reference window and zoom, the plan's own count of
+  words up), time with `startAt` from the shared clock (`L.clock.toPage(serverMs)`), pass a `level` that reads its ms argument. Worked
+  examples in section 6a. [V node]
 - **`L.net` (GM only, binding owner ruling).** `L.net.play(text, opts)`, `L.net.burst(items, common)`, `L.net.stream(opts)` play on
   every client in step: one seed, start stamped on Foundry's ping-synced server clock with a 120 ms lead, tokens travel as ids, a
   client without that token skips the world word; functions, Promises, elements and `reduced` do not travel. Handles carry `netId`;
@@ -596,6 +705,9 @@ travelling along `dir` or toward `to`, one hand for the whole stream.
   with no alternating spread or side jitter; with the view kept (default) the rows go forward as far as the view reaches, then on
   behind the source. Before, a gun's rounds piled 95-100 % on each other (all born at one spot, life 340 ms, every 110 ms). `L.stopAll()` and (world) a scene change stop
   it.
+- (1.9.18 ENGVIEW) `view` and `scale` are honoured as for a word (every seat's syllables the same size with one `view`); a caller that
+  plans room asks `L.streamUnit(opts)` -> `{ unit, sizeOf(i, loud), fit, view }` instead of copying 0.62 / 0.85 / 1.15. `ceil` is passed
+  to every syllable; `ceilK` is not read (one warning). Example in section 6a. [V node]
 
 ## 11. Motion (core): the legacy styles `comic` / `expressive`
 Status: stable and frozen for `comic` / `expressive` (their plans and drawings are proved unchanged by MOTION2: 2052 fingerprints).
@@ -728,6 +840,12 @@ Status: pending merge (`tactics-zones-move`, engine 1.5.0, contract v7), then ch
   runs the score on the event's clock (a seat joining late shows the same phrase at the same place at the same instant; every draw
   comes from the seed and the phrase index, and the layout reads only the phrases up). Cost: no rise measured (40 sustains + 10
   streams, fake browser, medians equal or lower).
+- **`startAt` in the legacy styles and `view` (1.9.18 ENGVIEW)** [V node, check-engview]: the frozen `comic` / `expressive` sustain
+  (sustain-legacy.mjs) joins the event's clock too when `startAt` is given: every phrase's choices are drawn at its own instant in
+  one fixed order and spaced by the phrase's own size (`size`, else 1.6 units), so a late seat skips the past phrases without
+  drawing them and shows the same ones after; without `startAt` it is the 1.9.14 run, unchanged. `view` and `ceil` go to every
+  phrase in both runs (sizes equal across seats; without a view a legacy phrase's size follows the words this seat has up). A
+  `level` function gets the phrase's age in ms since `startAt`. Example in section 6a.
 - Gallery parts `move orbit path choreo rate escalate shards glow sustain ambient` [C].
 
 **Merge watch (checked for this manual).** The MOVE branch predates two things on `tactics-zones`; the merge must keep both:
@@ -1085,6 +1203,11 @@ Adding a sound kind: `KINDS` entry in `words.mjs` (group, labels pl/en closest t
 ## 18. Known limits
 Status: stable list; edit as items close.
 
+- (1.9.18 ENGVIEW) A late seat joins a sustained run at the phrases still up or to come: a phrase the seat on time is already
+  fading out is not drawn there (the first ~150 ms after joining). Positions agree within a device pixel (each seat snaps to its own
+  pixels). `L.measure`'s `standBox` / `inkReachBox` hold the drawn ink within 2 px in the node runs (the ink recorder over-estimates
+  mitred strokes); a caller's own panels and other words are still the caller's to avoid. Streams' lanes still use this seat's view
+  rect unless `keepInView: false`. `ceilK` stays unread (named once per page). [V node]
 - (1.9.15) THUNDERFIT-E1 (sustain seats overlap) is closed by SUSTAINGAP. A run's room comes from the view and the caller's `room`;
   the engine knows nothing of a caller's panels or of another run next to it (two fires side by side may still touch). A `room`
   smaller than two seats lets the run overflow downwards. Phrases are measured from their first picture: before it the old fixed
@@ -1096,7 +1219,7 @@ Status: stable list; edit as items close.
 - (1.9.11) A seat compares its build only with the GM's; two players on different builds without a GM seat are not named. The
   clock needs Foundry's "time" socket answer; until the first answer `L.clock.ready()` is false and the old `serverTime` is used.
   `L.measure` returns this seat's box: a seat with its own reduced motion or another view size gets another box (the seat's own
-  picture differs the same way).
+  picture differs the same way). Since 1.9.18 pass `view` for the table's box (section 6a); a seat's own reduced motion still changes it.
 
 - Size drift repaints: a world word's size follows zoom and the number of world words alive (`alive` in the size model); a drift
   over 15 % repaints its pictures. On lane 5 this was most of a 1.9.0 word's 5-9 paintings. [V live]
@@ -1153,6 +1276,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | WORD2 (SPEC-WORDS) | dictionary leaks and near-words removed (PTAAK, PLOSK, DOIING, BRUUNCH ...); near-word check (one letter off, stuck-on letter, K respelling); no Polish diacritics (a check that fails on them); English as the master spelling, Polish derived; PH stretch bug; W not a lasting letter in English; percussive kinds lengthen by hits or echo, not vowels; "!" capped per kind; every lead-in from `PREFIXES`; sayable words; longer runs for steady sounds; roar stretches the vowel; siren as one morphing word; laser pistol attack-led (ZARK, TZAK); ICONIC ruling (candidates BLAM, BEEP, VROOM, HA, GRR, SZSZ). Owner's ruling overrides the review's "never share words" | 9, 14 |
 | SPEC-KINDS (being written) | missing kinds and dimensions: material of what is hit, phase (what follows what), source and impact of shots, distance, space/echo, approach-pass-recede, medium, wet/dry, size of source, cause-then-result combinations, tempo, silence, number of sources; kinds to split or merge | 9, 5 |
 | SPEC-EFFECTS (being written) | each map effect analysed separately: which words, which phases, which motion | 5 |
+| callers adopt ENGVIEW (1.9.18) | the map drops its size.mjs import, STREAM_UNIT / STREAM_CEIL and passes `view` / `startAt`; plus-ultra drops STAND / standPad / roomOf / tierOf mirrors and their check-callers pins (section 6a table) | 5, 6a (the "today" column) |
 | later queue | SCENE (occlusion, ground perspective), CROWD (placement solver, aggregation), TOKN (word + number as one lettering, stacking hits), HERO (panel freeze, full-frame flash), EXPO (frame strip / webm export, pause/seek), GOLD (golden-render checks), PERF, wiring into map weather/tornado and moinen-pixel-vfx | 5, 16, 18 |
 
 ## 20. API index
@@ -1178,6 +1302,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 | `gridClock(fn \| null)`; setting `movement` (world); tools `applyPrefs` | 1.9.2 MODE | pending merge; sections 11a and 15 [V node] |
 | `build` (also `MoinenLetters.build`), `seats()`, `clock` (`now toPage toServer offset error ready state`), `measure(text, opts)`; play option `ceil` | 1.9.11 ENGREG | pending merge; sections 2, 5, 6, 8 [V node] |
 | `crossRefusal`, `CROSS` (exports of `words.mjs`, not on `L`) | 1.9.13 ENGWORDS | pending merge; section 9 [V node] |
+| option `view` (`sizeOf measure play sfx stream sustain`); `measure` fields `stand standBox inkReach inkReachBox ink rim life view unread`; `sizeOf` fields `floor ceil ceilBy view`; `streamUnit(opts)`; stream option `scale`; legacy sustain `startAt`; `impact.tierOf stepOf tiers seriesBoost` | 1.9.18 ENGVIEW (v22) | pending merge; sections 6a, 10, 12 [V node] |
 | `_plan`, `_paint`, `_settle`, `_bank`, `_ext` | - | internal, for tests, the gallery and tools; may change without notice |
 
 ## 21. Change log of this manual
@@ -1239,6 +1364,9 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15: ENGTABLE (1.9.16, `tactics-zones-engtable`): section 15 rewritten: every preference is the table's (world, GM only,
   live on every seat), seat signals (OS reduced motion, Foundry photosensitive mode) still win on their seat, the photosensitivity
   guard always on, the read-only player window, migration and the plus-ultra bridge; section 18 limit on callers' `reduced: false`.
+- 2026-11-15: ENGVIEW (1.9.18, `tactics-zones-engview`): section 6a (one table picture from the public API: `view`, the standing
+  footprint, `L.streamUnit`, legacy sustain on `startAt`, the impact's ladders, what each caller may drop or pass), the `ceilK`
+  warning (6), notes in 8, 10, 12, limits (18), API index (20), stage table; `check-engview.mjs` (check.mjs section 15).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is
