@@ -772,11 +772,7 @@ function flush() {
   const t0 = performance.now();
   // MAPSFXSEAT: the events of a moment in the chunks a seat on time gathers them in (its first event's moment + the gathering): a seat
   // whose events came late (busy applying the destruction) used to gather two moments into one cluster - other words than its neighbour
-  due.sort((a, b) => (C.dueAt(a) - C.dueAt(b)) || (String(a.key) < String(b.key) ? -1 : 1));
-  while ( due.length ) {
-    const d0 = C.dueAt(due[0]), n = due.findIndex((e) => C.dueAt(e) > d0 + C.GATHER_MS + 20);
-    flushMoment(due.splice(0, n < 0 ? due.length : n));
-  }
+  for ( const m of T.moments(due) ) flushMoment(m);
   stats.ms += performance.now() - t0;
 }
 /** The words of one moment: planned on the TABLE (shared: the reference view, the shared obstacles, the table's words up), then shown on

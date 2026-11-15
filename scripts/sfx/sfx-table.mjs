@@ -150,6 +150,18 @@ export function write(w, taken, d) {
   } catch ( err ) { d.warn?.(`no word for ${w.kind}`, err); }
 }
 
+/** The moments of a batch of due events (sfx.mjs flush), in the chunks a seat ON TIME gathers them in: from the earliest event's due time
+    to GATHER_MS (+ a frame) after it, then the next. A seat whose events came late (busy applying the destruction) gets them all at once
+    and, before, clustered two moments into one: other words than its neighbour. `dueAt` = sfx-core dueAt. */
+export function moments(due, dueAt = C.dueAt) {
+  const list = due.slice().sort((a, b) => (dueAt(a) - dueAt(b)) || (String(a.key) < String(b.key) ? -1 : 1)), out = [];
+  while ( list.length ) {
+    const d0 = dueAt(list[0]), n = list.findIndex((e) => dueAt(e) > d0 + C.GATHER_MS + 20);
+    out.push(list.splice(0, n < 0 ? list.length : n));
+  }
+  return out;
+}
+
 /* ---------------------------------------------------------------- placement on the table */
 
 /** The TABLE's placement context of a moment: the reference view round `c` at zoom `z` (no seat's panels: Foundry's bars are already off
