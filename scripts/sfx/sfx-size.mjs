@@ -6,10 +6,13 @@
      fire         a fire catching, flaring up, going out, doused, and a burning fire's lasting sound; a page's catch and hisses
      weather      the rain storm's lightning (far rumble, mid thunder, a close strike)
    A step is 0 (no lettering of that group: nothing scheduled, nothing drawn), 1 (smaller), 2 (today's size, the default: the play
-   options pass through untouched, the same object) or 3 (bigger). A step scales the word's natural size (the engine's `scale` /
-   explicit `size`) AND its share of the engine's size ceiling, so a word held at its ceiling also steps; the engine's legibility floor
-   still holds a smaller word readable, and a bigger one never goes past the engine's own whole ceiling (ceilK 1), so it cannot bury
-   the scene. The placement measures the stepped word (sfx.mjs measure), so a bigger word still keeps off what it letters and in view. */
+   options pass through untouched, the same object) or 3 (bigger). A map word (world space) is stepped from the size the engine draws
+   it at today (sfx.mjs steppedWorld: L.sizeOf -> smallPx / bigPx -> drawn at that size, fit "world"), because the engine's clamp
+   would hold a word at its ceiling whatever its natural size and it drops a caller's ceiling share: 1 = 0.7 x, never under the
+   engine's legibility floor; 3 = 1.4 x, never over LOUD_K x the engine's ceiling for its loudest word. A screen word (an unlocated
+   thunder) steps under that ceiling itself (no room above it). Streams (guns) and a burning fire's phrase step their explicit size
+   (sizeAt / streamOpts) and stay under the engine's clamp. The placement measures the stepped word (sfx.mjs measure), so a bigger word
+   still keeps off what it letters and in view. */
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -23,9 +26,6 @@ export const SIZE_DEFAULT = 2;
     the smallest ranked word (R1 4 % of the view height -> 2.8 %, the floor is 2.6 %); 3 = 1.4: clearly louder (about twice the area),
     the biggest words held by the engine's own ceiling (question SFXSIZE-1) */
 export const STEP_K = [0, 0.7, 1, 1.4];
-/** a ranked word shown on the screen (fit "screen": no engine clamp) is never taller than this share of the screen height at a
-    bigger step (the engine's own height ceiling for its loudest word: 7 % + 8 % x 1.5) */
-export const SCREEN_MAX = 0.19;
 
 /** a setting's value -> its step 0..3 (anything unreadable: today's size) */
 export const stepOf = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && v !== null && v !== "" ? clamp(n, 0, 3) : SIZE_DEFAULT; };
@@ -66,11 +66,51 @@ export function streamOpts(natural, step) {
 }
 /** an explicit size (a stream's syllable unit, a burning fire's phrase size) at a step (the engine still clamps it) */
 export const sizeAt = (size, step) => { const s = stepOf(step); return s === SIZE_DEFAULT ? size : size * (STEP_K[s] ?? 1); };
-/** a ranked word's size on the screen (CSS px, fit "screen" = unclamped by the engine) at a step: scaled, at a bigger step held under
-    SCREEN_MAX of the screen height (never less than today's size) */
-export function screenSizeAt(size, step, vh) {
+/** the magnitude whose ceiling a bigger ranked word may reach: the engine's loudest (its height ceiling stops growing at 1.5) */
+export const LOUD_MAG = 2;
+/**
+ * A ranked story word's cap height on screen (CSS px, mood factor included) at a BIGGER step, from today's (`px`, as the engine draws
+ * it at step 2): STEP_K times today's, held under `cap` = the engine's own ceiling for its loudest word of this text on this screen
+ * (height 7 % + 8 % x 1.5 = 19 % of the view, width 65 % of the usable width, a crowd's share; the caller asks the engine, sfx.mjs
+ * loudCap), never under today's. A ranked word's ceiling share is already the whole (ceilK 1), so the engine's clamp would hold the
+ * louder ranks at today's size; the map steps them itself and draws them unclamped at that size (live 2026-11-15: step 3's main word
+ * stood no bigger than step 2's, and a screen thunder word ran off both sides).
+ */
+export function bigPx(px, step, cap, room = LOUD_K) {
+  const s = stepOf(step);
+  if ( s <= SIZE_DEFAULT || !(px > 0) ) return px;
+  return Math.max(px, Math.min(px * STEP_K[s], cap > 0 ? cap * room : px));
+}
+/** A world word's cap height on screen (CSS px, mood factor included) at a SMALLER step, from today's (`px`): STEP_K times today's,
+    never under the engine's legibility floor `floor` (or today's size, where today's already stands under it). The engine itself drops a
+    caller's ceiling share (engine.mjs sizeCtx passes no ceilK to the size model), so a word held at its ceiling today would not shrink
+    with a smaller natural size alone (live 2026-11-15: a big blast's main word at step 1 stood at 0.94 x today's) - the map steps it
+    itself and draws it at that size. */
+export function smallPx(px, step, floor) {
+  const s = stepOf(step);
+  if ( s >= SIZE_DEFAULT || s === 0 || !(px > 0) ) return px;
+  return Math.max(px * STEP_K[s], Math.min(px, floor > 0 ? floor : 0));
+}
+/** the engine's legibility floor for a word (CSS px of cap height; size.mjs limits(), model = the engine's SIZE / L.sizeModel) */
+export const floorPx = (vh, sizeK, M) => Math.min(M.floorMax, Math.max(M.floorMin, vh * M.floorVh)) * ((sizeK ?? 1) < 0.75 ? M.quietFloorK : 1);
+/** a world word's cap height at any step from today's: smaller (smallPx), today's, or bigger (bigPx) */
+export const steppedPx = (px, step, { floor = 0, cap = 0 } = {}) => {
+  const s = stepOf(step);
+  return s > SIZE_DEFAULT ? bigPx(px, s, cap) : s < SIZE_DEFAULT ? smallPx(px, s, floor) : px;
+};
+/** how far past the engine's loudest ceiling a word may go at step 3: a big blast's main word already stands at that ceiling (soft
+    clamp, up to 1.15 x) today, so without room above it the loudest words could not step at all (live 2026-11-15). 1.3 x: at most
+    about a quarter of the view height (19 % x 1.3) and 85 % of the usable width (65 % x 1.3) - loud, still not a wall over the scene
+    (question SFXSIZE-1) */
+export const LOUD_K = 1.3;
+/** a ranked word's size on the screen (CSS px, fit "screen" = unclamped by the engine) at a step: scaled; at a bigger step held under
+    the engine's own ceiling for its loudest word `capPx` (cap height incl. the mood factor `sizeK`), with no room above it - a screen
+    word has no subject to stand off and no world to scroll, and a long thunder word already runs across the view (live 2026-11-15:
+    at 1.3 x it ran off the side) - and never less than today's size */
+export function screenSizeAt(size, step, capPx = 0, sizeK = 1) {
   const s = stepOf(step);
   if ( s === SIZE_DEFAULT ) return size;
-  const z = size * (STEP_K[s] ?? 1);
-  return s > SIZE_DEFAULT ? Math.max(size, Math.min(z, SCREEN_MAX * Math.max(1, vh))) : z;
+  if ( s < SIZE_DEFAULT ) return size * (STEP_K[s] ?? 1);
+  const k = sizeK > 0 ? sizeK : 1;
+  return bigPx(size * k, s, capPx, 1) / k;
 }

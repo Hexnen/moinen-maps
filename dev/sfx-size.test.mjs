@@ -36,16 +36,23 @@ function pageOf(id, seed = 11) {
 const PRESETS = BUILTIN.map((d) => d.id);
 const pages = PRESETS.flatMap((id) => [11, 23, 97].map((s) => ({ id, s, pg: pageOf(id, s) }))).filter((q) => q.pg?.words?.length);
 
-/* ---- the engine's size model for a ranked map word (sfx.mjs optsOf: size = rankSize(rank, vh / zoom, shrink), ceilK 1) and a cluster
-   word (magnitude + area, ceilK = CEIL_K[role]) at a step: the cap height on screen, CSS px */
-const ranked = (rank, { vh, vw, zoom, sizeK = 1, shrink = 1, mag = 1 }, step) => {
-  const o = SZ.sizeOpts({ size: EV.rankSize(rank, vh / zoom, shrink), ceilK: 1, magnitude: mag }, step);
-  return sizeFor({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4, ...o });
+/* ---- the engine's size model for a ranked map word (sfx.mjs optsOf: size = rankSize(rank, vh / zoom, shrink)) and a cluster word
+   (magnitude + area) at a step: the cap height on screen, CSS px. The engine drops a caller's ceiling share (engine.mjs sizeCtx passes
+   no ceilK to the size model: pinned in STEPS), so today's word is modelled WITHOUT it; another step is sfx.mjs steppedWorld - today's
+   drawn size stepped (smallPx over the legibility floor, bigPx under the loudest ceiling) and drawn unclamped (fit "world") */
+const engineOf = (o) => { const q = { ...o }; delete q.ceilK; return q; };
+const stepped = (c, base, step) => {
+  const s = SZ.stepOf(step), today = sizeFor({ ...c, ...engineOf(base) });
+  if ( s === SZ.SIZE_DEFAULT ) return today;
+  const px = SZ.steppedPx(today.px, s, { cap: loudCeil(c), floor: SZ.floorPx(c.vh, c.sizeK, SIZE) });
+  return sizeFor({ ...c, ...engineOf(base), fit: "world", size: px / ((c.sizeK ?? 1) * c.zoom) });
 };
-const clustered = (role, { vh, vw, zoom, sizeK = 1, mag, area }, step) => {
-  const o = SZ.sizeOpts({ magnitude: mag, area, ceilK: C.CEIL_K[role] }, step);
-  return sizeFor({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4, ...o });
-};
+const ranked = (rank, { vh, vw, zoom, sizeK = 1, shrink = 1, mag = 1, aspect = 4 }, step) =>
+  stepped({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect }, { size: EV.rankSize(rank, vh / zoom, shrink), ceilK: 1, magnitude: mag }, step);
+/** sfx.mjs loudCap: the engine asked for a far too big word of magnitude LOUD_MAG, held at its hard stop over its ceiling */
+const loudCeil = (c) => sizeFor({ ...c, fit: "legible", size: (20 * c.vh) / (c.space === "world" ? c.zoom : 1), scale: 1, magnitude: SZ.LOUD_MAG }).px / SIZE.hardHi;
+const clustered = (role, { vh, vw, zoom, sizeK = 1, mag, area }, step) =>
+  stepped({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4 }, { magnitude: mag, area, ceilK: C.CEIL_K[role] }, step);
 const SCREENS = [[1366, 600], [1366, 768], [1600, 900], [1920, 1080], [2560, 1440]];
 const ZOOMS = [0.25, 0.5, 1, 2, 3];
 
@@ -74,6 +81,10 @@ group("STEPS", () => {
   ok(SZ.sizeAt(37.5, 2) === 37.5 && SZ.screenSizeAt(81, 2, 900) === 81 && Object.keys(SZ.streamOpts(55, 2)).length === 0, "step 2: sizes and streams untouched");
   for ( const o of samples ) for ( const s of [1, 3] ) { const q = SZ.sizeOpts(o, s); ok(q !== o && q.scale === (o.scale ?? 1) * SZ.STEP_K[s], `step ${s} scales the natural size`); }
   ok(SZ.ceilAt(0.6, 1) < 0.6 && SZ.ceilAt(0.6, 3) > 0.6 && SZ.ceilAt(1, 3) === 1 && SZ.ceilAt(0.38, 3) <= 1, "the ceiling share steps too, never past the engine's whole ceiling");
+  // (the engine drops a caller's ceiling share: its size context has no ceilK - why sfx.mjs steps a word from its drawn size; if the
+  // engine starts to honour it, revisit steppedWorld)
+  const ctxSrc = src("letters/engine.mjs").match(/function sizeCtx\(h\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+  ok(ctxSrc.length > 100 && !ctxSrc.includes("ceilK"), "the engine's size context carries no ceiling share");
   // (the stream's numbers mirror the engine's stream(): its syllable unit and ceiling share)
   const eng = src("letters/engine.mjs");
   ok(eng.includes(`sizeFor(c).natural * ${SZ.STREAM_UNIT};`) && eng.includes(`ceilK: o.ceilK ?? ${SZ.STREAM_CEIL}`), "STREAM_UNIT / STREAM_CEIL are the engine's stream numbers");
@@ -90,10 +101,17 @@ group("SIZES", () => {
       cases++;
       const mag = P.RANK_MAG[r], a = ranked(r, { ...ctx, mag }, 1).px, b = ranked(r, { ...ctx, mag }, 2).px, c = ranked(r, { ...ctx, mag }, 3).px;
       const L = limits({ space: "world", vh, vw, magnitude: mag, sizeK, aspect: 4, ceilK: 1 });
-      ok(a < b && b < c, `rank ${r} at ${vw}x${vh} zoom ${zoom} k${sizeK}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)}`);
+      // (bigger at 3 unless today's word already stands at the engine's ceiling for its loudest word: then it holds)
+      const held3 = b >= loudCeil({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4 }) * SZ.LOUD_K * 0.999;
+      const held1 = b <= SZ.floorPx(vh, sizeK, SIZE) + 1e-6;   // (today's word already on or under the floor: it holds there)
+      ok((a < b || (held1 && a <= b + 1e-6)) && (b < c || (held3 && c >= b - 1e-6)), `rank ${r} at ${vw}x${vh} zoom ${zoom} k${sizeK}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)}${held3 ? " (held)" : ""}`);
       // (readable as today's word: on the floor, or a hair under it where today's word is already held there; never past the hard stop)
       ok(a >= Math.min(L.floor, b) * 0.95 && a >= L.floor * SIZE.hardLo - 1e-6, `rank ${r} step 1 readable: ${a.toFixed(1)} px vs floor ${L.floor.toFixed(1)} (today ${b.toFixed(1)})`);
-      ok(c <= L.ceil * SIZE.hardHi + 1e-6, `rank ${r} step 3 under the engine's whole ceiling: ${c.toFixed(1)} vs ${L.ceil.toFixed(1)}`);
+      // (3 never past LOUD_K x the engine's ceiling for its LOUDEST word: 19 % of the view height, 65 % of the usable width - or today's
+      // size where today's already stands above it)
+      const LL = limits({ space: "world", vh, vw, magnitude: SZ.LOUD_MAG, sizeK, aspect: 4, ceilK: 1 });
+      ok(c <= Math.max(b, LL.ceil * SZ.LOUD_K) + 1e-6 && (c <= b + 1e-6 || (c <= 0.19 * SZ.LOUD_K * vh + 1e-6 && c * 4 <= 0.65 * SZ.LOUD_K * vw + 1e-6)), `rank ${r} step 3 under ${SZ.LOUD_K} x the engine's loudest ceiling: ${c.toFixed(1)} vs ${LL.ceil.toFixed(1)} (today ${b.toFixed(1)})`);
+      ok(c <= b * SZ.STEP_K[3] + 1e-6, `rank ${r} step 3 at most ${SZ.STEP_K[3]} x today`);
       if ( a / b <= 0.8 ) down++;
       if ( c / b >= 1.2 ) up++;
       if ( r < 5 ) for ( const s of [1, 2, 3] ) {
@@ -104,15 +122,22 @@ group("SIZES", () => {
     for ( const [role, mag, area] of [["main", 1.4, 500], ["main", 0.6, 120], ["sec", 0.4, 80], ["pre", 0.3, 60]] ) {
       const L = limits({ space: "world", vh, vw, magnitude: mag, sizeK, aspect: 4, ceilK: 1 });
       const a = clustered(role, { ...ctx, mag, area }, 1).px, b = clustered(role, { ...ctx, mag, area }, 2).px, c = clustered(role, { ...ctx, mag, area }, 3).px;
-      ok(a < b && b < c && c <= L.ceil * SIZE.hardHi + 1e-6, `cluster ${role} m${mag}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)} <= ${L.ceil.toFixed(1)}`);
+      const LL = loudCeil({ space: "world", grid: 100, zoom, vw, vh, sizeK, aspect: 4 }) * SZ.LOUD_K, fl = SZ.floorPx(vh, sizeK, SIZE);
+      ok((a < b || (b <= fl + 1e-6 && a <= b + 1e-6)) && (b < c || (b >= LL * 0.999 && c >= b - 1e-6)) && c <= Math.max(b, LL) + 1e-6,
+        `cluster ${role} m${mag}: ${a.toFixed(1)} < ${b.toFixed(1)} < ${c.toFixed(1)} <= ${LL.toFixed(1)}`);
       ok(a >= L.floor * SIZE.hardLo - 1e-6, `cluster ${role} step 1 never under the engine's hard stop`);
     }
   }
-  ok(down / cases > 0.85 && up / cases > 0.6, `clearly smaller at 1 in ${(100 * down / cases).toFixed(0)} %, clearly bigger at 3 in ${(100 * up / cases).toFixed(0)} % of ${cases} cases`);
-  // a ranked word shown on the screen (unclamped by the engine): stepped, the biggest held under SCREEN_MAX of the screen height
-  for ( const vh of [600, 900, 1440] ) for ( let r = 1; r <= 5; r++ ) {
-    const s2 = EV.rankSize(r, vh), s1 = SZ.screenSizeAt(s2, 1, vh), s3 = SZ.screenSizeAt(s2, 3, vh);
-    ok(s1 < s2 && s3 >= s2 && s3 <= Math.max(s2, SZ.SCREEN_MAX * vh) + 1e-9 && s1 >= vh * SIZE.floorVh * 0.95, `screen rank ${r} at ${vh}: ${s1.toFixed(1)} / ${s2.toFixed(1)} / ${s3.toFixed(1)}`);
+  console.log(`  sizes: clearly smaller at 1 in ${(100 * down / cases).toFixed(0)} %, clearly bigger at 3 in ${(100 * up / cases).toFixed(0)} % of ${cases} ranked cases`);
+  ok(down / cases > 0.85 && up / cases > 0.75,`clearly smaller at 1 in ${(100 * down / cases).toFixed(0)} %, clearly bigger at 3 in ${(100 * up / cases).toFixed(0)} % of ${cases} cases`);
+  // a ranked word shown on the screen (unclamped by the engine): stepped, at 3 held under the engine's loudest ceiling for its text -
+  // a long thunder word (aspect 9) never wider than 65 % of the usable width (live 2026-11-15: it ran off both sides)
+  for ( const [vw, vh] of SCREENS ) for ( const aspect of [3, 6, 9] ) for ( const sizeK of [0.85, 1, 1.32] ) for ( let r = 1; r <= 5; r++ ) {
+    const cap = loudCeil({ space: "screen", vw, vh, sizeK, aspect });
+    const s2 = EV.rankSize(r, vh), s1 = SZ.screenSizeAt(s2, 1), s3 = SZ.screenSizeAt(s2, 3, cap, sizeK);
+    const px3 = s3 * sizeK, px2 = s2 * sizeK;
+    ok(s1 < s2 && s3 >= s2 && s1 >= vh * SIZE.floorVh * 0.95, `screen rank ${r} at ${vw}x${vh} a${aspect}: ${s1.toFixed(1)} / ${s2.toFixed(1)} / ${s3.toFixed(1)}`);
+    ok(px3 <= px2 + 1e-6 || (px3 <= 0.19 * vh + 1e-6 && px3 * aspect <= 0.65 * vw + 1e-6), `screen rank ${r} at ${vw}x${vh} a${aspect} k${sizeK} step 3 inside the loudest ceiling: ${px3.toFixed(1)} px`);
   }
 });
 
@@ -161,9 +186,10 @@ group("WIRING", () => {
   ok(/stepFor\("weather"\) === 0 \) return again\(2000\)/.test(sfx), "weather at 0: the storm is not even read");
   ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;\n\s*sfxBus\.entry = noDestr \? null : onEntry;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx), "destruction at 0: off the display's hooks");
   ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), stepFor\("fire"\)\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
-  ok(/return raw \? o : SZ\.sizeOpts\(o, stepFor\(grpOf\(w\)\)\);/.test(sfx) && /const z = L\.sizeOf\(w\.text, o\);/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w\);/.test(sfx.slice(sfx.indexOf("function measure"))),
+  ok(/if \( raw \) return o;\n\s*const step = stepFor\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const z = L\.sizeOf\(w\.text, o\);/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w\);/.test(sfx.slice(sfx.indexOf("function measure"))),
     "the stepped options are what the word plays AND is measured with (placement sees the stepped size)");
-  ok(/o\.size = SZ\.screenSizeAt\(o\.size, step, innerHeight\); else o = SZ\.sizeOpts\(o, step\);/.test(sfx), "an unlocated word steps too");
+  ok(/o\.size = SZ\.screenSizeAt\(s0, step, /.test(sfx) && /else if \( !Number\.isFinite\(spec\.rank\) \) o = SZ\.sizeOpts\(o, step\);/.test(sfx) && /screenSpot\(bw, bh, spec\.seed\)/.test(sfx), "an unlocated word steps too, its spot found for the stepped box");
+  ok(/if \( step !== SZ\.SIZE_DEFAULT && step !== 0 && w\.text \) \{ const b = steppedWorld\(w\.text, o, step\); if \( b \) return b; \}/.test(sfx) && /const z = L\?\.sizeOf\?\.\(text, o\);/.test(sfx) && /fit: "world", size: px \//.test(sfx), "a world word at another step is stepped from the size the engine draws it at today (its clamp would hold it)");
   ok((sfx.match(/\.\.\.streamStep\(/g) ?? []).length === 2, "both gun streams step");
   ok(/!canvas\?\.ready \|\| stepFor\(grpOf\(w\)\) === 0 \) return;/.test(sfx) && /mode\(\) === "off" \|\| stepFor\(grp\) === 0 \) return;/.test(sfx), "a word waiting for its moment is dropped when its group went to 0");
   ok(/function sizeChanged\(g\)/.test(sfx) && /if \( g === "fire" \) \{ clearTimeout\(burnTimer\);/.test(sfx), "a changed size restarts the burning at its new size");

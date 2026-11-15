@@ -11,7 +11,9 @@
    motion the staging asked by sfx-core (a cave-in drops, a bomb shoves the words around it aside, a car's word rides with the car).
    Placement on THIS client's screen: beside what it letters, off tokens, off this client's interface panels, off other words.
    Settings: "sfxLetters" (client: all / big only / off), "sfxLettersWorld" (the GM's switch for everyone), "sfxWords" (client: the
-   word set, auto = the game's language), "sfxLayer". Reduced motion: the module's own rule (config.reducedMotion), passed on. */
+   word set, auto = the game's language), "sfxLayer"; SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (world, the
+   GM's for the table, live: 0 none, 1 smaller, 2 today's size, 3 bigger; sfx-size.mjs; a player sees them read-only under
+   "sfxLetters"). Reduced motion: the module's own rule (config.reducedMotion), passed on. */
 import { MODULE_ID, reducedMotion } from "../config.mjs";
 import { api as moduleApi } from "../attrs.mjs";
 import { perfMode } from "../perf-mode.mjs";
@@ -521,17 +523,26 @@ function screenSpot(bw, bh, key = "") {
     over the map (under the bars), not riding, not pointing at anything. */
 function playScreen(spec, fixed = null) {
   const zoom = canvas.stage?.scale?.x || 1;
-  // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
-  const fw = (spec.bw ?? 200) * zoom * 0.5 + 16, fh = (spec.bh ?? 80) * zoom * 0.75 + 16;
-  const at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot((spec.bw ?? 200) * zoom, (spec.bh ?? 80) * zoom, spec.seed);
   const grp = grpOf(spec), step = stepFor(grp);
   let o = optsOf(spec, true);
   delete o.path; delete o.from; delete o.area;
-  Object.assign(o, { space: "screen", layer: "hud", at });
+  Object.assign(o, { space: "screen", layer: "hud", at: null });
   // (a ranked word on the screen: its share of the screen height in CSS px)
   if ( Number.isFinite(spec.rank) ) Object.assign(o, { size: EV.rankSize(spec.rank, innerHeight, spec.shrink ?? 1), fit: "screen" });
-  // (SFXSIZE: the group's size step - a ranked screen word is not clamped by the engine, so it is stepped and held here)
-  if ( Number.isFinite(spec.rank) ) o.size = SZ.screenSizeAt(o.size, step, innerHeight); else o = SZ.sizeOpts(o, step);
+  // (SFXSIZE: the group's size step - a ranked screen word is not clamped by the engine, so it is stepped and held here: at a bigger
+  // step under the engine's ceiling for its loudest word, and its spot is found for the stepped box)
+  let bw = (spec.bw ?? 200) * zoom, bh = (spec.bh ?? 80) * zoom;
+  if ( Number.isFinite(spec.rank) && step !== SZ.SIZE_DEFAULT ) {
+    const s0 = o.size, sk = (() => { try { return L?.sizeOf?.(spec.text, o)?.sizeK ?? 1; } catch { return 1; } })();
+    o.size = SZ.screenSizeAt(s0, step, step > SZ.SIZE_DEFAULT ? (() => { try { return loudCap(spec.text, o); } catch { return 0; } })() : 0, sk);
+    // (today's box estimate at the stepped size: a word held at today's size keeps today's spot)
+    const f = o.size / s0;
+    if ( f !== 1 ) { bw *= f; bh *= f; }
+  } else if ( !Number.isFinite(spec.rank) ) o = SZ.sizeOpts(o, step);
+  // (a fixed spot - thunder from beyond an edge - holds the WHOLE word: live, a close strike's big word stood half off the top)
+  const fw = bw * 0.5 + 16, fh = bh * 0.75 + 16;
+  const at = fixed ? { x: Math.min(Math.max(fixed.fx * innerWidth, fw), Math.max(fw, innerWidth - fw)), y: Math.min(Math.max(fixed.fy * innerHeight, fh), Math.max(fh, innerHeight - fh)) } : screenSpot(bw, bh, spec.seed);
+  o.at = at;
   const g0 = gen, go = () => {
     if ( g0 !== gen || !L || mode() === "off" || stepFor(grp) === 0 ) return;
     if ( C.tooLate(spec, performance.now()) ) { stats.late++; return; }
@@ -774,7 +785,33 @@ function write(w, taken) {
 /** The options a word plays with (and is measured with): at its group's size step (SFXSIZE; `raw`: before the step). */
 function optsOf(w, raw = false) {
   const o = baseOpts(w);
-  return raw ? o : SZ.sizeOpts(o, stepFor(grpOf(w)));
+  if ( raw ) return o;
+  const step = stepFor(grpOf(w));
+  // (a word at another step than today's: stepped from the size the engine draws it at today and drawn at that size - fit "world", no
+  // second clamp - because the engine's clamp would hold a word at its ceiling whatever its natural size; sizeOpts only when the engine
+  // cannot tell the size)
+  if ( step !== SZ.SIZE_DEFAULT && step !== 0 && w.text ) { const b = steppedWorld(w.text, o, step); if ( b ) return b; }
+  return SZ.sizeOpts(o, step);
+}
+/** SFXSIZE: the engine's own ceiling (cap height on screen, CSS px) for the loudest word of this text with these options on this
+    screen - height, width over the word's measured shape, a crowd's share: the engine is asked for a far too big word of magnitude
+    LOUD_MAG with its whole ceiling, which it holds at its hard stop (hardHi x ceiling) */
+function loudCap(text, o) {
+  const zoom = o.space === "world" ? (canvas.stage?.scale?.x || 1) : 1;
+  const q = L?.sizeOf?.(text, { ...o, fit: "legible", size: (20 * innerHeight) / zoom, scale: 1, ceilK: 1, magnitude: SZ.LOUD_MAG });
+  return q?.px > 0 ? q.px / (L.sizeModel?.hardHi ?? 1.15) : 0;
+}
+/** SFXSIZE: a world word's options at a step other than today's (null: the engine cannot tell its size, or the word is sized another
+    way - exact or pixel lettering) */
+function steppedWorld(text, o, step) {
+  try {
+    if ( o.fit === "exact" || o.pixel || !L?.sizeModel ) return null;
+    const z = L?.sizeOf?.(text, o);
+    if ( !(z?.px > 0) ) return null;
+    const sk = z.sizeK ?? 1, zoom = canvas.stage?.scale?.x || 1;
+    const px = SZ.steppedPx(z.px, step, step > SZ.SIZE_DEFAULT ? { cap: loudCap(text, o) } : { floor: SZ.floorPx(innerHeight, sk, L.sizeModel) });
+    return { ...o, fit: "world", size: px / (sk * zoom * (Number.isFinite(o.scale) && o.scale > 0 ? o.scale : 1)) };
+  } catch { return null; }
 }
 function baseOpts(w) {
   const G = grid(), red = reducedMotion();
