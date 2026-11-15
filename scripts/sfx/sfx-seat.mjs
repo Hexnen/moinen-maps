@@ -236,7 +236,8 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     if ( it.ride ) { const f = sizes[0] / u; out.set(it.key, { cap: sizes[0], k: f, f, px: p.x, py: p.y, dx: 0, dy: 0, box: at(f), rules: [...rules, "ride"], rule: "ride", clean: true }); continue; }
     // (pins and tokens lie ON the map: a word over them hides what the table must read - the hardest rule; a panel lies over the canvas
     // and hides the word, another word up with it is read badly: both kept clean too, given way only where nothing clean exists)
-    const hard = [...pins, ...tokens], soft = [...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)], obs = [...hard, ...soft];
+    const near = (o) => o.x1 > view.x0 && o.x0 < view.x1 && o.y1 > view.y0 && o.y0 < view.y1;
+    const hardG = grid([...pins, ...tokens].filter(near), view), softG = grid([...panels, ...placed.filter((q) => meet(q.life, it.life)).map((q) => q.box)].filter(near), view);
     // (its own subject: covered no more than its kind allows, or than the table picture itself covers it - the table's placement weighs
     // that share, it does not forbid it: a big blast's word stands over the top of its crater on the table)
     const hw0 = sub ? (sub.x1 - sub.x0) / 2 : 0, hh0 = sub ? (sub.y1 - sub.y0) / 2 : 0;
@@ -245,12 +246,9 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // box keeps for the entrance and the outline: the box stays whole inside the view)
     const kx = it.ink?.[0] > 0 ? Math.min(1, it.ink[0]) : 1, ky = it.ink?.[1] > 0 ? Math.min(1, it.ink[1]) : 1;
     const inkOf = (b) => { const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw = ((b.x1 - b.x0) * kx) / 2, hh = ((b.y1 - b.y0) * ky) / 2; return { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh }; };
-    const hardHits = (b) => { const k = inkOf(b); return hard.reduce((s, o) => s + inter(k, o), 0); };
-    const hits = (b) => { const k = inkOf(b); return obs.reduce((s, o) => s + inter(k, o), 0) + (sub ? Math.max(0, inter(k, sub) - cover * area(sub)) : 0); };
     // (nothing clean at any size: the least covered spot, at a size that still keeps its step - a step-3 word not under `full`)
     const fmin = Math.min(sizes[0], Math.max(min, it.full > 0 ? it.full : 0));
     const offView = (b) => area(b) - inter(b, v);
-    // (its side of the thing: which way the table put it from the subject's centre - kept on every seat)
     // (its side of the thing: the way the table put it from the subject's centre, along the axis it stands out most - above, below, left,
     // right; kept on every seat, left only where this seat has no clean spot on it)
     const sideOf = (b) => {
@@ -266,18 +264,27 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const rankOf = (b, bw, bh) => {
       const ox = ((b.x0 + b.x1) / 2 - sc.x) / Math.max(1, hw + bw / 2), oy = ((b.y0 + b.y1) / 2 - sc.y) / Math.max(1, hh + bh / 2);
       let k = around.length, dk = Infinity;
-      around.forEach(([ax2, ay2], i) => { const dd = Math.hypot(ox - ax2, oy - ay2); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } });
+      for ( let i = 0; i < around.length; i++ ) { const dd = Math.hypot(ox - around[i][0], oy - around[i][1]); if ( dd < dk - 1e-9 ) { dk = dd; k = i; } }
       return k;
     };
     let best = null, fallback = null, flipSmall = null;
-    for ( const cap of sizes ) {
+    const trySize = (cap) => {
       const f = cap / u, b0 = at(f), bw = b0.x1 - b0.x0, bh = b0.y1 - b0.y0;
       const d0 = { dx: into(b0.x0, b0.x1, v.x0, v.x1), dy: into(b0.y0, b0.y1, v.y0, v.y1) };
       const clampD = (d) => { const q = mv(b0, d); return { dx: d.dx + into(q.x0, q.x1, v.x0, v.x1), dy: d.dy + into(q.y0, q.y1, v.y0, v.y1) }; };
-      // candidate shifts: none / into the view; just past every obstacle it meets (two rounds, so a word between two obstacles finds the
-      // gap); away from the thing and along it on its own side
-      const cands = [d0], seen = new Set();
-      const add = (d) => { const c = clampD(d), k = `${Math.round(c.dx)}|${Math.round(c.dy)}`; if ( !seen.has(k) ) { seen.add(k); cands.push(c); } };
+      // candidate shifts, searched nearest first (best first: a candidate's score is never under its `base`, so the search stops at the
+      // first candidate whose base is not better than the best clean one): none / into the view; away from the thing and along it on its
+      // own side; beside its subject on each side of the table's own order; and, from every candidate that meets an obstacle, just past
+      // that obstacle on each side (so a word between two obstacles finds the gap)
+      const queue = [], seen = new Set();
+      const add = (d) => {
+        const c = clampD(d), k = Math.round(c.dx) * 2097152 + Math.round(c.dy);
+        if ( seen.has(k) ) return;
+        seen.add(k);
+        const q = mv(b0, c), fl = flips(q), dist = Math.hypot(c.dx, c.dy) / Math.max(1, bh);
+        heapPush(queue, { d: c, q, fl, base: fl ? 6 + 2 * rankOf(q, bw, bh) + dist : dist });
+      };
+      add(d0);
       const ax = side.x || (side.y ? 0 : 1), ay = side.y || (side.x ? 0 : -1);
       for ( const s of [0.25, 0.5, 1, 1.5, 2.5] ) { add({ dx: d0.dx + ax * s * bh, dy: d0.dy + ay * s * bh }); add({ dx: d0.dx + s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx - s * bw * 0.5, dy: d0.dy }); add({ dx: d0.dx, dy: d0.dy + s * bh }); add({ dx: d0.dx, dy: d0.dy - s * bh }); }
       // (beside its subject on each side of the table's own order `around`, touching it as the table places - and a step farther out:
@@ -287,36 +294,63 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
         const tx = sc.x + ox * (hw + bw / 2 - touch * bh + g * bh), ty = sc.y + oy * (hh + bh / 2 - touch * bh + g * bh);
         add({ dx: tx - (b0.x0 + b0.x1) / 2, dy: ty - (b0.y0 + b0.y1) / 2 });
       }
-      for ( let round = 0; round < 2; round++ ) {
-        for ( const d of cands.slice() ) {
-          const q = inkOf(mv(b0, d));
-          for ( const o of obs ) {
-            if ( inter(q, o) <= 0 ) continue;
-            add({ dx: d.dx + o.x0 - q.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - q.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - q.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - q.y0 + 1 });
-          }
-          if ( cands.length > 400 ) break;
-        }
-      }
-      for ( const d of cands ) {
-        const q = mv(b0, d), h = hits(q), hh2 = hardHits(q), off = offView(q), dist = Math.hypot(d.dx, d.dy) / Math.max(1, bh), fl = flips(q);
-        // (clean: whole in the view, off every pin and token, and at most SOFT_OK of its ink under this seat's panels / words up with it -
-        // an edge of a word under a panel is read, a word made smaller is weaker: question MAPSFXSEAT2-1)
-        const ia = area(inkOf(q)), soft = h - hh2;
-        const clean = hh2 <= 1e-6 && off <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
+      let evals = 0;
+      while ( queue.length && evals < MAX_EVALS ) {
+        const c = heapPop(queue);
+        if ( best && best.cap === cap && c.base >= best.score - 1e-9 ) break;
+        evals++;
+        const { d, q, fl } = c, k = inkOf(q);
+        let hh2 = 0, soft = 0;
+        const met = [];
+        for ( const o of hardG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { hh2 += a; met.push(o); } }
+        const metSoft = [];
+        for ( const o of softG.near(k) ) { const a = inter(k, o); if ( a > 0 ) { soft += a; metSoft.push(o); } }
+        const subX = sub ? Math.max(0, inter(k, sub) - cover * area(sub)) : 0, off = offView(q), ia = area(k);
+        // (clean: whole in the view, off every pin and token, its own subject covered no more than allowed, and at most SOFT_OK of its ink
+        // under this seat's panels / words up with it - an edge under a panel is read, a word made smaller is weaker: MAPSFXSEAT2-1)
+        const clean = hh2 <= 1e-6 && off <= 1e-6 && subX <= 1e-6 && soft <= SOFT_OK * ia + 1e-6;
         // (clean first; on its own side; off it, the earliest side of the shared order; then the nearest, the least covered)
-        const score = (fl ? 6 + 2 * rankOf(q, bw, bh) + dist : dist) + (soft / Math.max(1, ia)) * 40;
+        const score = c.base + (soft / Math.max(1, ia)) * 40;
         // (made smaller for want of room: on its own side while it can - the seats that must shrink it keep one picture -, another side
         // only when its own has no clean spot down to `small`)
-        if ( clean && fl && cap < min - 1e-9 ) { if ( !flipSmall || (flipSmall.cap === cap && score < flipSmall.score - 1e-9) ) flipSmall = { cap, f, d, q, score, fl }; continue; }
-        if ( clean ) { if ( !best || score < best.score - 1e-9 ) best = { cap, f, d, q, score, fl, soft }; continue; }
-        // (nothing clean at any size: the least covered at a size not under `min`)
-        if ( cap < fmin - 1e-9 ) continue;
-        // (off pins and tokens first, then on its own side, then the least covered and the least cut by the view edge)
-        const fs = ((h + hh2 * 1000 + off * 4) / Math.max(1, area(q))) * 100 + fl * 20 + score;
-        if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs };
+        // (the larger size wins, then the lower score: the sizes under `min` are not tried in order, see below)
+        const over = (o) => !o || cap > o.cap + 1e-9 || (Math.abs(cap - o.cap) <= 1e-9 && score < o.score - 1e-9);
+        if ( clean && fl && cap < min - 1e-9 ) { if ( over(flipSmall) ) flipSmall = { cap, f, d, q, score, fl, soft }; }
+        else if ( clean ) { if ( over(best) ) best = { cap, f, d, q, score, fl, soft }; continue; }
+        else if ( cap >= fmin - 1e-9 ) {
+          // (nothing clean at any size: the least covered at a size not under `fmin` - off pins and tokens first, then on its own side, then
+          // the least covered and the least cut by the view edge)
+          const fs = ((soft + subX + hh2 * 1000 + off * 4) / Math.max(1, area(q))) * 100 + fl * 20 + score;
+          if ( !fallback || fs < fallback.fs - 1e-9 ) fallback = { cap, f, d, q, fs };
+        }
+        // (escapes: past each pin / token it meets, and past the panels / words it meets only when they cover more than the edge allowed)
+        if ( soft > SOFT_OK * ia + 1e-6 ) met.push(...metSoft);
+        for ( const o of met ) { add({ dx: d.dx + o.x0 - k.x1 - 1, dy: d.dy }); add({ dx: d.dx + o.x1 - k.x0 + 1, dy: d.dy }); add({ dx: d.dx, dy: d.dy + o.y0 - k.y1 - 1 }); add({ dx: d.dx, dy: d.dy + o.y1 - k.y0 + 1 }); }
+        if ( sub && subX > 1e-6 ) { add({ dx: d.dx, dy: d.dy + (side.y || -1) * Math.min(bh, subX / Math.max(1, k.x1 - k.x0)) }); }
       }
-      if ( best ) break;
-    }
+    };
+    // (its sizes from the largest: the first with a clean spot wins - its own sizes down to `min`, then under it (rule "small") only on its
+    // own side. Each run searched by a stride of four, then the three larger between the first hit and the miss before it: a smaller word
+    // fits where a larger one did nearly always, and a view with no room at all tries a third of the sizes. The run under `min` is the
+    // same on every step (`min` x 0.95^k), so its search finds the same size whichever step the word was asked at)
+    const gallop = (list) => {
+      let hit = -1;
+      for ( let j = 0; list.length; j = Math.min(j + 4, list.length - 1) ) {
+        trySize(list[j]);
+        if ( best ) { hit = j; break; }
+        if ( j === list.length - 1 ) break;
+      }
+      if ( hit > 0 ) for ( let j = Math.max(1, hit - 3); j < hit; j++ ) { const was = best; trySize(list[j]); if ( best !== was ) break; }
+    };
+    // (a view with no clean spot even at its smallest size has none at any: only the least covered spot at the largest size and the
+    // smallest that keeps its step (`fmin`) is sought)
+    if ( sizes.length > 2 ) {
+      trySize(sizes.at(-1));
+      const none = !best && !flipSmall;
+      best = flipSmall = null;
+      if ( none ) { const fs = sizes.filter((c) => c >= fmin - 1e-9); for ( const cap of new Set([fs[0], fs.at(-1)]) ) if ( cap > 0 ) trySize(cap); }
+      else { gallop(sizes.filter((c) => c >= min - 1e-9)); if ( !best ) gallop(sizes.filter((c) => c < min - 1e-9)); }
+    } else for ( const cap of sizes ) { trySize(cap); if ( best ) break; }
     best ??= flipSmall;
     const pick = best ?? fallback ?? { cap: sizes[0], f: sizes[0] / u, d: { dx: 0, dy: 0 }, q: at(sizes[0] / u) };
     if ( Math.abs(pick.f - 1) > 1e-6 && !rules.includes("fit") ) rules.push("size");
@@ -336,6 +370,33 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     smaller: question MAPSFXSEAT2-1 (provisional; live 2026-11-15 the take's blast word could not stand whole on either seat at its size
     between the challenges panel, the scene bar, the hotbar and the bomb's pin) */
 export const SOFT_OK = 0.06;
+/** the most candidate spots a word tries at one size (best first: the nearest clean one is found long before; the cap bounds a crowded view) */
+const MAX_EVALS = 160;
+// (the search's queue: a binary heap on `base`, nearest first)
+function heapPush(h, e) { h.push(e); let i = h.length - 1; while ( i > 0 ) { const pi = (i - 1) >> 1; if ( h[pi].base <= e.base ) break; h[i] = h[pi]; i = pi; } h[i] = e; }
+function heapPop(h) {
+  const top = h[0], e = h.pop();
+  if ( h.length ) {
+    let i = 0;
+    for ( ;; ) { const l = 2 * i + 1, r = l + 1; let m = i, mb = e.base; if ( l < h.length && h[l].base < mb ) { m = l; mb = h[l].base; } if ( r < h.length && h[r].base < mb ) m = r; if ( m === i ) break; h[i] = h[m]; i = m; }
+    h[i] = e;
+  }
+  return top;
+}
+// (obstacles bucketed on a coarse grid over the view: a candidate meets only the few in its cells - same answers, fewer tests)
+function grid(list, view, n = 12) {
+  if ( list.length < 8 ) return { near: () => list };
+  const x0 = view.x0, y0 = view.y0, cw = Math.max(1, (view.x1 - view.x0) / n), ch = Math.max(1, (view.y1 - view.y0) / n);
+  const cx = (x) => Math.max(0, Math.min(n - 1, Math.floor((x - x0) / cw))), cy = (y) => Math.max(0, Math.min(n - 1, Math.floor((y - y0) / ch)));
+  const cells = Array.from({ length: n * n }, () => []);
+  list.forEach((o, i) => { for ( let y = cy(o.y0); y <= cy(o.y1); y++ ) for ( let x = cx(o.x0); x <= cx(o.x1); x++ ) cells[y * n + x].push(i); });
+  const mark = new Uint32Array(list.length); let stamp = 0;
+  return { near(b) {
+    stamp++; const outL = [];
+    for ( let y = cy(b.y0); y <= cy(b.y1); y++ ) for ( let x = cx(b.x0); x <= cx(b.x1); x++ ) for ( const i of cells[y * n + x] ) if ( mark[i] !== stamp ) { mark[i] = stamp; outL.push(list[i]); }
+    return outL;
+  } };
+}
 /** the table's side order round a word's subject when the item names none (sfx-core AROUND: above, above beside, beside, below) */
 const AROUND = [[0, -1], [0.55, -1], [-0.55, -1], [1, -0.35], [-1, -0.35], [1, 0.3], [-1, 0.3], [0, 1], [0, 0]];
 /** a point of the table picture as this seat draws it (seatLayout's entry `L`) */
