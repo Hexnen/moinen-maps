@@ -1175,7 +1175,7 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 .mm-sfxt .mm-sfxt-body fieldset { display: block; gap: 0; margin: 0 0 0.7rem; padding: 0.1rem 0.85rem 0.15rem; border: 1px solid var(--mm-sfxt-edge); border-radius: 8px; }
 .mm-sfxt legend { padding: 0 0.35rem; font-weight: 700; font-size: var(--font-size-14, 0.9rem); }
 .mm-sfxt .mm-sfxt-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; column-gap: 1rem; row-gap: 0.15rem; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) 19.5rem; column-gap: 1rem; row-gap: 0.15rem; align-items: center;
   margin: 0; padding: 0.45rem 0; transition: opacity 0.15s var(--mm-sfxt-ease);
 }
 .mm-sfxt .mm-sfxt-row + .mm-sfxt-row { border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
@@ -1202,5 +1202,6 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 .mm-sfxt-seat li.is-on { color: inherit; }
 .mm-sfxt-seat li.is-on i { color: var(--mm-sfxt-accent); opacity: 1; }
 .mm-sfxt .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+.mm-sfxt .form-footer button { flex: 1 1 auto; white-space: nowrap; }
 .mm-sfxt .form-footer .mm-sfxt-save { color: var(--mm-sfxt-accent-ink); background: var(--mm-sfxt-accent); border-color: color-mix(in srgb, var(--mm-sfxt-accent) 70%, #000); }
 @media (prefers-reduced-motion: reduce) { .mm-sfxt .mm-sfxt-row { transition: none; } }

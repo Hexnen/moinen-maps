@@ -27,7 +27,7 @@ class TableWindow extends ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: "moinen-maps-sfx-table", tag: "form", classes: ["mm-sfxt"],
     window: { title: 'MOINENMAPS.Sfx.table.title', icon: "fa-solid fa-burst", contentClasses: ["standard-form"] },
-    position: { width: 560, height: "auto" },
+    position: { width: 640, height: "auto" },
     form: { handler: TableWindow.#save, submitOnChange: false, closeOnSubmit: false },
     actions: { reset: TableWindow.#reset, engine: TableWindow.#engine }
   };
