@@ -82,9 +82,9 @@ group("STEPS", () => {
   for ( const o of samples ) for ( const s of [1, 3] ) { const q = SZ.sizeOpts(o, s); ok(q !== o && q.scale === (o.scale ?? 1) * SZ.STEP_K[s], `step ${s} scales the natural size`); }
   ok(SZ.ceilAt(0.6, 1) < 0.6 && SZ.ceilAt(0.6, 3) > 0.6 && SZ.ceilAt(1, 3) === 1 && SZ.ceilAt(0.38, 3) <= 1, "the ceiling share steps too, never past the engine's whole ceiling");
   // (the engine drops a caller's ceiling share: its size context has no ceilK - why sfx.mjs steps a word from its drawn size; if the
-  // engine starts to honour it, revisit steppedWorld)
+  // engine starts to honour it, revisit steppedWorld; LETR 1.9.11 honours only the new option `ceil`, the map's `ceilK` stays unread)
   const ctxSrc = src("letters/engine.mjs").match(/function sizeCtx\(h\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
-  ok(ctxSrc.length > 100 && !ctxSrc.includes("ceilK"), "the engine's size context carries no ceiling share");
+  ok(ctxSrc.length > 100 && !ctxSrc.includes("opts.ceilK"), "the engine's size context carries no caller's ceilK");
   // (the stream's numbers mirror the engine's stream(): its syllable unit and ceiling share)
   const eng = src("letters/engine.mjs");
   ok(eng.includes(`sizeFor(c).natural * ${SZ.STREAM_UNIT};`) && eng.includes(`ceilK: o.ceilK ?? ${SZ.STREAM_CEIL}`), "STREAM_UNIT / STREAM_CEIL are the engine's stream numbers");
