@@ -4,6 +4,7 @@ import { MODULE_ID } from "../config.mjs";
 import * as M from "./model.mjs";
 import * as TM from "./tornado-model.mjs";
 import * as Wx from "./weather.mjs";
+import { LOOKS } from "./lens-look.mjs";
 import { VIEW_PRESETS } from "../view-angle.mjs";
 import { sharedNow } from "../shared-clock.mjs";
 
@@ -19,7 +20,8 @@ import { sharedNow } from "../shared-clock.mjs";
  *    fixed). Keys while the section is open: 0-3 the current preset's strength, [ ] nudge the last-touched slider by 0.25;
  *  - dock: Weather (status, on / off, who sees it, each layer's strength), Wind (direction, strength, gusts), Tornadoes (the
  *    next one's strength / speed / end, the list with each one's strength slider and rope-out, rope out all), Ground (how fast it
- *    wets and dries, puddles, whether rain puts fire out), Lens (on, Auto / fixed strength, how much shows), View (the oblique
+ *    wets and dries, puddles, whether rain puts fire out), Lens (on, Auto / fixed strength, how much shows, the table's look: pixel
+ *    art or smooth), View (the oblique
  *    angle, shared with fire), This client (detail and lens caps: the same settings every player has in Configure Settings).
  * Every change is one key on the timeline (one scene write); every client ramps to it from the shared clock.
  */
@@ -518,12 +520,14 @@ const PANELS = [
       ${lensLevelHtml(L, "g")}
       ${optRange({ name: "g.lensStrength", label: T("Weather.lensStrength"), value: L.strength, min: 0, max: 1, step: 0.05, hint: T("Weather.lensStrengthHint") })}
       ${optCheck({ name: "g.lensHeat", label: T("Weather.lensHeat"), checked: L.heat, hint: T("Weather.lensHeatHint") })}
+      ${optSelect({ name: "g.lensLook", label: T("Weather.look.short"), value: Wx.lensLook(), options: LOOKS.map((k) => [k, T(`Weather.look.${k}`)]), hint: T("Weather.look.dockHint") })}
       <p class="mm-ws-hint">${esc(T("Weather.lensPlayers"))}</p></div>`; },
     onChange: (n, v, c) => {
       if ( n === "g.lensOn" ) Wx.setParams({ lens: { on: v } });
       else if ( n === "g.lensMode" || n === "g.lensLevel" ) lensChange(n.slice(2), v, c);
       else if ( n === "g.lensStrength" ) Wx.setParams({ lens: { strength: v } });
       else if ( n === "g.lensHeat" ) Wx.setParams({ lens: { heat: v } });
+      else if ( n === "g.lensLook" ) Wx.weatherApi.look(v);   // (DROPS: the table's look, a world setting: every seat follows)
     }
   }) },
   { id: "view", title: "MOINENMAPS.Weather.pView", icon: "fa-solid fa-cube", open: false, mount: panel({

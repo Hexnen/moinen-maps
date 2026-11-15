@@ -14,7 +14,7 @@ const sets = {
   tornado: (await import("../scripts/weather/tornado.mjs")).tornadoPrograms(),
   display: (await import("../scripts/weather/display.mjs")).displayPrograms(),
   clouds: (await import("../scripts/weather/clouds.mjs")).cloudPrograms(),
-  lens: (await import("../scripts/weather/lens.mjs")).lensPrograms()
+  lens: await (async () => { const L = (await import("../scripts/weather/lens.mjs")).lensPrograms; return [...new Set([...L("pixel"), ...L("smooth")])]; })()   // (DROPS: both looks)
 };
 const T = Object.fromEntries(sets.tornado.map((p) => [p.name.replace("moinen-maps-tornado-", ""), p]));
 

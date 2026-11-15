@@ -2,6 +2,7 @@ import * as M from "./model.mjs";
 import { blendMode } from "./display.mjs";
 import { GLSL_WIND, gustEnv, dirVec } from "../wind.mjs";
 import { weatherQ } from "./guard.mjs";
+import { DEFAULT_LOOK, cleanLook, lensGrid } from "./lens-look.mjs";
 
 /**
  * The LENS: what happens ON the glass (doc 4.2-4.4), never a second copy of the world weather.
@@ -10,6 +11,10 @@ import { weatherQ } from "./guard.mjs";
  * are on the glass, not on the map). Sizes, cells and densities are in lens px; NOTHING IS DRAWN IN WHOLE LENS PX: every shape (a
  * drop's edge, a wet trail, a speck, a grain, frost, a crystal, a fleck, a glint) is drawn smooth and antialiased per px of the pass,
  * SUB = 3 px per lens px (one per CSS px). In whole lens px they were 3 x 3 squares and stairs (2026-11-08).
+ * DROPS (2026-11-15): that is the "smooth" LOOK. The GM chooses the table's look (lens-look.mjs, world setting `weatherLensLook`);
+ * the default "pixel" draws the lens as the pixel art it was before 244ba32 / 351f52b: one px of the pass per lens px, decided at its
+ * centre with hard edges (pixelize), shown as whole NEAREST blocks (SHOW_FRAG_PX). Same drops, same timing, same cost structure;
+ * the pixel pass has a ninth of the px.
  *
  * RENDER: one pass into a target of SUB x SUB px per lens px, only when its 12 Hz step changes, drawn in BANDS over the frames
  * until the next step into a hidden pair of targets, then swapped in; every frame one sprite, a child of the stage drawn last, in
@@ -754,20 +759,67 @@ let lensProg = null, dispProg = null, runProg = null, beadProg = null;
 // the background pre-warm) only builds a one-target variant. That draw-time compile of the 44 kB pass froze every frame for 2.4-2.8 s
 // on the first rainy scene of a session (Electron 146, warehouse). Two one-target programs link completely in the background; the
 // pass draws each band twice (shade, then refraction) with the same uniforms: the same two textures, the same pixels.
-const lensFrag = (n, inl = 0, out = 1) => LENS_FRAG.replace("#version 300 es", `#version 300 es
+const lensFrag = (n, inl = 0, out = 1, pixel = false) => {
+  const s = LENS_FRAG.replace("#version 300 es", `#version 300 es
 #define PRE ${n}
 #define INLINE ${inl}
 #define LENS_OUT ${out}`);
+  return pixel && n === 0 ? pixelize(s) : s;
+};
+/**
+ * DROPS: the PIXEL-ART pass (lens-look.mjs "pixel", the default), made from the same source by swapping a few lines (not #if
+ * branches: every program stays as short as the smooth one, dev/weather-link.test.mjs). The pass draws ONE px per lens px (uAA 1)
+ * and decides each lens px at its centre: hard edges (cov), a speck / mist droplet / splat satellite / crystal core is the one lens
+ * px it falls in (soft), a drop under 1.2 lens px sits on the grid (blob), the wet trail and its lit edge thin out and dry by an
+ * ordered 4 x 4 dither (bay: pixel art's own fade, never a partial tone over a whole trail), a small drop is its whole px (no
+ * soft lift), a glint is two tones (hot core, cool rim). Everything else (shading, timing, the drop field, the refraction share) is
+ * the smooth pass's, so both looks show the same drops at the same moments. Missing targets throw (a renamed line must not silently
+ * leave the smooth look on).
+ */
+const PIXEL_SWAPS = [
+  ["float cov(float s) { return clamp(0.5 - s / uAA, 0.0, 1.0); }", "float cov(float s) { return s < 0.0 ? 1.0 : 0.0; }"],
+  ["float soft(vec2 e, float r) { float t = clamp(1.0 - dot(e, e) / (r * r), 0.0, 1.0); return t * t; }",
+    "float soft(vec2 e, float r) { return max(abs(e.x), abs(e.y)) < 0.5 * max(1.0, r / 0.85) ? 1.0 : 0.0; }\n"
+    + "float bay(vec2 p) { ivec2 i = ivec2(floor(p)) & 3, x = i ^ i.yx; int b = ((x.x & 1) << 3) | ((i.y & 1) << 2) | (x.x & 2) | ((i.y >> 1) & 1); return (float(b) + 0.5) / 16.0; }"],
+  ["  vec2 d = p - c;\n  float dyy", "  vec2 d = p - (r < 1.2 ? floor(c) + 0.5 : c);\n  float dyy"],
+  ["  vec2 p = vP;   // (continuous: every shape is drawn per px of this pass, never in whole lens px)", "  vec2 p = floor(vP) + 0.5;   // (pixel art: one decision per lens px, at its centre)"],
+  ["wet = max(wet, cov(abs(dxp) - w) * on);", "wet = max(wet, cov(abs(dxp) - w) * step(bay(p), on));"],
+  ["lit = max(lit, (1.0 - ss(0.12, 0.5, le)) * on * ss(0.36, 0.5, vnoise(vec2(p.y / 3.0, ky), 345)));", "lit = max(lit, step(le, 0.5) * step(bay(p + 2.0), on * ss(0.36, 0.5, vnoise(vec2(p.y / 3.0, ky), 345))));"],
+  ["inC = 1.0 - ss(-0.45 * max(dR, 0.8), 0.5 * uAA, sdf);", "inC = cov(sdf);"],
+  // (a big drop's 1-px rim is its outline, as in the old pixel art: the lower ring darker, the upper ring lit; the old 0.58 lower rim
+  // and the contact shadow under it read as dark squares at night (B6): 0.72 here, no shadow)
+  ["low = clamp((n.y - 0.3) * dR / uAA + 0.5, 0.0, 1.0);", "low = n.y > -0.1 ? 1.0 : 0.0;"],
+  ["srcK = mix(srcK, mix(0.9, 0.86, low), rim);", "srcK = mix(srcK, mix(0.9, 0.72, low), rim);"],
+  ["bAdd = vec3(0.05) * uLight * rim * (1.0 - low);", "bAdd = vec3(0.10) * uLight * rim * (1.0 - low);"],
+  ["if ( G_ > 0.0 ) over(1.0 - G_, Gc_ * G_ * uLight);", "if ( G_ > 0.1 ) { float g = G_ > 0.42 ? 0.9 : 0.3; over(1.0 - g, (G_ > 0.42 ? Gc_ : vec3(0.80, 0.88, 1.0)) * g * uLight); }"]
+];
+export function pixelize(src) {
+  let s = src;
+  for ( const [a, b] of PIXEL_SWAPS ) {
+    if ( !s.includes(a) ) throw new Error(`moinen-maps lens: the pixel-art swap target is gone: ${a.slice(0, 60)}`);
+    s = s.replace(a, b);
+  }
+  return s;
+}
 let inlineProg = null, inlineDisp = null;
-function makeLensProgs() {
+const PX = {};   // the pixel-art pass (and its inline fallback); the pre-passes are the same programs for both looks
+function makeLensProgs(pixel = false) {
+  runProg ??= PIXI.Program.from(LENS_VERT, lensFrag(1), "moinen-maps-weather-lens-runners");
+  beadProg ??= PIXI.Program.from(LENS_VERT, lensFrag(2), "moinen-maps-weather-lens-beads");
+  if ( pixel ) {
+    PX.lens ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 0, 1, true), "moinen-maps-weather-lens-px");
+    PX.disp ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 0, 2, true), "moinen-maps-weather-lens-px-disp");
+    PX.inline ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1, 1, true), "moinen-maps-weather-lens-px-inline");
+    PX.inlineDisp ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1, 2, true), "moinen-maps-weather-lens-px-inline-disp");
+    return { lens: PX.lens, disp: PX.disp, inline: PX.inline, inlineDisp: PX.inlineDisp };
+  }
   lensProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0), "moinen-maps-weather-lens");
   dispProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 0, 2), "moinen-maps-weather-lens-disp");
   inlineProg ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1), "moinen-maps-weather-lens-inline");
   inlineDisp ??= PIXI.Program.from(LENS_VERT, lensFrag(0, 1, 2), "moinen-maps-weather-lens-inline-disp");
-  runProg ??= PIXI.Program.from(LENS_VERT, lensFrag(1), "moinen-maps-weather-lens-runners");
-  beadProg ??= PIXI.Program.from(LENS_VERT, lensFrag(2), "moinen-maps-weather-lens-beads");
+  return { lens: lensProg, disp: dispProg, inline: inlineProg, inlineDisp };
 }
-const SUB = 3, BANDS = 4;   // px of the pass per lens px (one per CSS px); the bands a step is drawn in
+const BANDS = 4;   // the bands a step is drawn in (px of the pass per lens px: lens-look.mjs subOf, 1 pixel art / 3 smooth)
 
 const SHOW_VERT = `#version 300 es
 precision highp float;
@@ -821,12 +873,46 @@ void main() {
   }
   fragColor = vec4(add, k);
 }`;
-let showProg = null;
-/** The lens's programs (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
-export function lensPrograms() {
-  makeLensProgs();
-  showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
-  return [lensProg, dispProg, runProg, beadProg, showProg];
+/**
+ * DROPS: the glass on screen in PIXEL ART: each lens px is ONE block (texelFetch of the pass, which drew one px per lens px), so at
+ * any DPR, zoom and window size a lens px covers whole device px (lpx = round(3 x DPR)) with one colour. A big drop adds the frame
+ * under it, refracted from the lens px's centre and averaged over the lens px (4 taps: a box filter, so the map moving under a drop
+ * changes its blocks evenly instead of sparkling).
+ */
+const SHOW_FRAG_PX = `#version 300 es
+precision highp float;
+in vec2 vP;
+out vec4 fragColor;
+uniform sampler2D uShade;
+uniform sampler2D uDisp;
+uniform sampler2D uFrame;
+uniform vec2 uFrameK;
+uniform float uHasFrame;
+void main() {
+  ivec2 ip = clamp(ivec2(floor(vP)), ivec2(0), textureSize(uShade, 0) - 1);
+  vec2 pc = vec2(ip) + 0.5;
+  vec4 c = texelFetch(uShade, ip, 0), d = texelFetch(uDisp, ip, 0);
+  vec3 add = c.rgb; float k = c.a, S = d.a;
+  if ( S > 0.0 ) {
+    if ( uHasFrame > 0.5 ) {
+      vec2 dc = pc + (d.xy - 0.5) * 32.0;
+      float dR = d.z * 16.0;
+      vec2 n = (pc - dc) / max(dR, 0.5);
+      vec2 sp = dc + (pc - dc) * (0.68 + 0.22 * min(dot(n, n), 1.0)) - vec2(0.0, 0.18 * dR);
+      vec3 s = vec3(0.0);
+      for ( int j = 0; j < 2; j++ ) for ( int i = 0; i < 2; i++ ) s += texture(uFrame, clamp((sp + vec2(float(i), float(j)) * 0.5 - 0.25) * uFrameK, vec2(0.0), vec2(1.0))).rgb;
+      add += s * 0.25 * S;
+    } else k = min(1.0, k + S);
+  }
+  fragColor = vec4(add, k);
+}`;
+let showProg = null, showPx = null;
+const showProgOf = (pixel) => (pixel ? (showPx ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG_PX, "moinen-maps-weather-lens-px-show"))
+  : (showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show")));
+/** The lens's programs for a look (made here, compiled by their first draw, or earlier by the idle pre-warm in weather.mjs). */
+export function lensPrograms(look = DEFAULT_LOOK) {
+  const pixel = cleanLook(look) === "pixel", p = makeLensProgs(pixel);
+  return [p.lens, p.disp, runProg, beadProg, showProgOf(pixel)];
 }
 
 /**
@@ -911,15 +997,15 @@ export class WeatherLens {
 
   /** Make (or re-make) the lens targets, sprite and pass for this screen size and DPR. */
   ensure() {
-    const r = canvas.app.renderer, dpr = r.resolution || 1, lpx = Math.max(1, Math.round(3 * dpr)), css = lpx / dpr;
-    const lw = Math.ceil(r.screen.width / css), lh = Math.ceil(r.screen.height / css);
-    if ( this.bufs && this.stats.lw === lw && this.stats.lh === lh && this.stats.lpx === lpx ) return;
+    const r = canvas.app.renderer, dpr = r.resolution || 1, look = cleanLook(this.look);
+    const { lpx, css, lw, lh, sub: SUB, W, H } = lensGrid(r.screen.width, r.screen.height, dpr, look), pixel = look === "pixel";
+    if ( this.bufs && this.stats.lw === lw && this.stats.lh === lh && this.stats.lpx === lpx && this.stats.look === look ) return;
     this.free();
-    this.stats.lw = lw; this.stats.lh = lh; this.stats.lpx = lpx;
-    const W = lw * SUB, H = lh * SUB;
+    this.stats.lw = lw; this.stats.lh = lh; this.stats.lpx = lpx; this.stats.look = look;
     // two sets of targets (shown / being drawn): the pass draws a step in bands over a few frames into the hidden set, then they swap
+    // (pixel art: one px per lens px, shown as whole blocks: NEAREST; smooth: SUB px per lens px, interpolated: LINEAR)
     this.bufs = [0, 1].map(() => {
-      const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
+      const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: pixel ? PIXI.SCALE_MODES.NEAREST : PIXI.SCALE_MODES.LINEAR });
       // the pass's refraction target (its own one-target program, lensFrag): where a big drop samples the frame (read px by px: NEAREST)
       const disp = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1, scaleMode: PIXI.SCALE_MODES.NEAREST });
       return { rt, disp, dispTex: disp, dispClear: true };   // (a new texture is all zero)
@@ -928,7 +1014,7 @@ export class WeatherLens {
     // the full-resolution copy of the frame under the glass (device px)
     const fw = Math.floor(r.screen.width * dpr), fh = Math.floor(r.screen.height * dpr);
     this.frameRT = PIXI.RenderTexture.create({ width: fw, height: fh, resolution: 1, scaleMode: PIXI.SCALE_MODES.LINEAR });
-    makeLensProgs();
+    const PG = makeLensProgs(pixel);
     const U = {
       uLens: new Float32Array([lw, lh]), uAA: 1 / SUB, uVS: 1 / SUB, uT: 0, uSeed: 0, uRainA: new Float32Array(4), uFilm: 0, uWind: new Float32Array([1, 0, 0]), uSlant: 0,
       uG: this.int, uCrR: this.crR, uSnowL: new Float32Array(4), uSandL: new Float32Array(4), uDustL: new Float32Array(4), uDustL2: new Float32Array(4), uHeatL: new Float32Array(4),
@@ -953,7 +1039,7 @@ export class WeatherLens {
       this.shaders.push(rs, bs);
     }
     // (the shade and the refraction programs share ONE uniform group: every value set on one is the other's)
-    const UG = new PIXI.UniformGroup(U), shader = new PIXI.Shader(this.pre ? lensProg : inlineProg, UG), dshader = new PIXI.Shader(this.pre ? dispProg : inlineDisp, UG);
+    const UG = new PIXI.UniformGroup(U), shader = new PIXI.Shader(this.pre ? PG.lens : PG.inline, UG), dshader = new PIXI.Shader(this.pre ? PG.disp : PG.inlineDisp, UG);
     this.shaders.push(shader);
     // the pass in BANDS of rows (each a quad of its own; a band overwrites its rows whole)
     this.slices = []; this.dslices = [];
@@ -963,9 +1049,8 @@ export class WeatherLens {
       this.slices.push(new PIXI.Mesh(g, shader, state));
       this.dslices.push(new PIXI.Mesh(g, dshader, state));
     }
-    showProg ??= PIXI.Program.from(SHOW_VERT, SHOW_FRAG, "moinen-maps-weather-lens-show");
     const sg = new PIXI.Geometry().addAttribute("aVertexPosition", [0, 0, lw, 0, lw, lh, 0, lh], 2).addIndex([0, 1, 2, 0, 2, 3]);
-    this.sprite = new LensShow(sg, new PIXI.Shader(showProg, {
+    this.sprite = new LensShow(sg, new PIXI.Shader(showProgOf(pixel), {
       uShade: this.bufs[0].rt, uDisp: this.bufs[0].dispTex, uFrame: this.frameRT, uLens: new Float32Array([lw, lh]), uSub: SUB,
       uFrameK: new Float32Array([css * dpr / fw, css * dpr / fh]), uHasFrame: 0, translationMatrix: new PIXI.Matrix().toArray(true)
     }));
