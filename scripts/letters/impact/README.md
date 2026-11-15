@@ -257,6 +257,16 @@ ladder scratch -> hit -> heavy -> knock-down -> critical called at once, zoom 0.
 | words and impacts | max 62 ms (the word frame above), 35 and 33 ms at the two loudest words; impacts add nothing measurable |
 | one critical scheduled 1.5 s ahead | paint 22-23 ms in total, spread; no frame over 25 ms |
 
+Re-measured 2026-11-15 (1.9.20 IMPACT3, lane 5, two seats GM + Test Gracz 1 on one chrome-headless-shell at 60 fps on the film
+clock, 1600x900, The Warehouse at zoom 0.75, both modules, another agent's test suite running on the same machine): 20 impacts (the
+hit ladder 0..5, heavy / slash / shock / landing / ko at 1.6, four plus-ultra criticals, a knock-down, a crowd, a critical with four
+`also` figures, a hidden attacker, a map blast). Every animation frame in the window of every directly called impact, the critical
+with five figures included, was 16.7 ms on both seats (no frame over one film tick). The plus-ultra criticals show one 100-117 ms
+frame just BEFORE the impact call, in the splash's own work (the same frame was 133-467 ms on 1.9.19 in earlier takes), none inside
+the impact. Both seats got the same drawings at the same instant (60 fps frame sheets: identical frame by frame; the hidden
+attacker: the player's drawing radial, by design). Cost of the figures: one 256 px software copy per token picture, cached and shared;
+at most 3 x 26 + 4 extra draw calls per drawing (check-figures).
+
 ## Integration recipes
 
 - **Dice-roll splash (critical).** `I.play({ kind: "crit", magnitude: 1.7, subject: splashPanelElement, over: "ui", seed: message.id,

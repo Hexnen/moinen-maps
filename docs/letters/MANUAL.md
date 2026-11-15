@@ -1610,7 +1610,10 @@ I.play({ kind, magnitude, subject: token, from: attackerToken, seed: `${token.id
   token at a close zoom shows rims only. The gentle variant and reduced motion draw rims only. A token is drawn on a seat only when
   that seat may see it (a GM-hidden token never on a player's, its outline neither). Caller options: `also: [tokens]`, `figures:
   false | "rim"` (lower only), and in your own `frames` a step's `fig` and `kick`. Tables per step and kind: the impact README
-  "The figures" and "Kinds". `[V node, V render]`
+  "The figures" and "Kinds". `[V node, V render, V live]` Live (lane 5, GM + Test Gracz 1, 60 fps): identical drawings on both
+  seats frame by frame; no frame over 16.7 ms inside any directly called impact; a photosensitive seat drew `local` with rims while
+  the GM drew `full`. Caller notes from the take: a crowd in plus-ultra passes only its heaviest target (the others could be `also`);
+  no maps caller plays an impact for a map blast today.
 
 **Frame types** (20): `pop splat lines ink slam shadow glare swap window smear tear rip dots shatter chroma ring fade rest`, and
 (1.9.20) `fig cracks`. Full-field:
