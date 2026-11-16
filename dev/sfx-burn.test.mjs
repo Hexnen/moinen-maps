@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as SEAT from "../scripts/sfx/sfx-seat.mjs";
+import * as BURN from "../scripts/sfx/sfx-burn.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 globalThis.__letrRealST = (f) => setImmediate(f);
@@ -24,13 +25,19 @@ const ok = (c, m) => { if ( c ) { n++; if ( process.env.BURN_VERBOSE ) console.l
 const levelAt = (t) => Math.max(0.2, Math.min(1, 0.35 + t / 8000)) * (0.9 + 0.1 * Math.sin(t / 900));
 const AT = { x: 2000, y: 1500 };
 
-async function run({ size, motion, room, ms = 10000, late = 0, seed = "burn" }) {
+async function run({ size, motion, room, ms = 10000, late = 0, seed = "burn", scored = true }) {
   const E = await setup(); const L = E.engine; L.lookStyle("invincible"); L.motionMode?.(motion);
   if ( late ) await E.tick(late + 137, 33);
   const start = E.now() - late;
-  const s = L.sustain({ kind: "fire", lang: "en", space: "world", at: () => AT, seed, size, keepInView: false, treatments: TREAT, glow: "auto", area: 120,
+  // (MAPBURN: the map's call is now the fire's score - sfx-burn burnScore passed as `words`, sized exactly (fit "world"), its room and
+  // width in the run's size x the share its heat reaches (the blaze's here: its biggest block); the checks below are the same checks on
+  // the call the map makes now - before MAPBURN they ran the unscored call, which the map no longer makes)
+  const k = size * BURN.topScale(5);
+  const score = BURN.burnScore({ seed, heat: (t) => levelAt(t), word: (q) => L.word("fire", { ...q, lang: "en" }) });
+  const s = L.sustain({ kind: "fire", lang: "en", space: "world", ...(scored ? { fit: "world", words: (i, t) => score(i, t) } : {}), at: () => AT, seed, size, keepInView: false, treatments: TREAT, glow: "auto", area: 120,
     level: (t) => levelAt(Number.isFinite(t) ? t : E.now() - start), startAt: start,
-    ...(room ? { room: () => SEAT.runBox(AT, size), maxWidth: SEAT.RUN.mw * size } : {}) });
+    ...(room ? { room: () => SEAT.runBox(AT, k), maxWidth: SEAT.RUN.mw * k } : {}) });
+  // (`scored: false`: the call before MAPBURN - PREV is about that call)
   const seen = new Set(), ext = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }, shots = new Map();
   for ( let t = 0; t < ms; t += 33 ) {
     await E.tick(33, 33);
@@ -51,7 +58,7 @@ for ( const motion of ["smooth", "stepped"] ) for ( const size of [58, 82] ) {
   ok(out <= tol / size, `CONTAIN ${motion} ${size}: the run stays inside its block (${((e.x1 - e.x0) / size).toFixed(2)} x ${((e.y1 - e.y0) / size).toFixed(2)} caps, up ${((AT.y - e.y0) / size).toFixed(2)} down ${((e.y1 - AT.y) / size).toFixed(2)}; past the block by ${Math.max(0, out).toFixed(2)} caps)`);
 }
 {
-  const size = 58, r = await run({ size, motion: "smooth", room: false, seed: "burn-prev" }), em = 1.25 * size, e = r.ext;
+  const size = 58, r = await run({ size, motion: "smooth", room: false, seed: "burn-prev", scored: false }), em = 1.25 * size, e = r.ext;
   const prevBox = { x0: AT.x - 4.4 * em, x1: AT.x + 4.4 * em, y0: AT.y - 2.5 * em, y1: AT.y + 0.9 * em };
   ok(e.y1 > prevBox.y1 + size || e.y0 < prevBox.y0 - size, `PREV the previous call (no room): the run left the box the map kept for it (down ${((e.y1 - AT.y) / size).toFixed(2)} caps vs ${(0.9 * 1.25).toFixed(2)}, up ${((AT.y - e.y0) / size).toFixed(2)} vs ${(2.5 * 1.25).toFixed(2)})`);
 }

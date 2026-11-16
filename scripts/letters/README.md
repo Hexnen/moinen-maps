@@ -296,6 +296,13 @@ stops, the words up play their exits and a small tail trails off.
   `{ stop({ quick }), level(v), alive, phrases, history, finished, handles }`. `level` 0..1 (or a function of ms) sets size, how
   often and how busy; change it live with `s.level(v)`. `kind` takes its words from the vocabulary (WORD); `words(k, ms, level)`
   supplies your own. Ends on `until`, `s.stop()`, `L.stopAll()` and (world) a scene change.
+  1.9.25 (MAPBURN): `words` may return a string or `{ text, mood, ms, accent }` and now also the phrase's own `treat` (one of the
+  run's treatments: "breath", "stretch", "split", "shed", "echo", "accent"; the seeded pick stands when it is absent or not
+  allowed in this mode), `level` (0..1: this phrase's loudness instead of the run's level now), `scale` (its size as a share of
+  the run's `size`) and `colors` (its own face): a caller's SCORE, so a run can build (a fire climbing from ember ticks to a
+  roar). The function is asked for every phrase in order from the first on every seat (a late seat replays the past), with `ms` on
+  the run's clock: decide from the seed, the index and `ms` only and every seat letters the same. Give each phrase its `mood` too:
+  a phrase with no mood has it read from its letters, and its design then follows the words this seat drew before it.
 - The run's layout (1.9.15 SUSTAINGAP, invincible style; the legacy styles keep the 1.9.14 sustain, `sustain-legacy.mjs`): a run
   reads as one living run, its phrases never pile on each other while legible. Each phrase is seated by its own measured ink box
   (`inkBoxOf` in the engine: entrance, hold and its turns, keyline, rim, duplicate block, the picture's glow, plus how far its exit
