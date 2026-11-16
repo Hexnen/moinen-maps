@@ -37,12 +37,32 @@ const stepOfEnv = (e) => (Number.isFinite(e.step) ? e.step : 3);
    neighbours; at an ordinary zoom (a token of ~100 px) the view's floor holds as before. No subject (R 0): the view's floor. */
 const LEGIBLE = 0.03;
 export const floorOf = (e, k, near) => (e.R > 0 ? Math.min(unit(e) * k, Math.max(e.R * near, unit(e) * LEGIBLE)) : unit(e) * k);
-export const burstR = (e) => {
+/* the star's radius as 1.9.26 had it: the FLASH frames (a full field: shadow, window) keep it for the star the whole screen turns into */
+export const flashR = (e) => {
   const st = stepOfEnv(e), cap = Math.sqrt(0.16 * e.W * e.H / Math.PI);
   if ( e.sil && st <= 1 ) return Math.min(Math.max(e.R * 0.5, floorOf(e, 0.04, 1.5)) * gain(e), cap);
   if ( e.sil && st === 2 ) return Math.min(Math.max(e.R * 0.85, floorOf(e, 0.07, 2.5)) * gain(e), cap);
   return Math.min(Math.max(e.R * 1.6, floorOf(e, 0.13, 4)) * gain(e), cap);
 };
+/* ---------- SAKUGATOKEN (1.9.27): the stickers stay on the token and its close surroundings ----------
+   The owner, on the impact frames at full strength: «robi efekty tokenowe na cały ekran a powinno być tylko na tokenie. na cały ekran błysk i
+   efekty ale nie naklejki», «na żetonie i bliskich okolicach», «naklejki spoko ale ze smakiem». Before, the ink pasted on for a struck token was
+   sized from the VIEW (floors of 13-50 % of the short side, rings and halftone out to 3.2 x the star): a 60 px token got a 400 px halftone
+   ring and cracks across a third of the screen. Now, when the subject is a token, every such piece is fitted inside nearR(e) from the token's
+   centre (its own reach factor: how far past its radius its longest spike, drop or tick can go), placed where it was; the flash frames and
+   the screen-wide effects are untouched. nearR = Infinity for a subject that is no token: nothing changes there */
+export const nearR = (e) => (e.sil && e.R > 0 ? Math.max(e.R * LIMITS.nearK, unit(e) * LIMITS.nearMin) : Infinity);
+/* a sticker of radius r centred at (x, y) whose ink reaches `reach` x r: the largest r (<= the wanted one) that keeps it inside nearR */
+export const nearFit = (e, r, reach = 1, x = e.cx, y = e.cy) => {
+  const n = nearR(e);
+  if ( !Number.isFinite(n) ) return r;
+  const room = Math.max(n - Math.hypot(x - e.cx, y - e.cy), n * 0.45);
+  return Math.min(r, room / Math.max(1, reach));
+};
+/* the star of the drawings that are not a full field: 1.9.26's, held to the token's surroundings (the core size every sticker is built on) */
+export const burstR = (e) => Math.min(flashR(e), nearR(e) * 0.6);
+/* how far a star of radius 1 reaches: jitter, a long spike (x 1.45), the stretch along the blow */
+const starReach = (e, o) => (1 + (o.jitter ?? 0.24)) * ((o.long ?? 3) > 0 ? 1.45 : 1) * (e.dir != null ? (o.stretch ?? 1.25) : 1);
 
 /* ---------- the struck figure ----------
    The token's picture is read once (our own small software canvas: no read-back of the WebGL board) and turned into:
@@ -204,6 +224,10 @@ function art(e, mode) {
   e._tints.set(key, c);
   return c;
 }
+/* SAKUGATOKEN (1.9.27): the frames that show the struck figure alone on a full field (shadow, glare, swap) draw it at its token's own
+   size and place (the owner: the token does not get bigger; the field, the lines and the star behind it are the flash). blowUp below is
+   the 1.9.26 enlargement, kept exported and no longer applied */
+const figUp = (e) => (e.sil ? LIMITS.figScale : 1);
 /* how much the silhouette is enlarged in the frames that show it alone (the struck figure fills its share of the frame at any zoom) */
 export function blowUp(e) {
   if ( !e.sil ) return 1;
@@ -549,43 +573,20 @@ export const popOf = (e, g, z) => {
    (i -> n, p / k -> d: colours turned, luminance kept, no area taken) and gets a SLICE of the bright one cut along the blow with what area
    is left (a share of its own area, at least 8 %), else none. On a flash drawing (a full-field frame, a scene change that the guard
    counted) the figures take no area: that drawing is already one of the rationed flashes. The gentle variant: rims only, no pop. */
-/* ---------- IMPACT5 (1.9.23): the cut-in ----------
-   The star of the cut (the struck figure; with no struck figure the attacker; else the first figure `also` names) is drawn ENLARGED at its
-   own place for the whole impact by the drawing's `cu` (plan.mjs cutIn): up to CUT_WANT of the view's short side (at least 1.3 x its token),
-   never past LIMITS.cutMax; the other figures by a little (up to LIMITS.cutMaxOther). The contact's pop (`z`) adds on top, inside the same
-   cap. The star moves with `kb` (a wind-up against the blow, a drift along it) and stays in the view (pulled in by at most half its size: a
-   token off the screen stays off it). A token already larger than the cap on this screen (a very close zoom) is not enlarged. */
-const CUT_WANT = 0.34, CUT_WANT_OTHER = 0.13;
+/* ---------- the figures stay on their tokens (1.9.27 SAKUGATOKEN) ----------
+   The owner on the 1.9.23 cut-in (the star figure drawn enlarged at its place, up to 44 % of the view's short side, the ink laid round the
+   enlarged copy): what belongs to a token stays ON THE TOKEN AND ITS CLOSE SURROUNDINGS, the whole screen carries only the flash and the
+   effects, and THE TOKEN DOES NOT GET BIGGER. So a figure is drawn at its token's own size and place on every drawing (LIMITS.figScale = 1):
+   no cut-in enlargement, no pop, no drift off the token (a copy moved off its token would show the token twice); what the figures DO on a
+   drawing (rim, negative, hue turn, posterised, slice) is unchanged, and they still follow their token's own pose frame by frame. The ink
+   that belongs to the struck token (stars, rings, splashes, flares, panels, echoes) is sized from the token again, with the legible floors
+   of a far zoom; the full-field frames, the lines and the scene's changes are the screen's. `cu` / `kb` stay on the plan (the cut's
+   envelope: lead-in, hold, release) and scale nothing. cutScale / cutOffset / frameEnv keep their names for the callers of 1.9.23-1.9.26. */
 export const starOf = (e) => { const L = e.figs ?? []; return L.find((g) => g.role === "target" && g.sil) ?? L.find((g) => g.role === "from" && g.sil) ?? L.find((g) => g.sil) ?? null; };
 const sizeOf = (g) => Math.max(1, Math.abs(g.sil.w), Math.abs(g.sil.h));
-export function cutScale(e, g, f) {
-  if ( e.local || !g?.sil ) return 1;
-  const star = g === starOf(e), u = unit(e), size = sizeOf(g), max = (star ? LIMITS.cutMax : LIMITS.cutMaxOther) * u;
-  if ( size >= max ) return 1;
-  const cu = Math.max(0, Math.min(1, Number(f?.cu) || 0)), want = (star ? CUT_WANT : CUT_WANT_OTHER) * u;
-  const top = Math.min(max / size, Math.max(want / size, 1.3));
-  let s = 1 + (top - 1) * (star ? cu : cu * 0.6);
-  const z = f?.z ?? 1;
-  if ( z > 1 ) s *= 1 + (z - 1) * (star ? 0.45 : 0.3);
-  return Math.min(s, max / size);
-}
-const pull = (v, lo, hi, lim) => (lo > hi ? v : v + Math.max(-lim, Math.min(lim, Math.max(lo, Math.min(hi, v)) - v)));
-export function cutOffset(e, g, f, s) {
-  if ( e.local || !g?.sil || g !== starOf(e) || !(s > 1.001) ) return [0, 0];
-  const size = sizeOf(g) * s, kb = Number(f?.kb) || 0, d = e.dir;
-  const x = g.cx + (d != null ? Math.cos(d) * kb * size * 0.22 : 0), y = g.cy + (d != null ? Math.sin(d) * kb * size * 0.22 : 0), half = size * 0.56;
-  return [pull(x, half, e.W - half, size * 0.5) - g.cx, pull(y, half, e.H - half, size * 0.5) - g.cy];
-}
-/* the drawing's own env: on a cut-in drawing the ink (stars, rings, splashes, flares, panels) is laid round the ENLARGED star, not round its
-   token (the ink of every frame type is sized from R and placed at cx / cy, hx / hy) */
-export function frameEnv(e, f) {
-  if ( e.local || !(f?.cu > 0) || !e.figs?.length ) return e;
-  const st = starOf(e); if ( !st ) return e;
-  const s = cutScale(e, st, f); if ( !(s > 1.001) ) return e;
-  const [dx, dy] = cutOffset(e, st, f, s), R = sizeOf(st) * s / 2, cx = st.cx + dx, cy = st.cy + dy;
-  const k = st.role === "target" && e.R > 0 ? R / e.R : 0;
-  return Object.assign(Object.create(e), { cx, cy, R: Math.max(e.R, R), hx: cx + (e.hx - e.cx) * k, hy: cy + (e.hy - e.cy) * k });
-}
+export function cutScale(e, g, f) { return LIMITS.figScale; }   // eslint-disable-line no-unused-vars
+export function cutOffset(e, g, f, s) { return [0, 0]; }         // eslint-disable-line no-unused-vars
+export function frameEnv(e, f) { return e; }                     // eslint-disable-line no-unused-vars
 /* which figures and what they show on this drawing, on this seat: -> null | { t, list, each, zs (scales), offs ([dx, dy]), slices, area }.
    IMPACT5 (the owner: «Poluzuj»): on an ordinary seat every change of luminance the figures make (a bright treatment i p k; a figure enlarged
    over the scene) is shared out of LIMITS.figAreaOpen of min(W, H)^2, the star first, then the attacker, then the rest. Each figure is
@@ -634,6 +635,40 @@ function cutAt(e, P, w, h, ang, share) {
   const v = list[Math.max(0, Math.min(list.length - 1, Math.floor(list.length * (1 - share))))];
   return { ang: (key * Math.PI) / 16, at: v };   // the slice = local points whose projection (x / w, y / h, on ang) is above `at`
 }
+/* ---------- SAKUGATOKEN (1.9.27): the morph ----------
+   The owner: «raczej wolałbym morfowanie niż naklejki», «i token nie powinien się powiększać». The pop of 1.9.21-1.9.26 (`z`: the figure drawn
+   up to 2.2 x bigger) and the cut-in (`cu`: up to 44 % of the short side) are gone; the same drawings now DEFORM the figure instead: its
+   picture is cut in bands across the blow and the bands are shifted away from the blow (a bend, strongest in the middle, with a seeded
+   ripple), then masked by the figure's own outline. Nothing leaves the outline (never bigger) and the gaps a band leaves show the figure's own
+   unshifted picture (a smear), never the token under it. Contact drawings (`z` 1.25..1.55) bend hardest, a `kick: -1` drawing springs back,
+   the held drawings of a cut (`cu`) quiver (the side alternates with the seed). Seeded from the drawing only: the same on every seat. Not on
+   the gentle panel (rims only, as before) nor on a still seat (its drawing has no `z` / `cu`). -> 0..1 */
+export function morphAmt(e, f, g) {
+  if ( e.local || !f ) return 0;
+  const z = Number(f.z) || 1, cu = Math.max(0, Math.min(1, Number(f.cu) || 0));
+  const hit = z > 1 ? Math.min(1, (z - 1) / 0.55) : 0, m = Math.max(hit, 0.35 * cu);
+  return g && g === starOf(e) ? m : m * 0.6;
+}
+/* the art `a` (P.w x P.h) bent by m along the local blow (lx, ly: toward the side the blow comes from), masked by `mask` -> a canvas */
+export const morphStats = { made: 0 };
+function morphed(e, P, a, mask, m, lx, ly, ph) {
+  if ( e._jobs ) return a;
+  const w = P.w, h = P.h, c = e.makeCanvas(w, h);
+  c.morph = true; morphStats.made++;
+  const x = ctx2d(e, c);
+  const alongX = Math.abs(lx) >= Math.abs(ly), away = -(alongX ? (lx || 1) : ly) >= 0 ? 1 : -1;
+  const amp = LIMITS.morphMax * Math.max(-1, Math.min(1, m)) * (alongX ? w : h), N = 12;   // m < 0: the spring back / the other side of a quiver
+  x.drawImage(a, 0, 0, w, h);
+  for ( let i = 0; i < N; i++ ) {
+    const t0 = i / N, tc = t0 + 0.5 / N, prof = 0.72 * Math.sin(Math.PI * tc) + 0.28 * Math.sin(ph + tc * Math.PI * 2.2);
+    const d = Math.round(away * amp * prof);
+    if ( !d ) continue;
+    if ( alongX ) { const y0 = Math.floor(t0 * h), y1 = Math.ceil((t0 + 1 / N) * h); x.drawImage(a, 0, y0, w, y1 - y0, d, y0, w, y1 - y0); }
+    else { const x0 = Math.floor(t0 * w), x1 = Math.ceil((t0 + 1 / N) * w); x.drawImage(a, x0, 0, x1 - x0, h, x0, d, x1 - x0, h); }
+  }
+  x.globalCompositeOperation = "destination-in"; x.drawImage(mask, 0, 0, w, h); x.globalCompositeOperation = "source-over";
+  return c;
+}
 /* one figure: ink line and lit rim round its true outline, then its art in the treatment (IMPACT4: popped by z, a held twin with a slice of
    the bright art, the cut-out figure's own edge lit inside a portrait) */
 function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
@@ -667,7 +702,12 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
     return P.pixels ? P.orig : null;
   };
   const art = artOf(t);
-  if ( art ) ctx.drawImage(art, -w / 2, -h / 2, w, h);
+  /* SAKUGATOKEN: the morph (the figure's picture rippled inside its own outline along the blow) on the contact and the hold */
+  const mo = art && P.pixels && !e.local ? morphAmt(e, f, g) : 0, msk = mo > 0 ? alphaTint(e, s, INK) : null;
+  const mph = (((Number(f.seed) || 0) * 2654435761) >>> 0) / 4294967296 * Math.PI * 2;
+  const msgn = f.kick < 0 ? -1 : !(Number(f.z) > 1) && ((Number(f.seed) >>> 1) & 1) ? -1 : 1;
+  const morph = (a, m = msk) => (mo > 0 && a && m ? morphed(e, P, a, m, mo * msgn, lx, ly, mph) : a);
+  if ( art ) ctx.drawImage(morph(art), -w / 2, -h / 2, w, h);
   else { try { ctx.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, -w / 2, -h / 2, w, h); } catch {} }
   /* the slice: the bright treatment on the struck side of a line along the blow, as much as the area left allows */
   if ( slice > 0 && P.pixels ) {
@@ -680,7 +720,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
       const ox = nx * d0, oy = ny * d0, tx = -ny, ty = nx;
       ctx.save(); ctx.beginPath();
       ctx.moveTo(ox + tx * D, oy + ty * D); ctx.lineTo(ox - tx * D, oy - ty * D); ctx.lineTo(ox - tx * D + nx * D, oy - ty * D + ny * D); ctx.lineTo(ox + tx * D + nx * D, oy + ty * D + ny * D); ctx.closePath();
-      ctx.clip(); ctx.drawImage(b, -w / 2, -h / 2, w, h); ctx.restore();
+      ctx.clip(); ctx.drawImage(morph(b), -w / 2, -h / 2, w, h); ctx.restore();
       /* the cut line itself: paper with an ink edge, inside the figure */
       ctx.save(); ctx.globalCompositeOperation = "source-atop"; ctx.lineCap = "butt";
       ctx.beginPath(); ctx.moveTo(ox + tx * D, oy + ty * D); ctx.lineTo(ox - tx * D, oy - ty * D);
@@ -696,7 +736,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
         /* the figure itself over its edge again: drawn through its own cut (a copy of the art masked by the cut) */
         const key = `cutart:${t}:${t === "h" ? Math.round(turn * 12) : ""}:${lit}`; let ca = P.held.get(key);
         if ( !ca && m ) { ca = e.makeCanvas(P.w, P.h); const x = ctx2d(e, ca); x.drawImage(m, 0, 0); x.globalCompositeOperation = "source-in"; x.drawImage(a2, 0, 0, P.w, P.h); P.held.set(key, ca); }
-        if ( ca ) ctx.drawImage(ca, -w / 2, -h / 2, w, h); ctx.restore(); } }
+        if ( ca ) ctx.drawImage(morph(ca, m), -w / 2, -h / 2, w, h); ctx.restore(); } }
   }
   ctx.restore();
 }
@@ -777,8 +817,9 @@ function lines(ctx, e, seed, o = {}) {
   }
 }
 function burst(ctx, e, seed, o = {}) {
-  const u = unit(e), r = (o.r ?? burstR(e));
-  const p = G.star(seed, { cx: o.cx ?? e.hx, cy: o.cy ?? e.hy, r, spikes: o.spikes ?? 15, inner: o.inner ?? 0.52, jitter: 0.24, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: o.long ?? 3 });
+  const u = unit(e), x0 = o.cx ?? e.hx, y0 = o.cy ?? e.hy;
+  const r = o.flash ? (o.r ?? burstR(e)) : nearFit(e, o.r ?? burstR(e), starReach(e, o), x0, y0);   // SAKUGATOKEN: on the token's surroundings
+  const p = G.star(seed, { cx: x0, cy: y0, r, spikes: o.spikes ?? 15, inner: o.inner ?? 0.52, jitter: 0.24, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: o.long ?? 3 });
   const lw = o.lw ?? Math.max(1.2, Math.min(u * 0.006, r * 0.06));
   if ( o.key ) shape(ctx, p, null, o.key, lw + Math.min(u * 0.011, r * 0.1));
   shape(ctx, p, o.fill ?? PAPER, o.stroke ?? INK, lw);
@@ -790,7 +831,8 @@ function burst(ctx, e, seed, o = {}) {
 }
 function splash(ctx, e, seed, o = {}) {
   const u = unit(e);
-  const s = G.splat(seed, { cx: o.cx ?? e.hx, cy: o.cy ?? e.hy, r: o.r ?? burstR(e) * 1.5, n: o.n ?? 24, ang: e.dir, spread: 0.8 });
+  const x0 = o.cx ?? e.hx, y0 = o.cy ?? e.hy;
+  const s = G.splat(seed, { cx: x0, cy: y0, r: nearFit(e, o.r ?? burstR(e) * 1.5, SPLAT_REACH, x0, y0), n: o.n ?? 24, ang: e.dir, spread: 0.8 });
   const key = o.key ?? PAPER, kw = u * 0.004;
   discs(ctx, s.blobs, key, kw);
   ctx.beginPath(); for ( const p of s.drops ) path(ctx, p); ctx.lineJoin = "round"; ctx.lineWidth = kw * 2; ctx.strokeStyle = key; ctx.stroke();
@@ -800,21 +842,23 @@ function splash(ctx, e, seed, o = {}) {
 /* the halftone never fills the frame: its outer radius stays inside a disc of a quarter of the picture (a big subject, e.g. a word, would otherwise
    turn the whole frame into the accent colour: a full-field frame the guard does not count) */
 export const dotsReach = (e, want) => Math.min(want, Math.sqrt(0.25 * e.W * e.H / Math.PI));
+/* SAKUGATOKEN: how far a splat of radius 1 throws (a blob up to 1.25 out plus its own size), and a shock ring with its chunks and ticks */
+const SPLAT_REACH = 1.45, RING_REACH = 1.75;
 function halftone(ctx, e, seed, o = {}) {
-  const u = unit(e);
-  const r1 = o.whole ? o.r1 : dotsReach(e, o.r1 ?? burstR(e) * 3.2), r0 = o.whole ? o.r0 : Math.min(o.r0 ?? e.R * 0.9, r1 * 0.45);   // whole: only the (rationed) swap frame
-  const d = G.dots(seed, { cx: o.cx ?? e.cx, cy: o.cy ?? e.cy, r0, r1, pitch: o.pitch ?? Math.max(9, u * 0.021), ang: o.all ? null : e.dir, fan: o.fan ?? 1.15 });
+  const u = unit(e), x0 = o.cx ?? e.cx, y0 = o.cy ?? e.cy;
+  const r1 = o.whole ? o.r1 : nearFit(e, dotsReach(e, o.r1 ?? burstR(e) * 3.2), 1, x0, y0), r0 = o.whole ? o.r0 : Math.min(o.r0 ?? e.R * 0.9, r1 * 0.45);   // whole: only the (rationed) swap frame
+  const d = G.dots(seed, { cx: x0, cy: y0, r0, r1, pitch: o.pitch ?? Math.min(Math.max(9, u * 0.021), Math.max(6, (r1 - r0) * 0.2)), ang: o.all ? null : e.dir, fan: o.fan ?? 1.15 });
   if ( o.under !== null ) discs(ctx, d, o.under ?? INK, 0, u * 0.004, u * 0.004);
   discs(ctx, d, o.color ?? e.tone.a);
 }
 /* a shock ring: a thick broken band in the accent with ink keylines, chunks thrown off its rim and short ticks running outward */
 function ringsOf(ctx, e, seed, o = {}) {
   const u = unit(e), cx = o.cx ?? e.cx, cy = o.cy ?? e.cy, flat = o.flat ?? 1;
-  const r = Math.min(o.r ?? burstR(e) * 1.9, Math.sqrt(0.25 * e.W * e.H / Math.PI));
-  const list = G.rings(seed, { r, w: o.w ?? u * 0.026 * gain(e), n: o.n ?? 2 });
+  const r = nearFit(e, Math.min(o.r ?? burstR(e) * 1.9, Math.sqrt(0.25 * e.W * e.H / Math.PI)), RING_REACH, cx, cy);
+  const list = G.rings(seed, { r, w: Math.min(o.w ?? u * 0.026 * gain(e), r * 0.22), n: o.n ?? 2 });
   const arc = (extra, color) => { ctx.strokeStyle = color; ctx.lineCap = "butt"; for ( const a of list ) { ctx.beginPath(); ctx.lineWidth = Math.max(1, a.w + extra); ctx.ellipse(cx, cy, a.r, a.r * flat, 0, a.a0, a.a1); ctx.stroke(); } };
-  arc(u * 0.014, INK); arc(u * 0.005, PAPER); arc(0, o.color ?? e.tone.a);
-  const ch = G.chunks(seed + 5, { cx, cy, r: r * 1.08, flat, n: Math.round(10 + 8 * gain(e)), size: u * 0.012 * gain(e) });
+  arc(Math.min(u * 0.014, r * 0.09), INK); arc(Math.min(u * 0.005, r * 0.035), PAPER); arc(0, o.color ?? e.tone.a);
+  const ch = G.chunks(seed + 5, { cx, cy, r: r * 1.08, flat, n: Math.round(10 + 8 * gain(e)), size: Math.min(u * 0.012 * gain(e), r * 0.1) });
   for ( const p of ch.chunks ) shape(ctx, p, INK, PAPER, u * 0.0025);
   fillPolys(ctx, ch.ticks, INK, PAPER, u * 0.002);
 }
@@ -827,7 +871,8 @@ const PAINT = {
   pop(ctx, e, f) {
     const rb = burstR(e), u = unit(e);
     burst(ctx, e, f.seed, { fill: e.tone.a, core: PAPER, key: PAPER });
-    fillPolys(ctx, G.focusLines(f.seed + 1, { cx: e.hx, cy: e.hy, rIn: rb * 1.25, rOut: rb * 2.1, n: 18, fat: 0.8 }), INK, PAPER, u * 0.002);
+    const ro = nearFit(e, rb * 2.1, 1, e.hx, e.hy);
+    fillPolys(ctx, G.focusLines(f.seed + 1, { cx: e.hx, cy: e.hy, rIn: Math.min(rb * 1.25, ro * 0.5), rOut: ro, n: 18, fat: 0.8 }), INK, PAPER, u * 0.002);
   },
   splat(ctx, e, f) {
     splash(ctx, e, f.seed);
@@ -852,29 +897,30 @@ const PAINT = {
   },
   shadow(ctx, e, f) {
     ctx.fillStyle = INK; ctx.fillRect(0, 0, e.W, e.H);
-    const k = blowUp(e), u = unit(e);
+    const k = figUp(e), u = unit(e);
     const [big, small] = bigTone(e);
     lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: small, key: INK, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
-    const r = Math.max(burstR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
-    burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4 });
+    const r = Math.max(flashR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
+    /* SAKUGATOKEN: the black frame IS the flash: its star is the shape the whole screen turns into (flash: not held to the token) */
+    burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4, flash: true });
     sil(ctx, e, { color: PAPER, outline: INK, outlineW: u * 0.008, scale: k, art: "bw", own: "inv" });
   },
   glare(ctx, e, f) {
     ctx.fillStyle = PAPER; ctx.fillRect(0, 0, e.W, e.H);
-    const k = blowUp(e), u = unit(e);
+    const k = figUp(e), u = unit(e);
     lines(ctx, e, f.seed, { n: 78, fat: 1.8, color: INK, key: PAPER, second: null, gap: Math.max(1, k * 0.7) });
     if ( !sil(ctx, e, { color: INK, outline: e.tone.a, outlineW: u * 0.007, scale: k, art: "neg", own: "post" }) ) burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.2, fill: INK, stroke: e.tone.a, long: 4 });
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.5, fill: e.tone.a, long: 2 });
   },
   swap(ctx, e, f) {
-    const k = blowUp(e), u = unit(e), bg = fieldColor(e, e.tone.a);
+    const k = figUp(e), u = unit(e), bg = fieldColor(e, e.tone.a);
     ctx.fillStyle = bg; ctx.fillRect(0, 0, e.W, e.H);
     halftone(ctx, e, f.seed, { color: INK, under: null, all: e.dir == null, whole: true, r0: 0, r1: Math.hypot(e.W, e.H) * 0.62, pitch: Math.max(12, u * 0.03), fan: 1.25 });
     lines(ctx, e, f.seed + 1, { n: 34, fat: 1.1, color: PAPER, key: INK, second: null, gap: Math.max(1, k * 0.7) });
     if ( !sil(ctx, e, { color: INK, outline: PAPER, outlineW: u * 0.008, scale: k, art: "neg", own: "ink" }) ) burst(ctx, e, f.seed + 2, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.3, fill: INK, stroke: PAPER, long: 4 });
   },
   window(ctx, e, f) {
-    const u = unit(e), r = Math.max(burstR(e) * 2.3, u * 0.3);
+    const u = unit(e), r = Math.max(flashR(e) * 2.3, u * 0.3);   // SAKUGATOKEN: a full field (the flash): its window keeps 1.9.26's size
     ctx.fillStyle = INK; ctx.fillRect(0, 0, e.W, e.H);
     const p = G.star(f.seed, { cx: e.cx, cy: e.cy, r, spikes: 17, inner: 0.6, jitter: 0.25, stretch: e.dir != null ? 1.3 : 1, ang: e.dir ?? 0, long: 4 });
     ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.beginPath(); path(ctx, p); ctx.fill(); ctx.restore();
@@ -887,17 +933,18 @@ const PAINT = {
   smear(ctx, e, f) {
     const u = unit(e), g = gain(e);
     const a = e.dir ?? (((f.seed % 360) * Math.PI) / 180);
-    const len = Math.max(e.R * 2.2, u * 0.07) * g;
+    /* SAKUGATOKEN: the streak ends inside the token's surroundings, and no copy is drawn bigger than the token (1.9.26: up to 1.04 x) */
+    const len = Math.min(Math.max(e.R * 2.2, u * 0.07) * g, Math.max(nearR(e) - e.R, e.R));
     const back = (k) => ({ x: e.cx - Math.cos(a) * len * k, y: e.cy - Math.sin(a) * len * k });
     const N = 14;
     if ( e.sil ) {
       const sweep = (color, from, to, grow) => { for ( let i = N; i >= 0; i-- ) { const t = from + (to - from) * (i / N), p = back(t); sil(ctx, e, { color, x: p.x, y: p.y, scale: 1 + grow * (1 - t) }); } };
       const kw = u * 0.006;
       ctx.save();
-      for ( const [dx, dy] of [[kw, 0], [-kw, 0], [0, kw], [0, -kw]] ) { ctx.save(); ctx.translate(dx, dy); sweep(INK, 1, 0, 0.04); ctx.restore(); }
+      for ( const [dx, dy] of [[kw, 0], [-kw, 0], [0, kw], [0, -kw]] ) { ctx.save(); ctx.translate(dx, dy); sweep(INK, 1, 0, 0); ctx.restore(); }
       ctx.restore();
-      sweep(e.tone.b, 1, 0.35, 0.04);
-      sweep(e.tone.a, 0.55, 0.05, 0.04);
+      sweep(e.tone.b, 1, 0.35, 0);
+      sweep(e.tone.a, 0.55, 0.05, 0);
       /* dry-brush gaps along the streak */
       const gaps = G.speedLines(f.seed + 3, { cx: back(0.55).x, cy: back(0.55).y, ang: a, W: len * 1.1, H: e.R * 2.4, n: 9, gap: 0, fat: 0.45 });
       ctx.save(); ctx.globalCompositeOperation = "destination-out"; fillPolys(ctx, gaps, "#000"); ctx.restore();
@@ -920,7 +967,7 @@ const PAINT = {
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.9, fill: e.tone.b, core: PAPER, key: PAPER });
   },
   shatter(ctx, e, f) {
-    const u = unit(e), c = G.cracks(f.seed, { cx: e.hx, cy: e.hy, r: floorOf(e, 0.5, 9) * gain(e), w: Math.min(u * 0.022, Math.max(e.R > 0 ? e.R * 0.4 : u, u * 0.008)) * gain(e), n: 10 });
+    const u = unit(e), c = G.cracks(f.seed, crackOpts(e));
     for ( const p of c.cracks ) shape(ctx, p, PAPER, INK, u * 0.004);
     for ( const p of c.shards ) shape(ctx, p, INK, PAPER, u * 0.004);
     burst(ctx, e, f.seed + 2, { r: burstR(e) * 0.7, fill: e.tone.a, core: PAPER });
@@ -941,14 +988,16 @@ const PAINT = {
   /* what is left when the blow is over: the star's afterimage as a hollow outline, puffs of dust thrown along the blow, specks */
   fade(ctx, e, f) {
     const rb = burstR(e), u = unit(e);
-    const star = G.star(f.seed + 4, { cx: e.hx, cy: e.hy, r: rb * 1.2, spikes: 13, inner: 0.6, jitter: 0.22, stretch: e.dir != null ? 1.2 : 1, ang: e.dir ?? 0, long: 2 });
+    const star = G.star(f.seed + 4, { cx: e.hx, cy: e.hy, r: nearFit(e, rb * 1.2, starReach(e, { long: 2, stretch: 1.2, jitter: 0.22 }), e.hx, e.hy), spikes: 13, inner: 0.6, jitter: 0.22, stretch: e.dir != null ? 1.2 : 1, ang: e.dir ?? 0, long: 2 });
     ctx.beginPath(); path(ctx, star); ctx.lineJoin = "miter"; ctx.miterLimit = 3;
     ctx.lineWidth = Math.max(2, u * 0.007); ctx.strokeStyle = PAPER; ctx.stroke();
     ctx.lineWidth = Math.max(1, u * 0.003); ctx.strokeStyle = INK; ctx.stroke();
-    const pf = G.puffs(f.seed + 2, { cx: e.hx, cy: e.hy, r: rb * 1.9, ang: e.dir, n: 7, size: rb * 0.26 });
+    /* SAKUGATOKEN: the dust, the specks and the afterimage settle on the token's surroundings (a puff reaches its spot plus ~1.4 of its size) */
+    const pr = nearFit(e, rb * 1.9, 1.35, e.hx, e.hy), ps = Math.min(rb * 0.26, pr * 0.18), fo = nearFit(e, rb * 3, 1, e.hx, e.hy);
+    const pf = G.puffs(f.seed + 2, { cx: e.hx, cy: e.hy, r: pr, ang: e.dir, n: 7, size: ps });
     discs(ctx, pf.flat(), INK, Math.max(1.2, u * 0.003)); discs(ctx, pf.flat(), PAPER);
-    fillPolys(ctx, G.focusLines(f.seed, { cx: e.hx, cy: e.hy, rIn: rb * 1.6, rOut: rb * 3, n: 10, fat: 0.25, thin: true }), INK, PAPER, u * 0.0015);
-    const s = G.splat(f.seed + 1, { cx: e.hx, cy: e.hy, r: rb * 2.4, n: 9, ang: e.dir, spread: 1.1 });
+    fillPolys(ctx, G.focusLines(f.seed, { cx: e.hx, cy: e.hy, rIn: Math.min(rb * 1.6, fo * 0.5), rOut: fo, n: 10, fat: 0.25, thin: true }), INK, PAPER, u * 0.0015);
+    const s = G.splat(f.seed + 1, { cx: e.hx, cy: e.hy, r: nearFit(e, rb * 2.4, SPLAT_REACH, e.hx, e.hy), n: 9, ang: e.dir, spread: 1.1 });
     const small = s.blobs.slice(0, -2).map(([x, y, r]) => [x, y, r * 0.5]);
     discs(ctx, small, PAPER, u * 0.003); discs(ctx, small, e.tone.a);
   },
@@ -962,7 +1011,8 @@ const PAINT = {
     /* knock-back echoes: the struck figure's outline twice behind it along the blow, fading (thin outlines in the accent and in ink;
        not in the gentle panel) */
     if ( tgt && e.dir != null && tr && !e.local ) {
-      const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03), d = Math.max(s.w, s.h) * S * 0.28 * g;
+      const s = tgt.sil, wpx = Math.max(1.5, Math.min(s.w, s.h) * 0.03);
+      const d = Math.min(Math.max(s.w, s.h) * S * 0.28 * g, Math.max(0, (nearR(e) - Math.max(s.w, s.h) / 2 - wpx * 3) / 2));   // SAKUGATOKEN: the echoes stay near
       const ra = ringOf(e, s, rimColor(e), wpx), rk = ringOf(e, s, INK, wpx * 1.8);
       for ( const [k, al] of [[2, 0.45], [1, 0.8]] ) {
         const x = tgt.cx + ox + Math.cos(e.dir) * d * k, y = tgt.cy + oy + Math.sin(e.dir) * d * k;
@@ -977,8 +1027,9 @@ const PAINT = {
     const out = Math.hypot(e.hx - e.cx, e.hy - e.cy) > 1 ? Math.atan2(e.hy - e.cy, e.hx - e.cx) : e.dir != null ? e.dir + Math.PI : R.f(0, Math.PI * 2);
     const n = 6 + Math.min(6, Math.round((Number.isFinite(e.step) ? e.step : 3) * 1.2));
     const ink = [], acc = [];
+    const flareMax = nearFit(e, Infinity, 1, e.hx, e.hy);   // SAKUGATOKEN: a flare ends inside the token's surroundings
     for ( let i = 0; i < n; i++ ) {
-      const a = out + R.f(-1.25, 1.25), len = R0 * R.f(0.7, 1.9) * g, wd = R0 * R.f(0.06, 0.14);
+      const a = out + R.f(-1.25, 1.25), len = Math.min(R0 * R.f(0.7, 1.9) * g, flareMax), wd = R0 * R.f(0.06, 0.14);
       const x0 = e.hx + Math.cos(a) * R0 * 0.1, y0 = e.hy + Math.sin(a) * R0 * 0.1, px = -Math.sin(a), py = Math.cos(a);
       const tri = [x0 + px * wd, y0 + py * wd, x0 - px * wd, y0 - py * wd, x0 + Math.cos(a) * len, y0 + Math.sin(a) * len];
       ink.push(tri);
@@ -990,17 +1041,24 @@ const PAINT = {
   },
   /* the cracks and shards of `shatter` with the scene left alone (a later drawing of a hit, after the flashes are spent) */
   cracks(ctx, e, f) {
-    const u = unit(e), c = G.cracks(f.seed, { cx: e.hx, cy: e.hy, r: floorOf(e, 0.5, 9) * gain(e), w: Math.min(u * 0.022, Math.max(e.R > 0 ? e.R * 0.4 : u, u * 0.008)) * gain(e), n: 10 });
+    const u = unit(e), c = G.cracks(f.seed, crackOpts(e));
     for ( const p of c.cracks ) shape(ctx, p, PAPER, INK, u * 0.004);
     for ( const p of c.shards ) shape(ctx, p, INK, PAPER, u * 0.004);
   }
 };
 const tearAngle = (e, f) => e.dir ?? ((f.seed % 180) * Math.PI) / 180;
+/* the cracks of shatter / cracks: 1.9.26 ran them out to 9 token radii (half the view's short side); SAKUGATOKEN holds them to the token's
+   surroundings (a crack runs out to 1.25 x r and wanders), their width with them */
+function crackOpts(e) {
+  const u = unit(e), r = nearFit(e, floorOf(e, 0.5, 9) * gain(e), 1.3, e.hx, e.hy);
+  return { cx: e.hx, cy: e.hy, r, w: Math.min(Math.min(u * 0.022, Math.max(e.R > 0 ? e.R * 0.4 : u, u * 0.008)) * gain(e), Number.isFinite(nearR(e)) ? r * 0.12 : Infinity), n: 10 };
+}
 
 /* the gentle variant's panel: a jagged star of at most LIMITS.localArea of the viewport round the subject */
 export const panelOf = (e, f) => G.star(f.seed + 11, { cx: e.cx, cy: e.cy, r: e.local.r, spikes: 14, inner: 0.72, jitter: 0.12, stretch: 1, ang: 0, long: 0 });
 /* the panel of a drawing that changes the scene only round the blow (`local` frames: ink, shatter): never more than localArea */
-export const localPanelR = (e) => Math.min(Math.sqrt((LIMITS.localArea * e.W * e.H) / Math.PI), Math.max(e.R * 2.4, floorOf(e, 0.17, 5)) * gain(e));
+/* SAKUGATOKEN: round a struck token the panel is part of its surroundings (a jagged star of jitter 0.14, stretched 1.12 along the blow) */
+export const localPanelR = (e) => nearFit(e, Math.min(Math.sqrt((LIMITS.localArea * e.W * e.H) / Math.PI), Math.max(e.R * 2.4, floorOf(e, 0.17, 5)) * gain(e)), 1.14 * (e.dir != null ? 1.12 : 1));
 export const panelPoly = (e, f) => (e.local ? panelOf(e, f) : G.star(f.seed + 13, { cx: e.cx, cy: e.cy, r: localPanelR(e), spikes: 13, inner: 0.74, jitter: 0.14, stretch: e.dir != null ? 1.12 : 1, ang: e.dir ?? 0, long: 0 }));
 
 /* the part of the picture whose scene is changed by the drawing's `back` (a polygon for the player's clip, null = all of it) */

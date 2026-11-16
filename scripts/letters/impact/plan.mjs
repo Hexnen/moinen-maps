@@ -29,6 +29,22 @@ export const LIMITS = {
   figAreaOpen: 0.25,
   cutMax: 0.44,          // IMPACT5: the cut-in's star figure is never drawn larger than this share of the view's short side (others: cutMaxOther)
   cutMaxOther: 0.16,
+  /* SAKUGATOKEN (1.9.27, the owner: what belongs to a token stays on the token and its close surroundings, the whole screen carries only the
+     flash and the effects, and the token does not get bigger): the scale every figure is drawn at, on every drawing and every seat. cutMax /
+     cutMaxOther are since then only the size a figure is COUNTED at for the brightness share above (zoom-independent, so every seat still
+     decides alike); nothing is drawn at them */
+  figScale: 1,
+  /* SAKUGATOKEN (1.9.27, the same rulings, «na żetonie i bliskich okolicach», «naklejki spoko ale ze smakiem»): the ink pasted on for a
+     struck TOKEN (stars, splashes, rings and what they throw, halftone, puffs, cracks, flares, echoes, the local black-and-white panel) stays
+     inside a disc round the token's centre of nearK x its radius (one token width beyond its edge), at least nearMin of the view's short side
+     at a far zoom so it still reads. The full-field frames, the speed and focus lines, the tear, the colour split and the frame punch are the
+     screen's (the flash and the effects) and keep their reach. A subject that is no token (a word, a point of the map) is not bound */
+  nearK: 3,
+  nearMin: 0.05,
+  /* SAKUGATOKEN («raczej wolałbym morfowanie niż naklejki»): the figure itself deforms on the drawings of the contact and the hold (`z`,
+     `cu`): its picture ripples INSIDE its own outline along the blow (rows shifted by at most morphMax of its width), so it never gets
+     bigger and the token under it never shows */
+  morphMax: 0.13,
   redArea: 0.01,         // photosafe: saturated red covers at most this share of any drawing (WCAG 2.3.1 "red flash")
   punchMax: 0.022,       // the frame punch moves the scene by at most this share of the viewport (and never past its own zoom margin)
   chromaMax: 0.012,      // chromatic split: plate offset as a share of the viewport's short side

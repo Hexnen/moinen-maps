@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { planImpact, safety, modeFor, frameAt, punchAt, pick, tierOf, stepOf, STEP_AT, peakOf, SERIES_STEP, SERIES_MAX, isFlash, localRadius, isRed, safeColor, SAFE_RED, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES } from "./plan.mjs";
 import * as G from "./shapes.mjs";
-import { bigTone, dotsReach, burstR, floorOf, paintFrame, backClip, panelOf, panelPoly, localPanelR, blowUp, figureMask, inkPixels, PAINTERS } from "./draw.mjs";
+import { bigTone, dotsReach, burstR, flashR, nearR, nearFit, floorOf, paintFrame, backClip, panelOf, panelPoly, localPanelR, blowUp, figureMask, inkPixels, PAINTERS } from "./draw.mjs";
 
 export async function run(ok) {
   const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
@@ -299,7 +299,11 @@ export async function run(ok) {
     for ( const st of [1, 2, 4] ) {
       const pic = { w: 20, h: 20 }, small = burstR(env({ R: 10, sil: pic, step: st, mag: 1 })), u = 900;
       ok(small <= Math.max(10 * 4, u * 0.03) * 1.0001 && small >= u * 0.03 * 0.5 - 1e-9, `impact: step ${st}: a 20 px token's star radius ${small.toFixed(0)} px (a few token widths, legible)`);
-      ok(burstR(env({ R: 50, sil: { w: 100, h: 100 }, step: st, mag: 1 })) === Math.max(50 * (st <= 1 ? 0.5 : st === 2 ? 0.85 : 1.6), u * (st <= 1 ? 0.04 : st === 2 ? 0.07 : 0.13)), `impact: step ${st}: an ordinary token keeps the view's floor`);
+      /* SAKUGATOKEN (1.9.27, the owner: a token's stickers stay on the token and its close surroundings): the full-field frames keep 1.9.26's
+         star (flashR: the view's floor), every other drawing's star is that one held to 0.6 of the token's surroundings (nearR) */
+      const old = Math.max(50 * (st <= 1 ? 0.5 : st === 2 ? 0.85 : 1.6), u * (st <= 1 ? 0.04 : st === 2 ? 0.07 : 0.13)), eo = env({ R: 50, sil: { w: 100, h: 100 }, step: st, mag: 1 });
+      ok(flashR(eo) === old, `impact: step ${st}: an ordinary token's flash frames keep the view's floor`);
+      ok(burstR(eo) === Math.min(old, nearR(eo) * 0.6) && nearR(eo) === Math.max(50 * LIMITS.nearK, u * LIMITS.nearMin), `impact: step ${st}: an ordinary token's star is held to its surroundings (${burstR(eo).toFixed(0)} of ${old.toFixed(0)} px)`);
     }
     ok(burstR(env({ R: 0, step: 4, mag: 1 })) === 900 * 0.13 && floorOf(env({ R: 0 }), 0.2, 9) === 900 * 0.2, "impact: no subject: the view's floor");
     ok(localPanelR(env({ R: 10, mag: 1 })) < localPanelR(env({ R: 50, mag: 1 })) && localPanelR(env({ R: 10, mag: 1 })) <= Math.max(10 * 5, 27) + 1e-9, "impact: the black-and-white panel of a far-zoom token stays round it");
