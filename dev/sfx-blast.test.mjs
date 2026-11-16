@@ -98,6 +98,12 @@ await group("VOLLEY", () => {
   ok(BL.volley([B("w", 1000, 0.5, true)]).get("w") === "quiet" && BL.volley([B("w", 1000, 0.5, true), B("a", 1200)]).get("a") === "lead", "a soft one never leads and opens no volley");
   // (a quiet one does not push the window on: the fourth, 2.6 s after the lead, leads)
   ok(BL.volley([B("a", 0), B("b", 1000), B("c", 2000), B("d", 2600)]).get("d") === "lead", "the window is counted from the lead");
+  // (a place that blows again: the same id at another moment is another blast of the volley)
+  { const known = [{ id: "m|x", of: "m|x", t: 1000, magnitude: 1.45, soft: false }];
+    ok(BL.noteKey([], { id: "m|x", t: 1000 }) === "m|x" && BL.noteKey(known, { id: "m|x", t: 1000 + BL.SAME_MS }) === "m|x", "one blast told twice keeps its name");
+    const k2 = BL.noteKey(known, { id: "m|x", t: 2000 });
+    ok(k2 !== "m|x" && BL.noteKey([...known, { id: k2, of: "m|x", t: 2000 }], { id: "m|x", t: 2010 }) === k2, "the same id a second later is another blast, and is told twice alike");
+    ok(BL.volley([...known, { id: k2, of: "m|x", t: 2000, magnitude: 1.45, soft: false }]).get(k2) === "quiet", "the place blowing again inside the window is a follower"); }
   // a later blast never changes an earlier answer; no two leads of the same step within one window
   let s = 7; const rnd = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
   for ( let run = 0; run < 60; run++ ) {
@@ -231,7 +237,7 @@ await group("WIRING", () => {
   ok(rb.length > 100 && /BL\.viewMoved\(B\.at, camNow\(\)\)/.test(rb) && /B\.h\.stop\(\)/.test(rb) && /armBlast\(w, \{ b: B\.b, lead: B\.lead \}, true\)/.test(rb) && /if \( w\.blast \) \{ reBlast\(w\);/.test(s), "a view that moved since the asking: the frame is stopped and asked again when the word starts");
   ok(/BL\.blastOfMoment\(/.test(s) && /if \( bl && mine\.includes\(mw\) \) armBlast\(mw, bl\);/.test(s), "a blast that is no firing gets its frame with its main word");
   const lead = s.slice(s.indexOf("function blastLead("), s.indexOf("const seatOpt"));
-  ok(/L\.impact\.mode\?\.\(\) === "off"\s*\) return null;/.test(lead) && /BL\.volley\(blasts\)\.get\(b\.id\) === "lead"/.test(lead) && /if \( lead \) w\.noFlash = true;/.test(lead), "the table's impact switch off: none; the volley rule; a lead's word marked");
+  ok(/L\.impact\.mode\?\.\(\) === "off"\s*\) return null;/.test(lead) && /const key = noteBlast\(b\), lead = BL\.volley\(blasts\)\.get\(key\) === "lead"/.test(lead) && /if \( lead \) w\.noFlash = true;/.test(lead), "the table's impact switch off: none; the volley rule; a lead's word marked");
   const arm = s.slice(s.indexOf("function armBlast("), s.indexOf("function reBlast("));
   ok(arm.length > 100 && /const vw = mapView\(\)/.test(arm) && /!BL\.inView\(b, vw\)/.test(arm) && /!hereVisible\(b\.x, b\.y\)/.test(arm), "only a seat that has the blast in view and may see the place");
   ok(/L\.contactAt\(L\.measure\(w\.text, \{ \.\.\.optsOf\(w\), reduced: false \}\)\?\.plan, w\.t\)/.test(arm) && /seat: seatNeeds\(\)/.test(arm) && /keep, seat/.test(arm), "the blow at the word's contact on the table's clock; the seat's needs passed");

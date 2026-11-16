@@ -1401,17 +1401,19 @@ let blasts = [];               // the blasts known lately ({ id, t (shared ms), 
 let blastLog = [];             // this seat's log of the impact frames it was asked for (api.sfx.blasts())
 const impacts = new Set();     // the impact frames up or scheduled here
 function noteBlast(b) {
-  if ( !b || blasts.some((q) => q.id === b.id) ) return;
+  if ( !b ) return null;
   const t = sharedNow();
   blasts = blasts.filter((q) => q.t > t - BL.KEEP_MS);
-  if ( b.t > t - BL.KEEP_MS ) blasts.push({ id: b.id, t: b.t, magnitude: b.magnitude, soft: b.soft });
+  // (the same id at another moment is the place blowing again: another blast of the volley - sfx-blast noteKey)
+  const key = BL.noteKey(blasts, b);
+  if ( !blasts.some((q) => q.id === key) && b.t > t - BL.KEEP_MS ) blasts.push({ id: key, of: b.id, t: b.t, magnitude: b.magnitude, soft: b.soft });
+  return key;
 }
 /** The table's part: does this blast get a frame, and is it the lead of its volley? -> { b, lead } | null. Marks a lead's word. */
 function blastLead(w, b) {
   try {
     if ( !b || !L?.impact?.play || L.impact.mode?.() === "off" ) return null;
-    noteBlast(b);
-    const lead = BL.volley(blasts).get(b.id) === "lead";
+    const key = noteBlast(b), lead = BL.volley(blasts).get(key) === "lead";      // (noted first: the rule reads the list with it in)
     if ( lead ) w.noFlash = true;
     return { b, lead };
   } catch { return null; }

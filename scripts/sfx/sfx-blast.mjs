@@ -97,6 +97,17 @@ export function volley(list) {
   }
   return out;
 }
+/** two tellings of one blast are at most this far apart (ms); further apart, the same id is the place blowing again */
+export const SAME_MS = 250;
+/**
+ * The name a blast goes by in the volley rule. A blast that is no firing is named by its place's word (the moment's seed), and a place
+ * can blow twice (live: a second painted blast on the same spot came with the first one's id and would have been its lead again):
+ * the same id at another moment is another blast. `list` = the blasts known ([{ id (this name), of (the blast's id), t }]).
+ */
+export function noteKey(list, b) {
+  const same = (list ?? []).filter((q) => (q.of ?? q.id) === b.id), hit = same.find((q) => Math.abs(q.t - b.t) <= SAME_MS);
+  return hit ? hit.id : same.length ? `${b.id}@${Math.round(b.t)}` : b.id;
+}
 /** the strength a blast is drawn at: its own as a lead, at most QUIET as a follower */
 export const drawnMag = (b, lead) => (lead ? b.magnitude : Math.min(b.magnitude, QUIET));
 
