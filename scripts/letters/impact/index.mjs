@@ -9,7 +9,7 @@
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
 import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost, isFlash, peakOf } from "./plan.mjs";
-import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs, warmBase, artJobs, PAINTERS } from "./draw.mjs";
+import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs, warmBase, artJobs, PAINTERS, nearR } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
 const MAX_PIX = 2.2e6;        // backing pixels of one drawing (a 4K screen is painted at about 1080p: ink is flat, nobody sees it in 40 ms)
@@ -191,6 +191,8 @@ export function createImpact(L, tools = null) {
       ctxLayer: (c) => c.getContext("2d") };   // CRITFREEZE: a figure layer is shown, never read (draw.mjs ctxLayer)
     /* where the blow lands: on the struck figure's rim on the side it comes from; the weak steps put it right on the rim (the figure
        stays in sight), a figure struck from nowhere in particular gets its rim spot from the seed */
+    /* SAKUGATOKEN (1.9.27): round a struck token the gentle panel is the token's surroundings too (a jagged star reaching 1.12 x its radius) */
+    if ( e.local && Number.isFinite(nearR(e)) ) e.local.r = Math.min(e.local.r, Math.max(e.R * 1.6, nearR(e) / 1.12));
     const rim = sub.sil && plan.step <= 2 ? (plan.step <= 1 ? 0.95 : 0.85) : 0.7;
     const ha = dir != null ? dir : (sub.sil && plan.step <= 2 ? -Math.PI * (0.2 + ((plan.seed >>> 3) % 60) / 100) : null);
     e.hx = ha != null ? cx - Math.cos(ha) * R * rim : cx; e.hy = ha != null ? cy - Math.sin(ha) * R * rim : cy;

@@ -7,7 +7,7 @@
 // Run from check-impact.mjs (`run`), or alone: node scripts/letters/impact/check-figures.mjs -> "impact figures: N checks, F failed".
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK } from "./plan.mjs";
-import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, starOf, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb, artJobs, warmBase } from "./draw.mjs";
+import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, frameEnv, starOf, nearR, morphAmt, morphStats, panelPoly, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb, artJobs, warmBase } from "./draw.mjs";
 
 const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
 const MAGS = [0.2, 0.45, 0.7, 1.1, 1.5, 1.9];   // one per step
@@ -98,7 +98,8 @@ export async function run(ok) {
       ok(seen.size === 1, `figures: the struck token gets the same treatment at every zoom (${[...seen]})`); }
     const many = env([0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ role: i ? "also" : "target", cx: 200 * i, cy: 450, sil: sil(100), area: 0.95 })));
     const tm = figTreat(many, f);
-    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.zs[0] > 1 && tm.area <= cap + 1e-6, `figures: eight tokens share the open cap, the struck one first, the rest get the held twin (${tm.each}, ${(tm.area / (W * H) * 100).toFixed(2)} %)`);
+    /* SAKUGATOKEN (1.9.27): the struck one is no longer drawn enlarged (zs 1: the token does not get bigger); the share is unchanged */
+    ok(tm.each[0] === "i" && tm.each.includes("n") && tm.zs.every((z) => z === 1) && tm.area <= cap + 1e-6, `figures: eight tokens share the open cap, the struck one first, the rest get the held twin, none enlarged (${tm.each}, ${(tm.area / (W * H) * 100).toFixed(2)} %)`);
     ok(figTreat(many, { ...f, fig: "p" }).each.includes("d") && figTreat(many, { ...f, fig: "k" }).each.includes("d"), "figures: over the cap posterised and inked become the duotone");
     for ( const n of [1, 2, 3, 5, 8] ) { const seen = new Set(); for ( const w of [30, 60, 90, 130] ) { const tt = figTreat(env(Array.from({ length: n }, (_, i) => ({ role: i ? "also" : "target", cx: 100 * i, cy: 450, sil: sil(w), area: 0.9 }))), f);
       seen.add(tt.each.join() + "|" + tt.slices.join());
@@ -110,17 +111,17 @@ export async function run(ok) {
     for ( const t of ENLARGED ) ok(figTreat(small, { ...f, type: t }) === null, `figures: ${t} shows the struck figure enlarged: no second copy at its place`);
     const two = env([{ role: "target", cx: 800, cy: 450, sil: sil(100), area: 0.78 }, { role: "from", cx: 300, cy: 450, sil: sil(100), area: 0.78 }]);
     ok(figTreat(two, { ...f, type: "shadow" }).list.length === 1 && figTreat(two, { ...f, type: "shadow" }).list[0].role === "from", "figures: on a black frame the attacker stands at its place beside the enlarged struck figure");
-    /* IMPACT5: the cut-in: the star (struck figure, else the attacker) is enlarged by cu, at least 1.3 x, never past cutMax of the short side;
-       the others by less, never past cutMaxOther; nothing on a calm seat; the star stays in the view (pulled in by at most half its size) */
+    /* SAKUGATOKEN (1.9.27; replaces IMPACT5's cut-in checks: the owner ruled «i token nie powinien się powiększać» and «na żetonie i bliskich
+       okolicach»): no figure is enlarged or moved off its token, on any drawing, at any size, star or not, cu or no cu, with or without a pop */
     for ( const w of [12, 30, 60, 120, 250, 380, 500] ) {
       const g = { role: "target", cx: 800, cy: 450, sil: sil(w) }, e1 = env([g, { role: "from", cx: 300, cy: 450, sil: sil(w) }], { dir: 0 });
-      const s1 = cutScale(e1, g, f), s0 = cutScale(e1, g, { ...f, cu: 0 }), so = cutScale(e1, e1.figs[1], f);
-      ok(s0 === 1 && (w >= LIMITS.cutMax * u ? s1 === 1 : s1 >= Math.min(1.3, LIMITS.cutMax * u / w) - 1e-9) && w * s1 <= Math.max(w, LIMITS.cutMax * u) + 1e-6, `figures: the cut-in of a ${w} px star is ${s1.toFixed(2)} x`);
-      ok(w * so <= Math.max(w, LIMITS.cutMaxOther * u) + 1e-6 && so <= s1 + 1e-9, `figures: a figure beside the star is enlarged less (${so.toFixed(2)} x)`);
-      ok(cutScale({ ...e1, local: { r: 100 } }, g, f) === 1, "figures: no cut-in on a calm seat");
+      for ( const ff of [f, { ...f, cu: 0 }, { ...f, z: 1.55 }, { ...f, cu: 1, kb: 1 }] ) {
+        ok(cutScale(e1, g, ff) === 1 && cutScale(e1, e1.figs[1], ff) === 1 && cutOffset(e1, g, ff, 1).every((v) => v === 0) && frameEnv(e1, ff) === e1, `figures: a ${w} px star stays its token's size and place (cu ${ff.cu}, z ${ff.z ?? 1})`);
+        const tr = figTreat(e1, ff); ok(!tr || (tr.zs.every((z) => z === 1) && tr.offs.every(([x, y]) => x === 0 && y === 0)), `figures: no figure of a ${w} px pair is enlarged or moved (cu ${ff.cu}, z ${ff.z ?? 1})`);
+      }
     }
-    { const g = { role: "from", cx: 20, cy: 450, sil: sil(40) }, e2 = env([g], { dir: Math.PI }), s = cutScale(e2, g, f), [dx] = cutOffset(e2, g, f, s);
-      ok(starOf(e2) === g && s > 1.3 && 20 + dx - 40 * s * 0.5 >= -1e-6 - 40 * s * 0.06, `figures: with no struck figure the attacker is the star, kept in the view (${s.toFixed(2)} x, dx ${dx.toFixed(0)})`); }
+    { const g = { role: "from", cx: 20, cy: 450, sil: sil(40) }, e2 = env([g], { dir: Math.PI });
+      ok(starOf(e2) === g && cutScale(e2, g, f) === 1 && cutOffset(e2, g, f, 1)[0] === 0, "figures: with no struck figure the attacker is the star, at its token's size and place"); }
   }
   /* no saturated red from any art: a cyan costume inverts to red, a red one stays red: both become the deep crimson */
   { const px = [[0, 255, 255, 255], [255, 0, 0, 255], [20, 230, 220, 255], [250, 60, 70, 255], [255, 255, 255, 255], [12, 12, 16, 255], [200, 30, 30, 0], [90, 200, 60, 255], [255, 120, 140, 255]];
@@ -190,12 +191,12 @@ export async function run(ok) {
           ok(tr.flash === (!gentle && isFlash(f)), `figures: ${kind} m=${m} ${f.type}: a drawing takes the flash exemption without being a flash`);
           if ( !tr.flash ) ok(tr.area <= cap + 1e-6, `figures: ${kind} m=${m} ${f.type} ${cnt} x ${w} px: the figures change ${(tr.area / (W * H) * 100).toFixed(2)} % of the view (open cap)`);
           if ( gentle ) ok(tr.each.every((t) => t === "r") && tr.zs.every((z) => z === 1), `figures: ${kind} m=${m} ${p.mode}: the gentle panel pops or turns a figure`);
-          if ( tr.zs.some((z) => z > 1) ) popped++;
+          if ( tr.list.some((g) => morphAmt({ figs }, f, g) > 0) ) popped++;   // SAKUGATOKEN: the morph took the pop's drawings
           if ( tr.each.some((t) => FIG_HELD.has(t)) ) held++;
         }
       }
     }
-    ok(popped > 50 && held > 50, `figures: the pops and the held colours are used (${popped} popped, ${held} held of ${draws} drawings)`);
+    ok(popped > 50 && held > 50, `figures: the morphs and the held colours are used (${popped} morphed, ${held} held of ${draws} drawings)`);
     /* a small figure pops more, but at most 2.2 x; the others half as much */
     const ez = { W, H };
     ok(popOf(ez, { role: "target", sil: sil(40) }, 1.55) > popOf(ez, { role: "target", sil: sil(200) }, 1.55) && popOf(ez, { role: "target", sil: sil(10) }, 1.55) <= 2.2 && popOf(ez, { role: "from", sil: sil(200) }, 1.55) < 1.55, "figures: the pop grows for small figures (max 2.2 x), half as much for the others");
@@ -255,10 +256,12 @@ export async function run(ok) {
       ok(jobs.length >= (o.local ? 0 : 3) && walkMade <= 2 * figs3.length && e._jobs === undefined, `figures: artJobs lists the plan's arts without drawing (${jobs.length} jobs, ${walkMade} canvases) ${JSON.stringify(o)}`);
       for ( const j of jobs ) j();
       ok(artJobs(e, plan).length === 0, `figures: after its jobs a plan needs no more art ${JSON.stringify(o)}`);
-      made = 0; let layers = 0;
+      made = 0; let layers = 0; const m0 = morphStats.made;
       for ( const f of plan.frames ) { if ( e.figLayers ) layers += paintFigLayers(e, f, 1).length; else paintFrame(mkCtx(null), e, f); }
-      const cutArt = plan.frames.filter((f) => f.fig && f.fig !== "r" && f.fig !== "p").length * 2;
-      ok(made - layers <= cutArt, `figures: painting after the jobs makes only its layers and cut-outs of arts already worked out (${made - layers} > ${cutArt}) ${JSON.stringify(o)}`);
+      /* SAKUGATOKEN: a morphed drawing composes its bent picture on a canvas of its own while it is painted (ahead of its frame): no art */
+      const cutArt = plan.frames.filter((f) => f.fig && f.fig !== "r" && f.fig !== "p").length * 2, morphs = morphStats.made - m0;
+      ok(o.local ? morphs === 0 : morphs > 0, `figures: the morph bends the figures on a full seat only (${morphs}) ${JSON.stringify(o)}`);
+      ok(made - layers - morphs <= cutArt, `figures: painting after the jobs makes only its layers and cut-outs of arts already worked out (${made - layers} > ${cutArt}) ${JSON.stringify(o)}`);
     }
     /* CRITFREEZE: a figure layer is painted on the context the env hands for layers (ctxLayer: a plain 2D context, drawn by the graphics
        card), every layer and nothing else; the layers and their draws are the very same as on the read-back context */
@@ -266,7 +269,8 @@ export async function run(ok) {
       const go = (hook) => {
         const figsL = [{ role: "target", cx: 900, cy: 450, sil: { src: fake(120, 120), sx: 0, sy: 0, sw: 120, sh: 120, w: 100, h: 100, rot: 0 } }, { role: "from", cx: 500, cy: 420, sil: { src: fake(100, 100), sx: 0, sy: 0, sw: 100, sh: 100, w: 90, h: 90, rot: 0 } }];
         let asked = 0, read = 0; const xs = [], out = [];
-        const e = env({ figs: figsL, sil: figsL[0].sil, figLayers: true, ctx2d: (c) => { read++; const x = mkCtx(c); if ( !hook ) xs.push(x); return x; }, ...(hook ? { ctxLayer: (c) => { asked++; const x = mkCtx(c); xs.push(x); return x; } } : {}) });
+        /* SAKUGATOKEN: a morph's own canvas (c.morph) is no layer */
+        const e = env({ figs: figsL, sil: figsL[0].sil, figLayers: true, ctx2d: (c) => { read++; const x = mkCtx(c); if ( !hook && !c.morph ) xs.push(x); return x; }, ...(hook ? { ctxLayer: (c) => { asked++; const x = mkCtx(c); xs.push(x); return x; } } : {}) });
         warmBase(e); for ( const j of artJobs(e, plan) ) j();
         read = 0; xs.length = 0;
         for ( const f of plan.frames ) for ( const l of paintFigLayers(e, f, 1) ) out.push([Math.round(l.x), Math.round(l.y), l.size, l.canvas.width]);
@@ -276,6 +280,76 @@ export async function run(ok) {
       ok(a.n >= 6 && a.asked === a.n, `figures: every figure layer is painted on the layer context (${a.asked} of ${a.n})`);
       ok(a.out === b.out && a.draws > 0 && a.draws === b.draws && b.asked === 0, `figures: the layers and their draws are the same on either context (${a.draws} / ${b.draws} draws)`);
       ok(/x = ctxLayer\(e, c\)/.test(await (await import("node:fs/promises")).readFile(new URL("./draw.mjs", import.meta.url), "utf8")), "figures: paintFigLayers asks the layer context"); }
+  }
+
+  /* 3b. SAKUGATOKEN (1.9.27, the owner on the impact frames at full strength: «robi efekty tokenowe na cały ekran a powinno być tylko na
+     tokenie. na cały ekran błysk i efekty ale nie naklejki», «na żetonie i bliskich okolicach», «naklejki spoko ale ze smakiem», «raczej
+     wolałbym morfowanie niż naklejki», «i token nie powinien się powiększać»). On a recording context that follows every path point, arc and
+     ellipse: every drawing that pastes ink on a struck TOKEN keeps all of it inside nearR of the token's centre (plus its keylines), at every
+     size of token, step, strength and direction; the same drawing for a subject that is no token still reaches far (the measure is not empty,
+     and nothing changed there); the screen's own effects (speed lines, the colour split, the tear) still cross the screen. On 1.9.26 the
+     sticker drawings of a 60 px token reached 2-7 x nearR (the halftone ring 400 px, the cracks a third of the screen). */
+  { const pts = [];
+    const mk = () => new Proxy({}, { get: (t, k) => {
+      if ( k in t ) return t[k];
+      if ( k === "moveTo" || k === "lineTo" ) return (x, y) => pts.push([x, y]);
+      if ( k === "arc" ) return (x, y, r) => pts.push([x - r, y], [x + r, y], [x, y - r], [x, y + r]);
+      if ( k === "ellipse" ) return (x, y, rx, ry) => pts.push([x - rx, y], [x + rx, y], [x, y - ry], [x, y + ry]);
+      if ( k === "getImageData" ) return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(200) });
+      if ( k === "createImageData" ) return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      return () => {};
+    }, set: (t, k, v) => ((t[k] = v), true) });
+    const fake = (w, h) => { const c = { width: w, height: h }; c.getContext = () => mk(); return c; };
+    const src = fake(64, 64);
+    const STICK = ["pop", "splat", "dots", "shatter", "cracks", "ring", "fade", "fig"];
+    const reach = (e, f) => { pts.length = 0; paintFrame(mk(), e, f); return pts.reduce((a, [x, y]) => Math.max(a, Math.hypot(x - e.cx, y - e.cy)), 0); };
+    let n = 0, worst = 0, before = 0;
+    for ( const size of [24, 60, 110, 240] ) for ( const step of [0, 1, 2, 3, 4, 5] ) for ( const mag of [0.4, 1.2, 2] ) for ( const dir of [0.3, null] ) for ( const type of STICK ) {
+      const R = size / 2, sl = { src, sx: 0, sy: 0, sw: 64, sh: 64, w: size, h: size, rot: 0 };
+      const e = { W: 1600, H: 900, cx: 800, cy: 450, hx: 800 - Math.cos(dir ?? -1) * R * 0.85, hy: 450 - Math.sin(dir ?? -1) * R * 0.85, R, dir, mag, step, kind: "hit", tone: TONES.hero, rimTone: "a", sil: sl, figs: [{ role: "target", cx: 800, cy: 450, sil: sl }], local: null, redOk: false, makeCanvas: fake };
+      const f = { type, seed: 11 + step, fig: "i", back: FRAMES[type].back, full: FRAMES[type].full };
+      const r = reach(e, f), lim = nearR(e), slack = 900 * 0.016;   // keylines and ink strokes are drawn round the path
+      n++; worst = Math.max(worst, r / lim);
+      ok(r <= lim + slack, `figures: SAKUGATOKEN ${type} on a ${size} px token (step ${step}, m ${mag}, dir ${dir}) reaches ${r.toFixed(0)} px (surroundings ${lim.toFixed(0)} px)`);
+      if ( size === 60 && step === 4 && mag === 1.2 && dir != null ) before = Math.max(before, reach({ ...e, sil: null, figs: [] }, f) / lim);
+    }
+    ok(n > 1000 && worst > 0.5, `figures: SAKUGATOKEN the stickers fill their surroundings, never more (${n} drawings, worst ${worst.toFixed(2)} x nearR)`);
+    ok(before > 1.8, `figures: SAKUGATOKEN a subject that is no token still draws its stickers sized from the view (${before.toFixed(1)} x a 60 px token's surroundings)`);
+    { const sl = { src, sx: 0, sy: 0, sw: 64, sh: 64, w: 60, h: 60, rot: 0 }, e = { W: 1600, H: 900, cx: 800, cy: 450, hx: 775, hy: 450, R: 30, dir: 0.3, mag: 1.4, step: 4, kind: "hit", tone: TONES.hero, rimTone: "a", sil: sl, figs: [{ role: "target", cx: 800, cy: 450, sil: sl }], local: null, redOk: false, makeCanvas: fake };
+      for ( const type of ["lines", "chroma", "tear"] ) ok(reach(e, { type, seed: 5, back: FRAMES[type].back, full: FRAMES[type].full }) > 600, `figures: SAKUGATOKEN the screen keeps its effect ${type} (the flash and the effects)`);
+      const p = panelPoly(e, { type: "ink", seed: 4 }); let pr = 0; for ( let i = 0; i < p.length; i += 2 ) pr = Math.max(pr, Math.hypot(p[i] - 800, p[i + 1] - 450));
+      ok(pr <= nearR(e) + 1e-6, `figures: SAKUGATOKEN the black-and-white panel round a token is its surroundings (${pr.toFixed(0)} of ${nearR(e).toFixed(0)} px)`);
+      ok(nearR({ ...e, sil: null }) === Infinity && nearR({ ...e, R: 5 }) === 900 * LIMITS.nearMin, "figures: SAKUGATOKEN no token, no bound; a far-zoom token keeps a legible surrounding");
+      /* the full-field frames draw the struck figure at its token's own size (shadow, glare, swap: 1.9.26 blew it up to 8 x) */
+      for ( const type of ENLARGED ) {
+        const L = [];
+        const c = new Proxy({}, { get: (t, k) => (k === "drawImage" ? (...a) => L.push(a) : k === "getImageData" ? (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(200) }) : k === "createImageData" ? (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) : () => {}), set: () => true });
+        paintFrame(c, e, { type, seed: 3, back: FRAMES[type].back, full: FRAMES[type].full });
+        const big = L.filter((a) => a.length === 5).reduce((m, a) => Math.max(m, Math.abs(a[3]), Math.abs(a[4])), 0);
+        ok(big > 0 && big <= 60 + 1e-6, `figures: SAKUGATOKEN ${type} draws the struck figure at its token's size (${big.toFixed(1)} px of 60)`);
+      }
+    }
+    /* the morph: on the contact (z) and the hold (cu) of a full seat, never on the gentle panel; the struck figure more than the others;
+       a bent picture is masked by the figure's own outline (the last thing done to it: destination-in with the outline) */
+    { const sl = { src, sx: 0, sy: 0, sw: 64, sh: 64, w: 60, h: 60, rot: 0 }, g = { role: "target", cx: 800, cy: 450, sil: sl }, o2 = { role: "from", cx: 500, cy: 450, sil: sl }, e = { figs: [g, o2], local: null };
+      ok(morphAmt(e, { z: 1.55 }, g) === 1 && morphAmt(e, { z: 1.25 }, g) > 0.4 && morphAmt(e, { z: 1.55 }, o2) < 1 && morphAmt(e, { cu: 1 }, g) > 0 && morphAmt(e, {}, g) === 0, "figures: SAKUGATOKEN the morph: hardest on the contact, a quiver on the hold, less on the others, none on a plain drawing");
+      ok(morphAmt({ ...e, local: { r: 100 } }, { z: 1.55, cu: 1 }, g) === 0, "figures: SAKUGATOKEN no morph on the gentle panel");
+      let morphedAll = 0, masked = false;
+      for ( const kind of KIND_IDS ) for ( const m of MAGS ) {
+        const p = safety(planImpact({ kind, magnitude: m, seed: `mo:${kind}:${m}`, dir: 30 }), P0, { flashLog: [], now: 0, t0: 0 });
+        for ( const f of p.frames ) if ( f.fig && morphAmt(e, f, g) > 0 ) morphedAll++;
+      }
+      { const ops = [];
+        const fk = (w, h) => { const c = { width: w, height: h }; c.getContext = () => new Proxy({ gco: "source-over" }, { get: (t, k) => (k === "drawImage" ? () => ops.push([!!c.morph, t.gco]) : k === "getImageData" ? (x, y, ww, hh) => ({ data: new Uint8ClampedArray(ww * hh * 4).fill(200) }) : k === "createImageData" ? (ww, hh) => ({ data: new Uint8ClampedArray(ww * hh * 4) }) : k in t ? t[k] : () => {}), set: (t, k, v) => { if ( k === "globalCompositeOperation" ) t.gco = v; else t[k] = v; return true; } }); return c; };
+        const s2 = fk(64, 64), sl2 = { src: s2, sx: 0, sy: 0, sw: 64, sh: 64, w: 60, h: 60, rot: 0 };
+        const ee = { W: 1600, H: 900, cx: 800, cy: 450, hx: 775, hy: 450, R: 30, dir: 0.3, mag: 1.4, step: 4, kind: "hit", tone: TONES.hero, rimTone: "a", sil: sl2, figs: [{ role: "target", cx: 800, cy: 450, sil: sl2 }], local: null, redOk: false, makeCanvas: fk };
+        const L = paintFigLayers(ee, { type: "fig", seed: 7, fig: "i", z: 1.55 });
+        const mops = ops.filter((o) => o[0]);
+        masked = mops.length > 3 && mops.at(-1)[1] === "destination-in";
+        ok(L.length === 1 && Math.abs(L[0].x + L[0].size / 2 - 800) < 1e-6 && L[0].dx === 0 && L[0].dy === 0, "figures: SAKUGATOKEN a morphed figure's layer stays centred on its token");
+      }
+      ok(morphedAll > 100 && masked, `figures: SAKUGATOKEN the ladders morph their figures (${morphedAll} drawings) and a bent picture is cut by its own outline last (${masked})`);
+    }
   }
 
   /* 4. the player on a fake browser: which figures take part on a seat (its own process: it replaces globals) */

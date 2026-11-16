@@ -177,7 +177,7 @@ a fall; one frame old at most; frozen while the hit-stop holds the ticker); an e
 its figures inside its clip, painted where the blow found them (1.9.20 behaviour). Before 1.9.21 the figure stayed where the blow found
 it while the token's reaction moved.
 
-### The cut-in (1.9.23 IMPACT5)
+### The cut-in (1.9.23 IMPACT5; removed in 1.9.27, see the next section)
 
 The owner after IMPACT4: «bardziej jak sakuga mad ... Dynamiczniej». Measured before: after ~200 ms only token-sized changes were left,
 and at a far zoom (a token of 20-30 px) the whole cut read as a few blinking pixels; a seat zoomed closer got another picture than the far
@@ -233,6 +233,43 @@ The gentle variant and reduced motion get none of this (no `cu`, no `kb`, rims o
 Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps film clock): six impacts (hit, heavy, crit, crit
 without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
 same instants within one frame; no frame over 20 ms; the call's warm-up took 0-31 ms before the start (0 when the idle warm-up had run).
+
+### On the token, not on the screen (1.9.27 SAKUGATOKEN; replaces the cut-in above)
+
+The owner on the impact frames at full strength (the 1.9.23-1.9.26 cut-in, called "sakuga mad" at the table): «robi efekty tokenowe na
+cały ekran a powinno być tylko na tokenie. na cały ekran błysk i efekty ale nie naklejki» (it puts token effects over the whole screen,
+they belong on the token; the flash and effects may take the screen, the stickers may not), «na żetonie i bliskich okolicach» (on the
+token and its close surroundings), «raczej wolałbym morfowanie niż naklejki» then «naklejki spoko ale ze smakiem» (stickers are fine, with
+taste; morphing preferred), «i token nie powinien się powiększać» (the token must not get bigger). Measured on 1.9.26 (a 60 px token, a
+1600 x 900 view): the cut-in drew the struck token at about 300 px (5 x), the pop up to 2.2 x on top, `shadow` / `glare` / `swap` up to 8 x;
+the stickers were sized from the view (`burstR` floor 13 % of the short side): the halftone ring reached about 400 px, the cracks a third
+of the screen. Now:
+- **The token keeps its size.** `LIMITS.figScale` = 1: `cutScale` returns it, `cutOffset` is [0, 0], `frameEnv` is the identity, no pop
+  (`z`) and no knock-back offset (`kb`) moves or scales a figure; `shadow` / `glare` / `swap` draw the figure at its token's size (`figUp`;
+  `blowUp` stays exported, unused); the smear's sweep copy no longer grows. `cu` / `kb` / `z` stay on the frames (read-only, unchanged
+  plan): they now drive the morph.
+- **Stickers stay on the token and its close surroundings.** `nearR(e)` = max(`LIMITS.nearK` (3) x the token's radius, `LIMITS.nearMin`
+  (5 %) x the short side) round the struck token's centre (Infinity when the subject is no token: an element or a point keeps 1.9.26's
+  sizes). Every drawing that pastes ink round a token is fitted inside it (`nearFit`: a shape of radius r reaching `reach` x r from its
+  centre is shrunk until it fits): burst stars (`burstR` = min(the view's `flashR`, 0.6 x nearR)), splats, halftone rings, rings with
+  their chunks and ticks, puffs, cracks and shards, focus lines round the token, flares, the knock-back echoes, the smear streak, the ink
+  panel and the gentle panel (`local.r`). Strokes and dot pitch scale down with the shape so a small sticker is not a blob.
+- **The screen keeps the flash and the effects.** Full-field frames (`slam`, `shadow`, `glare`, `swap`, `window`, `tear`),
+  the shadow's big star and the window's frame (`flashR`, the old sizes), speed lines across the screen, the chromatic split, the tear and
+  the frame punch are the screen's, unchanged. Flash rationing and every safety limit unchanged.
+- **Morph instead of growth.** On a full seat, a figure drawn on a drawing with a contact pop (`z` > 1) or a held cut-in (`cu`) is bent
+  INSIDE its own outline (`morphAmt`, `morphed`): its picture is cut in 12 bands across the blow, each shifted along it by a seeded,
+  mostly sine profile (at most `LIMITS.morphMax` = 13 % of its size), then masked by the figure's own outline (destination-in), so the
+  token warps and quivers in place and nothing leaves its silhouette. Hardest on the contact (morph 1 at z 1.55), a quiver on the hold
+  (0.35 x cu), the struck figure (the star) fully, the others at 60 %. No morph on the gentle panel or reduced motion (rims only, one
+  still, as before). Seeded from the drawing's seed: the same bend on every seat.
+- **Same picture on every seat**: nearR is the token's own radius on that screen times a constant, so every sticker keeps its share of
+  the token at every zoom; the figure-area rule still counts each figure at its `cutMax` size (zoom-independent; nothing is drawn there).
+- Callers: the plus-ultra splash keeps its letters off the star's box; with an engine that tells `limits.figScale` that box is the
+  token's own box (letter-plan `starBox(..., fig)`).
+- Checks: check-figures section 3b (every sticker type x 4 token sizes x 6 steps x 3 strengths x 2 directions inside nearR plus the
+  strokes; the same drawing for no token still reaches far; the screen effects still cross the screen; the enlarged frames at the token's
+  size; the morph's rules, mask and centring), check-impact (the step's `flashR` / `burstR`).
 
 ## Kinds
 
@@ -304,7 +341,7 @@ Full-screen flashes and inversions can harm photosensitive viewers. The engine's
 |---|---|---|
 | length of an impact | at most 24 ticks = 1 s (1.9.21; was 12 = 500 ms); one drawing at most 4 ticks | `planImpact` (also a caller's own `frames`) |
 | hit-stop | at most 8 ticks = 333 ms per impact (1.9.21; was 4) | `planImpact` |
-| the figures' colours (1.9.21; 1.9.23 IMPACT5 «Poluzuj») | ordinary seats: bright treatments (`i p k`) and enlarged figures share `figAreaOpen` (25 % of min(W, H)^2, each figure counted at its cut-in cap, so every seat decides alike) on non-flash drawings; the cut-in's star never larger than `cutMax` (44 % of the short side), the others `cutMaxOther` (16 %); photosensitive (gentle) seats rims only, reduced-motion seats one still, both unchanged (1.9.20-1.9.22: `figArea` 2.5 % of the view on every seat); held treatments (`n d h`) keep every pixel's relative luminance within 0.01 (measured 0.004) and never give saturated red, so they need no area | `figTreat`, `heldPixels` |
+| the figures' colours (1.9.21; 1.9.23 IMPACT5 «Poluzuj») | ordinary seats: bright treatments (`i p k`) and enlarged figures share `figAreaOpen` (25 % of min(W, H)^2, each figure counted at its cut-in cap, so every seat decides alike) on non-flash drawings; the cut-in's star never larger than `cutMax` (44 % of the short side), the others `cutMaxOther` (16 %) (1.9.27 SAKUGATOKEN: nothing is enlarged any more, every figure at its token's size, `figScale` 1; the area is still counted at the cap; stickers within `nearR`); photosensitive (gentle) seats rims only, reduced-motion seats one still, both unchanged (1.9.20-1.9.22: `figArea` 2.5 % of the view on every seat); held treatments (`n d h`) keep every pixel's relative luminance within 0.01 (measured 0.004) and never give saturated red, so they need no area | `figTreat`, `heldPixels` |
 | flash drawings, guard on (`photosafe`, the default) | a FLASH is a full-field frame OR any drawing that changes the scene's brightness behind it, even inside a panel (`ink`, `shatter`, the gentle variant's panels; `isFlash`). At most 2 per impact AND at most 2 in any rolling second on this client, counted in the SAME log as the words' flash frames; over the budget a full frame becomes its quiet twin (`slam` -> `ink`, `shadow`/`window` -> `pop`, `glare` -> `lines`, `swap` -> `dots`, `tear` -> `rip`) and a twin or panel that would still change the scene keeps its ink and leaves the scene alone. The slam is kept first. Two flashes a second is under the three of WCAG 2.3.1 (1.8.2: before, `ink` and `shatter` turned the WHOLE view black and white uncounted, and the guard's twin for `slam` was that whole-view `ink`) | `safety` |
 | scene changed by a drawing that is not full-field | only inside a jagged panel of at most 20 % of the view round the blow (`localPanelR`, `backClip`) | `draw.mjs` |
 | saturated red (R / (R+G+B) >= 0.7, stricter than WCAG's 0.8) | under the guard covers at most 1 % of ANY drawing (`LIMITS.redArea`): every red accent (a kind's, a `tone`, a caller's `colors`) is drawn as the deep crimson `SAFE_RED` (#b02840, 0.63); the guard off keeps the red. Measured in check-impact.mjs on every frame type x red tones x subjects (1.8.2: before, the knock-out's shadow frame threw red spikes over the black field: ADVI 18) | `draw.mjs` `guarded` |
