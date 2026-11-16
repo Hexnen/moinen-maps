@@ -267,7 +267,7 @@ await group("PURE", async () => {
   ok(PF.clean("sfxLetters", "x") === "all" && PF.clean("sfxLayer", "top") === "top" && PF.clean("sfxSizeFire", "9") === 3 && PF.clean("sfxSizeFire", null) === 2, "clean: illegal values fall back, sizes clamp");
   // (MAPWIN: nothing of the seat goes into the table - a word set no GM named yet is the shared one, whatever the seat's language)
   const t = PF.tableOf((k) => PF.TABLE[k].def, "pl");
-  ok(t.mode === "all" && t.lang === PF.SHARED_WORDS && t.layer === "overlay" && JSON.stringify(t.steps) === JSON.stringify({ destruction: 2, fire: 2, weather: 2 }), "tableOf at the defaults (a word set not named yet: the shared one, not the interface's)");
+  ok(t.mode === "all" && t.lang === PF.SHARED_WORDS && t.layer === "overlay" && JSON.stringify(t.steps) === JSON.stringify({ destruction: 2, fire: 2, weather: 2, tokens: 2 }) && Object.values(t.on).every((v) => v === true), "tableOf at the defaults (MAPSWITCH: four groups, each switched on; (a word set not named yet: the shared one, not the interface's)");
   ok(PF.wordsOf("pl") === "pl" && PF.wordsOf("en") === "en" && PF.wordsOf("auto") === PF.SHARED_WORDS && PF.wordsOf(undefined) === PF.SHARED_WORDS && PF.wordsOf("de") === PF.SHARED_WORDS, "wordsOf: a named set, else the shared one");
   ok(PF.wordsFor("pl") === "pl" && PF.wordsFor("pl-PL") === "pl" && PF.wordsFor("en") === "en" && PF.wordsFor("de") === "en" && PF.wordsFor(undefined) === "en", "wordsFor: the GM's language names the set");
   const dp = PF.defaultsFor("pl"), de = PF.defaultsFor("en");

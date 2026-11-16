@@ -13,3 +13,4 @@ import "../presets/section.mjs";       // Destruction presets: the soundboard to
 import "../roads/workspace.mjs";   // Roads take over their placeholder
 import "../zones/section.mjs";   // Zones take over their placeholder (pencil lines -> zones, movement presets)
 import "./tokens.mjs";             // Tokens: enter / leave / idle / death of tokens (scripts/tokens)
+import "../sfx/sfx-tabs.mjs";       // Comic lettering: its switch and size slider as a dock panel of Destruction, Weather and Tokens (scripts/sfx)

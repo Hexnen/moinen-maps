@@ -4,6 +4,7 @@
      sfxWordsWorld     the word set: English / Polish, named by a GM's seat (MAPWIN: never a seat's own language; wordsOf)   (a seat's own override sfxWords is gone)
      sfxLayer          where the words are drawn among the canvas layers           (was a CLIENT setting)
      sfxSize*          the size step per group, 0..3 (SFXSIZE; already world)
+     sfxOn*            MAPSWITCH: the on / off switch per group (destruction, fire, weather, tokens); off letters nothing of the group
    Every one is a WORLD setting, written by a GM only (a player's write is cancelled on its own seat: guardWrite), applied live on every
    seat (onChange on create / update, deleteSetting back to the default), shown read-only to players in the same window.
    What stays each seat's own (not a table option): its performance mode (fewer side words up on a slow machine), its system's reduced
@@ -11,7 +12,7 @@
    MIGRATION once per world, by the first GM seat after the update (marker sfxTableMigrated): a value the world does not hold yet is taken
    from that GM's own old client value (localStorage "moinen-maps.<key>"); the old world switch "for everyone" off wins (lettering off);
    a GM's own word set (not "game language") becomes the table's. Players' old values are not taken (each is told once if his differed). */
-import { SIZE_GROUPS, SIZE_SETTING, SIZE_DEFAULT, stepOf } from "./sfx-size.mjs";
+import { SIZE_GROUPS, SIZE_SETTING, ON_SETTING, SIZE_DEFAULT, stepOf, stepWith, shownPair } from "./sfx-size.mjs";
 
 /** The engine's world layers (LETR contract v3), bottom to top. */
 export const LAYER_IDS = ["ground", "tokens", "weather", "overlay", "top"];
@@ -30,7 +31,12 @@ export const wordsFor = (guiLang) => (String(guiLang ?? "").toLowerCase().starts
 /** The values the window's "Defaults" fills in: every key's default, the word set named from the GM's language (never "auto"). */
 export const defaultsFor = (guiLang) => Object.fromEntries(Object.keys(TABLE).map((k) => [k, k === "sfxWordsWorld" ? wordsFor(guiLang) : TABLE[k].def]));
 /** What a window shows and edits of the stored values: each made legal, the word set as every seat letters it (wordsOf). */
-export const shownOf = (get) => Object.fromEntries(Object.keys(TABLE).map((k) => [k, k === "sfxWordsWorld" ? wordsOf(get(k)) : clean(k, get(k))]));
+export const shownOf = (get) => {
+  const o = Object.fromEntries(Object.keys(TABLE).map((k) => [k, k === "sfxWordsWorld" ? wordsOf(get(k)) : clean(k, get(k))]));
+  // (MAPSWITCH: a group's switch and its slider 1..3 as the tabs show them - a stored size 0 reads as switched off)
+  for ( const g of SIZE_GROUPS ) { const p = shownPair(o[ON_SETTING[g]], o[SIZE_SETTING[g]]); o[ON_SETTING[g]] = p.on; o[SIZE_SETTING[g]] = p.size; }
+  return o;
+};
 /** The keys whose edited value differs from what the table holds (the window's "unsaved" list; both as shownOf gives them). */
 export const changedKeys = (edited, table) => Object.keys(TABLE).filter((k) => k in edited && !same(edited[k], table[k]));
 
@@ -39,7 +45,8 @@ export const TABLE = {
   sfxLetters: { def: "all", choices: LETTERS },
   sfxWordsWorld: { def: "auto", choices: WORDS },
   sfxLayer: { def: "overlay", choices: LAYER_IDS },
-  ...Object.fromEntries(SIZE_GROUPS.map((g) => [SIZE_SETTING[g], { def: SIZE_DEFAULT, range: [0, 3] }]))
+  ...Object.fromEntries(SIZE_GROUPS.map((g) => [SIZE_SETTING[g], { def: SIZE_DEFAULT, range: [0, 3] }])),
+  ...Object.fromEntries(SIZE_GROUPS.map((g) => [ON_SETTING[g], { def: true, bool: true }]))
 };
 export const TABLE_KEYS = Object.keys(TABLE);
 export const MIGRATED_KEY = "sfxTableMigrated", MIGRATION = 1;
@@ -52,6 +59,7 @@ export const NOTICE_LS = "moinen-maps.sfxTableNotice";
 export function clean(key, v) {
   const d = TABLE[key]; if ( !d ) return v;
   if ( d.range ) return stepOf(v ?? d.def);
+  if ( d.bool ) return v !== false && v !== "false" && v !== 0;
   return d.choices.includes(v) ? v : d.def;
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -64,7 +72,9 @@ export function tableOf(get) {
     mode: v("sfxLetters"),
     lang: wordsOf(get("sfxWordsWorld")),
     layer: v("sfxLayer"),
-    steps: Object.fromEntries(SIZE_GROUPS.map((g) => [g, v(SIZE_SETTING[g])]))
+    // (MAPSWITCH: the step a group letters at - 0 while its switch is off; `on` = the switch as the tabs show it)
+    steps: Object.fromEntries(SIZE_GROUPS.map((g) => [g, stepWith(v(ON_SETTING[g]), v(SIZE_SETTING[g]))])),
+    on: Object.fromEntries(SIZE_GROUPS.map((g) => [g, shownPair(v(ON_SETTING[g]), v(SIZE_SETTING[g])).on]))
   };
 }
 

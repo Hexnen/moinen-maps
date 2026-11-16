@@ -61,7 +61,9 @@ const ZOOMS = [0.25, 0.5, 1, 2, 3];
 // GROUPS: every map sound belongs to one group - fire is the burning (catch, flare, out, douse, a page's catch and hisses), weather the
 // storm's flashes (a story of its own), everything else destruction (damage, blasts, guns, debris, dust, ploughs, Detonate)
 group("GROUPS", () => {
-  ok(JSON.stringify(SZ.SIZE_GROUPS) === '["destruction","fire","weather"]', "three groups");
+  // (MAPSWITCH: a fourth group, "tokens" - a carried token's plough, told by its story's own group like the storm's; no voice and no
+  // page role of a preset firing belongs to it, so the two rules below hold as they were. Was: three groups.)
+  ok(JSON.stringify(SZ.SIZE_GROUPS) === '["destruction","fire","weather","tokens"]', "four groups");
   for ( const v of Object.keys(C.VOICES) ) ok(SZ.groupOfVoice(v) === (/^(fire|flare|out|douse)$/.test(v) ? "fire" : "destruction"), `voice ${v} -> ${SZ.groupOfVoice(v)}`);
   ok(pages.length >= 10, `pages of the built-in presets: ${pages.length}`);
   for ( const { id, pg } of pages ) for ( const w of pg.words ) {
@@ -186,7 +188,12 @@ group("WIRING", () => {
   ok(/if \( stepFor\(SZ\.groupOfVoice\(e\.voice\)\) === 0 \) return;/.test(sfx), "an event of a group at 0 is not even scheduled");
   ok(/if \( stepFor\(SZ\.groupOfPageWord\(w\)\) === 0 \) continue;/.test(sfx) && /const grp = SZ\.groupOfPageWord\(w, p\.grp\);\n\s*if \( stepFor\(grp\) === 0 \) return;/.test(sfx), "a page word of a group at 0 is not scheduled, nor played if the GM switched it off meanwhile");
   ok(/stepFor\("weather"\) === 0 \) return again\(2000\)/.test(sfx), "weather at 0: the storm is not even read");
-  ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;\n\s*sfxBus\.entry = noDestr \? null : onEntry;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx), "destruction at 0: off the display's hooks");
+  // (MAPSWITCH: a plough enters through the same hook and is lettered by the tokens group, so the entry hook comes off only when both
+  // groups letter nothing; with it on for the tokens alone, a destruction entry returns before anything is computed. Was: the entry
+  // hook off with destruction alone.)
+  ok(/const noDestr = mode\(\) === "off" \|\| stepFor\("destruction"\) === 0;/.test(sfx) && /sfxBus\.entry = noDestr && \(mode\(\) === "off" \|\| stepFor\("tokens"\) === 0\) \? null : onEntry;/.test(sfx)
+    && /if \( g\.objId && onPlough\(d, g, start\) \) return;\n[^\n]*\n\s*if \( stepFor\("destruction"\) === 0 \) return;/.test(sfx) && /sfxBus\.detonate = noDestr \? null : onDetonate;/.test(sfx),
+    "destruction at 0: off the display's hooks (the entry hook stays on only for the tokens group's ploughs)");
   // (MAPRIDE: burnSize takes the step - the fire group's by default; the lower steps for a seat's run layout)
   ok(/canvas\?\.ready && stepFor\("fire"\) > 0;/.test(sfx) && /function burnSize\(p, live, step = stepFor\("fire"\)\)/.test(sfx) && /return SZ\.sizeAt\(Math\.max\(4, px \/ zoom\), step\);/.test(sfx), "fire at 0: no burning sound; else its size steps");
   ok(/if \( raw \) return o;\n\s*const step = d\.step\(grpOf\(w\)\);/.test(sfx) && /return SZ\.sizeOpts\(o, step\);\n\}/.test(sfx) && /const md = measureOf\(w\.text, o, d\)/.test(sfx.slice(sfx.indexOf("function measure"))) && /const o = optsOf\(w, d\);/.test(sfx.slice(sfx.indexOf("function measure"))),

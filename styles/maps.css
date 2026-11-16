@@ -813,6 +813,15 @@ body.mm-aiming-preset.mm-picking-src #board { cursor: cell; }
 .mm-ws .mm-ws-form .mm-ws-hint { display: block; margin: 0.15rem 0 0.3rem; color: var(--mm-ws-muted); font-size: var(--font-size-12, 0.75rem); }
 .mm-ws .mm-ws-form .mm-ws-sub { margin: 0.45rem 0 0.1rem; padding: 0; border: 0; font-size: var(--font-size-12, 0.75rem); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mm-ws-muted); }
 .mm-ws .mm-ws-form [hidden] { display: none !important; }
+/* MAPSWITCH: the comic lettering panel of a tab (sfx-tabs.mjs): per group a switch and its size slider; the slider of a group that
+   is switched off stays in place, dimmed; two groups in one tab (destruction and fire) are parted by a hairline */
+.mm-ws .mm-sfx-tab .mm-sfx-tab-group { display: grid; gap: 0.1rem; min-width: 0; }
+.mm-ws .mm-sfx-tab .mm-sfx-tab-group + .mm-sfx-tab-group { margin-top: 0.3rem; padding-top: 0.3rem; border-top: 1px solid var(--mm-ws-edge); }
+.mm-ws .mm-sfx-tab .mm-sfx-tab-group.is-off .mm-ws-range { opacity: 0.45; }
+.mm-ws .mm-sfx-tab .mm-sfx-tab-group .mm-ws-range { transition: opacity 0.15s var(--mm-ease-out); }
+.mm-ws .mm-ws-form .mm-sfx-tab-off { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin-top: 0.4rem; color: inherit; }
+.mm-ws .mm-ws-form .mm-sfx-tab-off > span { flex: 1 1 9rem; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .mm-ws .mm-sfx-tab .mm-ws-range { transition: none; } }
 /* folding groups (also the zones panel's) */
 .mm-ws :is(.mm-ws-group, .mm-z-fold) > summary { display: flex; align-items: center; gap: 0.45rem; list-style: none; }
 .mm-ws :is(.mm-ws-group, .mm-z-fold) > summary::-webkit-details-marker { display: none; }
@@ -1187,6 +1196,11 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 .mm-sfxt .mm-sfxt-slide { display: flex; align-items: center; gap: 0.7rem; width: 100%; }
 .mm-sfxt .mm-sfxt-slide input[type="range"] { flex: 1; min-width: 0; margin: 0; accent-color: var(--mm-sfxt-accent); }
 .mm-sfxt .mm-sfxt-slide output { flex: none; min-width: 5.2rem; text-align: right; font-weight: 600; white-space: nowrap; }
+/* MAPSWITCH: a size row's own switch before its slider; a group switched off keeps its slider's place, dimmed */
+.mm-sfxt .mm-sfxt-on { flex: none; display: inline-flex; align-items: center; gap: 0.35rem; margin: 0 0.8rem 0 0; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.mm-sfxt .mm-sfxt-on input { margin: 0; accent-color: var(--mm-sfxt-accent); }
+.mm-sfxt .mm-sfxt-row > .form-fields:has(> .mm-sfxt-on) { flex: 1 1 auto; }
+.mm-sfxt .mm-sfxt-row.is-off .mm-sfxt-slide { opacity: 0.45; }
 .mm-sfxt .mm-sfxt-ro { flex: none; display: inline-block; padding: 0.15rem 0.6rem; border-radius: 6px; background: var(--mm-sfxt-raise);
   border: 1px solid var(--mm-sfxt-edge); font-weight: 600; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .mm-sfxt .is-off [data-group="letters"] .mm-sfxt-row:not([data-key="sfxLetters"]), .mm-sfxt .is-off [data-group="size"] { opacity: 0.5; }

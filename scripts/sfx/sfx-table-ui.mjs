@@ -10,7 +10,7 @@
    Opened from the module's settings (menu "sfxTable") and api.sfx.open(). Same visual family as the engine's window (its tokens). */
 import { MODULE_ID } from "../config.mjs";
 import * as PF from "./sfx-prefs.mjs";
-import { SIZE_GROUPS, SIZE_SETTING } from "./sfx-size.mjs";
+import { SIZE_GROUPS, SIZE_SETTING, ON_SETTING } from "./sfx-size.mjs";
 
 const { ApplicationV2 } = foundry.applications.api;
 const T = (k) => game.i18n.localize(`MOINENMAPS.Sfx.${k}`);
@@ -19,11 +19,13 @@ const get = (k) => { try { return PF.clean(k, game.settings.get(MODULE_ID, k)); 
 const isGM = () => !!game.user?.isGM;
 const GROUPS = [["letters", ["sfxLetters", "sfxWordsWorld", "sfxLayer"]], ["size", SIZE_GROUPS.map((g) => SIZE_SETTING[g])]];
 const SIZE_OF = Object.fromEntries(SIZE_GROUPS.map((g) => [SIZE_SETTING[g], g]));
+// (MAPSWITCH: a size row holds its group's switch too - the same pair as the group's tab shows: on / off and the size 1..3)
+const ON_OF = (k) => ON_SETTING[SIZE_OF[k]];
 const choiceLabel = (k, c) => (k === "sfxLetters" ? T(c) : k === "sfxLayer" ? T(`layers.${c}`) : T(`words${c === "en" ? "En" : "Pl"}`));
 const choicesOf = (k) => (k === "sfxWordsWorld" ? PF.WORD_SETS : PF.TABLE[k].choices);
 const F = (k, data) => T(k).replace(/\{(\w+)\}/g, (m, n) => (n in data ? data[n] : m));
 const stepText = (v) => T(`size.step${v}`);
-const valueText = (k, v) => (SIZE_OF[k] ? stepText(v) : choiceLabel(k, v));
+const valueText = (k, v, all = null) => (SIZE_OF[k] ? (all && all[ON_OF(k)] === false ? T("size.step0") : stepText(v)) : choiceLabel(k, v));
 
 let deps = { table: () => null, guiLang: () => "en", perf: () => "high", reduced: () => false, engineMenu: async () => false };
 /** sfx.mjs hands in what the window shows of this seat (no import back into the runtime) */
@@ -46,14 +48,15 @@ class TableWindow extends ApplicationV2 {
     const id = (k) => `mm-sfxt-${k}`;
     const row = (k) => {
       let input;
-      if ( !gm ) input = `<output class="mm-sfxt-ro" id="${id(k)}">${esc(valueText(k, v[k]))}</output>`;
-      else if ( SIZE_OF[k] ) input = `<span class="mm-sfxt-slide"><input type="range" id="${id(k)}" name="${k}" min="0" max="3" step="1" value="${v[k]}" data-dtype="Number">`
+      if ( !gm ) input = `<output class="mm-sfxt-ro" id="${id(k)}">${esc(valueText(k, v[k], v))}</output>`;
+      else if ( SIZE_OF[k] ) input = `<label class="mm-sfxt-on" data-tooltip="${esc(T(`on.${SIZE_OF[k]}Hint`))}"><input type="checkbox" name="${ON_OF(k)}"${v[ON_OF(k)] ? " checked" : ""}> <span>${esc(T("table.on"))}</span></label>`
+        + `<span class="mm-sfxt-slide"><input type="range" id="${id(k)}" name="${k}" min="1" max="3" step="1" value="${v[k]}" data-dtype="Number">`
         + `<output for="${id(k)}">${esc(stepText(v[k]))}</output></span>`;
       else { const s = f.createSelectInput({ name: k, value: v[k], options: choicesOf(k).map((c) => ({ value: c, label: choiceLabel(k, c) })) }); s.id = id(k); input = s.outerHTML; }
       const hint = SIZE_OF[k] ? "" : `<p class="hint">${esc(T(`table.hint.${k}`))}</p>`;
       // (a GM's row: the table's value, shown only while the form holds another one - refreshDirty)
       const was = gm ? `<p class="mm-sfxt-was" hidden></p>` : "";
-      return `<div class="form-group mm-sfxt-row" data-key="${k}"><label for="${id(k)}">${esc(T(`table.short.${k}`))}</label><div class="form-fields">${input}</div>${was}${hint}</div>`;
+      return `<div class="form-group mm-sfxt-row${SIZE_OF[k] && !v[ON_OF(k)] ? " is-off" : ""}" data-key="${k}"><label for="${id(k)}">${esc(T(`table.short.${k}`))}</label><div class="form-fields">${input}</div>${was}${hint}</div>`;
     };
     const perf = deps.perf() ?? "high", red = !!deps.reduced();
     const seatLine = (on, name, text) => `<li class="${on ? "is-on" : ""}"><i class="fa-solid ${on ? "fa-circle-check" : "fa-circle"}" aria-hidden="true"></i><span><b>${esc(name)}</b> ${esc(text)}</span></li>`;
@@ -88,7 +91,11 @@ class TableWindow extends ApplicationV2 {
       if ( t?.type === "range" ) { const o = t.parentElement?.querySelector("output"); if ( o ) o.textContent = stepText(Number(t.value)); }
       this.refreshDirty();
     });
-    el.addEventListener("change", (e) => { this.refreshDirty(); if ( e.target?.name === "sfxLetters" ) el.querySelector(".mm-sfxt-body")?.classList.toggle("is-off", e.target.value === "off"); });
+    el.addEventListener("change", (e) => {
+      this.refreshDirty();
+      if ( e.target?.name === "sfxLetters" ) el.querySelector(".mm-sfxt-body")?.classList.toggle("is-off", e.target.value === "off");
+      if ( e.target?.type === "checkbox" ) e.target.closest(".mm-sfxt-row")?.classList.toggle("is-off", !e.target.checked);
+    });
   }
   _onClose() { if ( win === this ) win = null; }
   /** MAPWIN: what the form holds against what the table holds: the status line, the changed rows (with the table's value), the buttons.
@@ -98,9 +105,9 @@ class TableWindow extends ApplicationV2 {
     const table = this.current(), edited = this.values(), keys = PF.changedKeys(edited, table);
     this.dirty = keys.length > 0;
     for ( const row of el.querySelectorAll(".mm-sfxt-row") ) {
-      const k = row.dataset.key, on = keys.includes(k), was = row.querySelector(".mm-sfxt-was");
+      const k = row.dataset.key, on = keys.includes(k) || (!!SIZE_OF[k] && keys.includes(ON_OF(k))), was = row.querySelector(".mm-sfxt-was");
       row.classList.toggle("is-changed", on);
-      if ( was ) { was.hidden = !on; was.textContent = on ? F("table.was", { value: valueText(k, table[k]) }) : ""; }
+      if ( was ) { was.hidden = !on; was.textContent = on ? F("table.was", { value: valueText(k, table[k], table) }) : ""; }
     }
     const st = el.querySelector(".mm-sfxt-state");
     if ( st ) {

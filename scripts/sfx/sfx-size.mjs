@@ -16,10 +16,17 @@
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-/** the groups, in the order of the settings window */
-export const SIZE_GROUPS = ["destruction", "fire", "weather"];
+/** the groups, in the order of the settings window (MAPSWITCH: "tokens" = what the map letters about tokens - a carried token
+    ploughing through the others: its bite, grind and stop; it was part of destruction) */
+export const SIZE_GROUPS = ["destruction", "fire", "weather", "tokens"];
 /** the world setting of each group (scope world, the GM's: every seat letters the same) */
-export const SIZE_SETTING = { destruction: "sfxSizeDestruction", fire: "sfxSizeFire", weather: "sfxSizeWeather" };
+export const SIZE_SETTING = { destruction: "sfxSizeDestruction", fire: "sfxSizeFire", weather: "sfxSizeWeather", tokens: "sfxSizeTokens" };
+/** MAPSWITCH (owner, 2026-11-16: a lettering switch on / off and a size slider in the Destruction, Weather and Tokens tabs): the
+    on / off switch of each group, a world setting of the GM's like its size. A group switched off letters nothing, exactly as its
+    size 0 does; the size it had is kept for when it is switched on again. */
+export const ON_SETTING = { destruction: "sfxOnDestruction", fire: "sfxOnFire", weather: "sfxOnWeather", tokens: "sfxOnTokens" };
+/** the tab (workspace section) each group's switch and slider stand in: fire is painted in the Destruction tab */
+export const GROUP_TAB = { destruction: "destruction", fire: "destruction", weather: "weather", tokens: "tokens" };
 /** today's size */
 export const SIZE_DEFAULT = 2;
 /** the size factor of each step (0: none). 1 = 0.7: clearly quieter (half the area) and still over the engine's legibility floor for
@@ -29,6 +36,24 @@ export const STEP_K = [0, 0.7, 1, 1.4];
 
 /** a setting's value -> its step 0..3 (anything unreadable: today's size) */
 export const stepOf = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && v !== null && v !== "" ? clamp(n, 0, 3) : SIZE_DEFAULT; };
+
+/** MAPSWITCH: the step a group letters at: 0 while it is switched off (or its stored size is 0, the older way to say "none"),
+    else its size step. `on` anything but false = on (a world that never stored the switch). */
+export const stepWith = (on, v) => (on === false ? 0 : stepOf(v));
+/** what a tab's controls show for a stored pair: the switch (off also for a stored size 0) and the slider 1..3 (a stored 0 shows
+    today's size: the size it gets when it is switched on) */
+export const shownPair = (on, v) => { const s = stepOf(v); return { on: on !== false && s > 0, size: s > 0 ? s : SIZE_DEFAULT }; };
+/** the writes that make a group's stored pair ({ on, size } as the world holds them) show `want` ({ on?, size? } of the tab's
+    controls): only what differs. A stored size 0 (the older "none") becomes the shown size with the first write, so the switch alone
+    says on or off from then on. -> { on?: boolean, size?: 1..3 } */
+export function pairWrites(stored, want) {
+  const cur = shownPair(stored?.on, stored?.size), out = {};
+  const on = want?.on === undefined ? cur.on : !!want.on;
+  const size = want?.size === undefined ? cur.size : Math.min(3, Math.max(1, stepOf(want.size)));
+  if ( on !== (stored?.on !== false) ) out.on = on;
+  if ( size !== stepOf(stored?.size) ) out.size = size;
+  return out;
+}
 
 /** the voices of the fire layer's burning (sfx-core VOICES): the fire group; every other voice letters destruction */
 export const FIRE_VOICES = new Set(["fire", "flare", "out", "douse"]);

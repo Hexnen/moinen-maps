@@ -51,6 +51,7 @@ import * as PLAN from "./sfx-plan.mjs";
 import * as BURN from "./sfx-burn.mjs";
 import * as DIR from "./sfx-direct.mjs";
 import * as BL from "./sfx-blast.mjs";
+import * as RX from "./sfx-react.mjs";
 import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
@@ -144,7 +145,8 @@ export const mode = () => PF.clean("sfxLetters", get("sfxLetters", "all"));
 // is the shared one on every seat, never this seat's interface language - sfx-prefs wordsOf; fixWords names it)
 const lang = () => PF.wordsOf(get("sfxWordsWorld", "auto"));
 // SFXSIZE: the size step of a group's lettering (sfx-size.mjs; world settings, the GM's for the table: every seat letters the same)
-export const stepFor = (g) => SZ.stepOf(get(SZ.SIZE_SETTING[g], SZ.SIZE_DEFAULT));
+// (MAPSWITCH: 0 also while the group's switch is off - sfx-size stepWith; the switch is a world setting like the size)
+export const stepFor = (g) => SZ.stepWith(get(SZ.ON_SETTING[g], true), get(SZ.SIZE_SETTING[g], SZ.SIZE_DEFAULT));
 const grpOf = T.grpOf;
 
 function registerSettings() {
@@ -158,6 +160,9 @@ function registerSettings() {
   // SFXSIZE: the lettering's size per group, chosen by the GM for the table (0 none, 1 smaller, 2 today's size, 3 bigger); live
   for ( const g of SZ.SIZE_GROUPS ) game.settings.register(MODULE_ID, SZ.SIZE_SETTING[g], { name: T(`size.${g}`), hint: T(`size.${g}Hint`), scope: "world", config: false,
     restricted: true, type: Number, default: SZ.SIZE_DEFAULT, range: { min: 0, max: 3, step: 1 }, onChange: live(() => sizeChanged(g)) });
+  // MAPSWITCH: the on / off switch per group, shown with the size in the group's own tab (sfx-tabs.mjs) and in the table window; live
+  for ( const g of SZ.SIZE_GROUPS ) game.settings.register(MODULE_ID, SZ.ON_SETTING[g], { name: T(`on.${g}`), hint: T(`on.${g}Hint`), scope: "world", config: false,
+    restricted: true, type: Boolean, default: true, onChange: live(() => sizeChanged(g)) });
   // (the lettering engine's world layers, LETR contract v3; the next word takes the new layer)
   game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "world", config: false, restricted: true, type: String, default: "overlay",
     choices: Object.fromEntries(LAYER_IDS.map((k) => [k, T(`layers.${k}`)])), onChange: live() });
@@ -291,6 +296,8 @@ function onEntry(d, g, opts, start) {
   if ( detonating && Math.abs(start - detonating.start) < 60 && performance.now() < detonating.until ) { stats.detOwned = (stats.detOwned ?? 0) + 1; return; }
   // (a Superhero plough: its own story - bite, grind, stop - instead of the stroke's word riding the front; EFFECTS2)
   if ( g.objId && onPlough(d, g, start) ) return;
+  // (MAPSWITCH: the hook also stays on for the tokens group's ploughs; destruction itself switched off letters nothing here)
+  if ( stepFor("destruction") === 0 ) return;
   // (a damage area of a preset firing told as a page: silent - its ground tells the page what the debris lands on)
   // (MAPSFXSEAT: its ground is read from the map when the page is planned, the same on every seat - not from the first area to enter here)
   if ( g.objId && owned.d.has(g.objId) ) return;
@@ -389,7 +396,7 @@ function onPlough(d, g, start) {
   const key = `${g.objId}|${Math.round(start / 200)}`;
   if ( ploughs.has(key) ) return true;
   ploughs.add(key); if ( ploughs.size > 200 ) ploughs.delete(ploughs.values().next().value);
-  if ( mode() === "off" ) return true;
+  if ( mode() === "off" || stepFor("tokens") === 0 ) return true;
   try {
     const k = (1 / (d.look?.speed || 1)) * (causeLook(g.info.cause)?.slow ?? 1);
     const tl = buildTimeline(pl.tk, { ...pl.geo, k }), hits = hitsOf(pl.tk);
@@ -399,7 +406,8 @@ function onPlough(d, g, start) {
     const sh = sharedNow() + (start - performance.now());
     const words = EV.ploughPage({ hits, front, D: tl?.D ?? 0, k, start: sh, delay: 40 * k, grid: grid(), seed: `plough|${g.objId}` })
       .map((w) => ({ ...w, role: w.role === "stop" ? "main" : w.role === "bite" ? "pre" : "sec", story: w.role }));
-    if ( words.length ) storyPage(`plough|${g.objId}|${Math.round(sh)}`, sh, words, C.matOf(g.info.mat));
+    // (MAPSWITCH: a plough letters TOKENS shoved along - the Tokens tab's switch and size, not destruction's)
+    if ( words.length ) storyPage(`plough|${g.objId}|${Math.round(sh)}`, sh, words, C.matOf(g.info.mat), "tokens");
     stats.ploughs = (stats.ploughs ?? 0) + 1;
   } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a plough's words failed`, err); }
   return true;
@@ -1538,7 +1546,7 @@ function play(w) {
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
     // (EFFECTS2: a cave-in's word sinks as it holds, so what it covers reaches half its height lower; REQUESTS EFFECTS2-4)
     const b0 = call?.box ?? w.box, bx = b0 && w.voice === "cavein" ? { ...b0, y1: b0.y1 + (b0.y1 - b0.y0) * 0.5 } : b0;
-    const ts0 = w.ts ?? toShared(w.t), rec = { box: bx, h, obj: w.obj, voice: w.voice, grp: w.group ?? null, life: [ts0, ts0 + lifeMs(w)] };
+    const ts0 = w.ts ?? toShared(w.t), rec = { box: bx, h, obj: w.obj, voice: w.voice, grp: w.group ?? null, life: [ts0, ts0 + lifeMs(w)], sg: grpOf(w) };
     alive.add(rec);
     keepStorm(w, h);
     Promise.resolve(h.finished).finally(() => alive.delete(rec));
@@ -1691,7 +1699,8 @@ function teardown(full = true) {
 function refresh() {
   // (SFXSIZE: destruction at size 0 takes its hooks off the display - nothing is computed per entry)
   const noDestr = mode() === "off" || stepFor("destruction") === 0;
-  sfxBus.entry = noDestr ? null : onEntry;
+  // (MAPSWITCH: a damage area entering may be a plough, lettered by the tokens group: the hook is off only when both letter nothing)
+  sfxBus.entry = noDestr && (mode() === "off" || stepFor("tokens") === 0) ? null : onEntry;
   sfxBus.fireShown = mode() === "off" ? null : onFireShown;
   sfxBus.detonate = noDestr ? null : onDetonate;
   if ( mode() === "off" ) {
@@ -1716,6 +1725,8 @@ function sizeChanged(g) {
     for ( const [k, s] of sched ) if ( s.voice && SZ.groupOfVoice(s.voice) === g ) { clearTimeout(s.id); sched.delete(k); }
     pending = pending.filter((e) => SZ.groupOfVoice(e.voice) !== g);
     if ( g === "fire" ) gated.clear();
+    // (MAPSWITCH: switched off = no word of the group on any screen: the ones standing now leave, by their own exit)
+    for ( const a of alive ) if ( a.sg === g ) { try { a.h.stop(); } catch {} }
   }
   firingsSeen = null;
   refresh();
@@ -1744,6 +1755,9 @@ export const sfxApi = {
   blasts: ({ clear = false } = {}) => { const l = blastLog.map((q) => ({ ...q })); if ( clear ) blastLog = []; return l; },
   /** GMALLMAPS: the table's lettering options as this seat applies them; `open()` shows their window */
   prefs: () => tableNow(), open: () => UI.open(),
+  /** MAPSWITCH: a group's switch and size as the tabs show them ({ on, size 1..3 }); `set(group, { on?, size? })` writes them for the
+      table (a GM only); `linked()`: do the token reactions' words of another module follow the tokens group here? */
+  group: (g) => groupShown(g), set: (g, want) => setGroup(g, want), linked: () => reactLinked(),
   core: C
 };
 
@@ -1759,7 +1773,7 @@ function guardWrite(doc, change) {
 function onDeleted(doc) {
   const key = String(doc?.key ?? "");
   if ( !key.startsWith(`${MODULE_ID}.`) || !PF.TABLE_KEYS.includes(key.slice(MODULE_ID.length + 1)) ) return;
-  for ( const g of SZ.SIZE_GROUPS ) if ( key.endsWith(`.${SZ.SIZE_SETTING[g]}`) ) { sizeChanged(g); UI.follow(); return; }
+  for ( const g of SZ.SIZE_GROUPS ) if ( key.endsWith(`.${SZ.SIZE_SETTING[g]}`) || key.endsWith(`.${SZ.ON_SETTING[g]}`) ) { sizeChanged(g); UI.follow(); return; }
   refresh(); UI.follow(); fixWords();
 }
 /* MAPWIN: the table's word set is NAMED ("en" / "pl") by the active GM's seat, from its interface language, whenever the world holds
@@ -1802,6 +1816,53 @@ async function engineMenu() {
   try { const e = L ?? await letters(); if ( typeof e?.openSettings === "function" ) { await e.openSettings(); return true; } } catch {}
   return false;
 }
+/* MAPSWITCH: a group's switch and size as the world holds them, and the one write path of the tabs' controls (sfx-tabs.mjs) and the
+   macro api: only a GM, only what differs (sfx-size pairWrites). */
+const pairOf = (g) => ({ on: get(SZ.ON_SETTING[g], true), size: get(SZ.SIZE_SETTING[g], SZ.SIZE_DEFAULT) });
+export const groupShown = (g) => SZ.shownPair(pairOf(g).on, pairOf(g).size);
+export async function setGroup(g, want) {
+  if ( !game.user?.isGM || !SZ.SIZE_GROUPS.includes(g) ) return false;
+  const w = SZ.pairWrites(pairOf(g), want ?? {});
+  // (the size first: a group switched on shows at its new size from its first word)
+  if ( w.size !== undefined ) await game.settings.set(MODULE_ID, SZ.SIZE_SETTING[g], w.size);
+  if ( w.on !== undefined ) await game.settings.set(MODULE_ID, SZ.ON_SETTING[g], w.on);
+  return true;
+}
+/* MAPSWITCH: the words of token reactions (sfx-react.mjs: another module's two table values) follow the tokens group and the group
+   follows them. Only the GM seat whose own write changed one of the two pairs makes the other equal (the hooks name the writer), and
+   nothing is read back while it writes (`bridging`), so one change is one pass. */
+const reactHas = () => { try { return !!game.modules.get(RX.REACT.module)?.active && game.settings.settings.has(`${RX.REACT.module}.${RX.REACT.on}`) && game.settings.settings.has(`${RX.REACT.module}.${RX.REACT.size}`); } catch { return false; } };
+const reactNow = () => ({ on: game.settings.get(RX.REACT.module, RX.REACT.on), size: game.settings.get(RX.REACT.module, RX.REACT.size) });
+export const reactLinked = () => reactHas();
+let bridging = null, bridgeNext = null;      // the direction being written ("out" | "in"); a change of the other pair meanwhile
+async function bridge(dir) {
+  if ( !game.user?.isGM || !reactHas() ) return false;
+  if ( bridging ) { bridgeNext = dir; return false; }
+  bridging = dir;
+  try {
+    if ( dir === "out" ) {
+      const w = RX.toReact(pairOf("tokens"), reactNow());
+      if ( w.size !== undefined ) await game.settings.set(RX.REACT.module, RX.REACT.size, w.size);
+      if ( w.on !== undefined ) await game.settings.set(RX.REACT.module, RX.REACT.on, w.on);
+    } else {
+      const w = RX.fromReact(reactNow(), pairOf("tokens"));
+      if ( w.size !== undefined ) await game.settings.set(MODULE_ID, SZ.SIZE_SETTING.tokens, w.size);
+      if ( w.on !== undefined ) await game.settings.set(MODULE_ID, SZ.ON_SETTING.tokens, w.on);
+    }
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: token reactions' lettering did not follow`, err); }
+  finally { bridging = null; }
+  // (the pair this pass read changed again while it wrote - the GM's second control, a quick second click: one more pass)
+  if ( bridgeNext ) { const d = bridgeNext; bridgeNext = null; return bridge(d); }
+  return true;
+}
+/** a world setting written (created, updated, deleted): the writer's own GM seat makes the other pair equal. The pair a pass is
+    writing reports its own writes here too: not a change to follow (following it mid-pass would take a half-written pair back). */
+function onPairWritten(doc, userId) {
+  if ( userId !== game.user?.id ) return;
+  const key = String(doc?.key ?? "");
+  if ( key === `${MODULE_ID}.${SZ.ON_SETTING.tokens}` || key === `${MODULE_ID}.${SZ.SIZE_SETTING.tokens}` ) { if ( bridging !== "in" ) bridge("out"); }
+  else if ( key === `${RX.REACT.module}.${RX.REACT.on}` || key === `${RX.REACT.module}.${RX.REACT.size}` ) { if ( bridging !== "out" ) bridge("in"); }
+}
 /** the table's lettering as this seat applies it (sfx-prefs tableOf over the world values) */
 export const tableNow = () => PF.tableOf((k) => get(k, PF.TABLE[k]?.def));
 
@@ -1815,6 +1876,9 @@ export function registerSfx() {
     noticeOnce();
     // the world's word set is named by the active GM's seat from its language (then, and until then, every seat letters the same words)
     await fixWords();
+    // MAPSWITCH: the token reactions' words were the table's choice before the Tokens tab had a switch: the map's pair takes theirs once
+    // they differ at a start (the active GM's seat), then each follows the other
+    if ( game.user?.isActiveGM ) await bridge("in");
   });
   // (canvasTearDown cleared the old scene; at canvasReady the new scene's fire may already have shown its flames: kept)
   Hooks.on("canvasReady", () => { teardown(false); refresh(); });
@@ -1822,6 +1886,9 @@ export function registerSfx() {
   Hooks.on("preCreateSetting", guardWrite);
   Hooks.on("preUpdateSetting", guardWrite);
   Hooks.on("deleteSetting", onDeleted);
+  Hooks.on("createSetting", (doc, options, userId) => onPairWritten(doc, userId));
+  Hooks.on("updateSetting", (doc, change, options, userId) => onPairWritten(doc, userId));
+  Hooks.on("deleteSetting", (doc, options, userId) => onPairWritten(doc, userId));
   UI.wire({ table: tableNow, guiLang: () => game.i18n?.lang, perf: () => perfMode(), reduced: () => reducedMotion(), engineMenu: engineMenu });
   Hooks.on("moinenMapsPresets", (kind, data) => { if ( kind === "firing" ) onFiring(data?.rec); });
   Hooks.on("moinenMapsWeather", (kind) => onWeather(kind));                     // (MAPTHUNDER: the rain's hiss on a fire)
