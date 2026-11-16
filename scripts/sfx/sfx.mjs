@@ -50,6 +50,7 @@ import * as T from "./sfx-table.mjs";
 import * as PLAN from "./sfx-plan.mjs";
 import * as BURN from "./sfx-burn.mjs";
 import * as DIR from "./sfx-direct.mjs";
+import * as BL from "./sfx-blast.mjs";
 import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
@@ -620,6 +621,8 @@ function planPage(rec, tries = 0) {
   // (MAPSFXSEAT: the ground under the impact from the map's own pixels, the same on every seat, known before any word is written)
   const p = { rec, pg, ground: groundAt(rec) };
   pages.set(rec.id, p);
+  // (MAPBLAST: the firing's impact frame, known - for the volley rule - as soon as its page is, on every seat)
+  try { p.bl = BL.blastOfPage(pg, rec, grid()); noteBlast(p.bl); } catch { p.bl = null; }
   // (MAPTHUNDER: a firing's main word takes the stage from the storm)
   for ( const w of pg.words ?? [] ) if ( w.role === "main" ) noteFight(`pg|${rec.id}|${w.key}`, Number(w.t));
   for ( const id of pg.owned.d ) owned.d.add(id);
@@ -642,6 +645,21 @@ function planPage(rec, tries = 0) {
   // the first word starts in (live 2026-11-15 one layout took 114 ms on the player's seat at that frame). A camera moved since lays it
   // out again at the word, as before.)
   if ( Number.isFinite(first) ) later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));
+  // (MAPBLAST: the firing's impact frame is asked AHEAD_MS before its main word - sfx-blast AHEAD_MS says why)
+  const mw = p.bl ? pg.words.find((w) => w.role === "main") : null;
+  if ( mw && stepFor(SZ.groupOfPageWord(mw)) !== 0 && performance.now() < toPerf(mw.t) + 200 ) later(`pg|${rec.id}|blast`, toPerf(mw.t) - BL.AHEAD_MS - performance.now(), () => pageBlast(p, mw));
+}
+/** MAPBLAST: a firing's impact frame, asked ahead: as soon as the table's main word is planned (its text and options give the blow's instant) */
+function pageBlast(p, w) {
+  if ( mode() === "off" || !canvas?.ready || !L || !p.bl || !pages.has(p.rec.id) ) return;
+  plans.ask(p, p.pg.words.indexOf(w), toPerf(w.t) - 200, () => {
+    try {
+      const q = (p.table ?? p.job?.pl.table)?.get(w.key);
+      if ( !q || q.dropped || q.blast || mode() === "off" || stepFor(SZ.groupOfPageWord(w, p.grp)) === 0 ) return;
+      const bl = blastLead(q, p.bl);
+      if ( bl ) armBlast(q, bl);
+    } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a blast's impact frame was not asked`, err); }
+  }, `pgb|${p.rec.id}`);
 }
 /** how long before a page's first word its table and layout are made (ms; an idle moment within it) */
 const PREP_LEAD = 500;
@@ -704,6 +722,8 @@ function pageWordNow(p, w, here) {
   if ( stepFor(grp) === 0 ) return;
   const q = tb?.get(w.key);
   if ( !q ) return;
+  // (MAPBLAST: lead or quiet is the table's - decided before this seat's own rules, so the word is the same word on every seat)
+  const bl = w.role === "main" ? blastLead(q, p.bl) : null;
   const still = here.still;
   if ( still === false || typeof still === "string" ) { seatSkip(q, typeof still === "string" ? still : "gone"); return; }   // (MAPTHUNDER: "yield")
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
@@ -717,6 +737,8 @@ function pageWordNow(p, w, here) {
   // not hide it; question MAPSEATS3-4)
   if ( !q.heard && !hereVisible(q.sx ?? q.x, q.sy ?? q.y) ) { playScreen(q); return; }
   if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(q); return; }
+  // (asked ahead by pageBlast; here only for a seat that got the firing late)
+  if ( bl && !q.blast ) armBlast(q, bl);
   play(q);
   // (MAPPLAN: the walk over this seat's panels - 5-9 ms - not inside the frame the word starts in: when the walk kept (UI_MS) would be
   // too old by the word's instant, it is made in an idle moment before it)
@@ -1192,6 +1214,12 @@ function flushMoment(due) {
     // this seat's filtered share, so every seat applies its rule to the same picture)
     const grp = { words: placed.filter((w) => !w.stream && Number.isFinite(w.x) && Number.isFinite(w.y)) };
     for ( const w of grp.words ) w.group = grp;
+    // (MAPBLAST: a blast that is no preset firing - a painted blast area, a burst of the fire layer, a Detonate - has its impact frame
+    // too: from the moment's main event, shared; the word of a lead leaves its flash to it on every seat, also one that does not draw it)
+    const mw = placed.find((w) => w.role === "main" && !w.stream);
+    const bl = mw ? blastLead(mw, BL.blastOfMoment({ id: mw.seed, voice: g.main.voice, ...(g.members.length === 1 ? { x: g.main.x, y: g.main.y } : { x: g.x, y: g.y }),
+      r: g.members.length === 1 ? g.main.r : Math.max(g.main.r, g.span * 0.75), t: mw.ts ?? toShared(mw.t), way: mw.way ?? null }, grid())) : null;
+    if ( bl && mine.includes(mw) ) armBlast(mw, bl);
     for ( const w of mine ) { play(w); lastPlaced.push({ text: w.text ?? w.kind, role: w.role, voice: w.voice, box: w.box, ...(w.fitK !== undefined ? { fitK: w.fitK } : {}), pen: w.pen && { ui: +w.pen.pui.toFixed(3), tok: +w.pen.tok.toFixed(3), pin: +(w.pen.pin ?? 0).toFixed(3), wrd: +w.pen.wrd.toFixed(3), off: +w.pen.off.toFixed(3), sub: +w.pen.sub.toFixed(3) } }); }
     trimPlaced();
   }
@@ -1338,6 +1366,8 @@ function play(w) {
     stats.words++;
     if ( call?.knock ) call.knock.h = h;
     if ( call ) logCall(w, call);
+    // (MAPBLAST: the blast's impact frame, called ahead, keeps this word readable on its drawings from the word's first frame on)
+    if ( w.blast ) { reBlast(w); w.blast.keep?.push(h); try { const c = L.contactAt(h); if ( Number.isFinite(c) && Number.isFinite(w.blast.blowAt) ) w.blast.ent.drift = Math.round(c - w.blast.blowAt); } catch { /* the log only */ } }
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
     // (EFFECTS2: a cave-in's word sinks as it holds, so what it covers reaches half its height lower; REQUESTS EFFECTS2-4)
@@ -1352,6 +1382,81 @@ function play(w) {
   };
   const wait = w.t - performance.now();
   if ( wait > 4 ) later(`w|${w.seed}|${w.role}|${w.t}`, wait, go, { obj: w.obj, voice: w.voice }); else go();
+}
+
+/* ---------------------------------------------------------------- MAPBLAST: a blast's impact frame */
+
+/* A map blast gets the lettering engine's impact frame (L.impact, kind "blast" / "landing"; sfx-blast.mjs decides which, how strong and
+   the volley rule from shared data). Here: the table's switches, the call and this seat's own needs.
+     - the table: the engine's impact frames off (its world setting) -> none and the word keeps its own flash, as before; the map's
+       lettering off or destruction at size 0 -> no word and no frame (nothing reaches this code);
+     - lead or quiet (blastLead) is decided from the blasts every seat knows; a lead's main word plays with `flash: false` on EVERY seat;
+     - the call (armBlast): a firing's frame is asked AHEAD_MS before its main word (pageBlast: every word round the blow then gives
+       its flash to the frame on every seat alike, and the engine paints the drawings in idle time, not in the word's first frame); a
+       blast that is no firing is asked with its word. The blow is at the word's contact on the shared clock (the engine's own measure
+       of the table's word); the word is kept readable (an array the word's handle joins when it starts);
+     - this seat: only when it has the blast's centre in its map view and may see the place; its opt-outs lower the frame (specOf);
+       a view that moved between the asking and the word is asked again (reBlast). */
+let blasts = [];               // the blasts known lately ({ id, t (shared ms), magnitude, soft }): the volley rule reads them
+let blastLog = [];             // this seat's log of the impact frames it was asked for (api.sfx.blasts())
+const impacts = new Set();     // the impact frames up or scheduled here
+function noteBlast(b) {
+  if ( !b || blasts.some((q) => q.id === b.id) ) return;
+  const t = sharedNow();
+  blasts = blasts.filter((q) => q.t > t - BL.KEEP_MS);
+  if ( b.t > t - BL.KEEP_MS ) blasts.push({ id: b.id, t: b.t, magnitude: b.magnitude, soft: b.soft });
+}
+/** The table's part: does this blast get a frame, and is it the lead of its volley? -> { b, lead } | null. Marks a lead's word. */
+function blastLead(w, b) {
+  try {
+    if ( !b || !L?.impact?.play || L.impact.mode?.() === "off" ) return null;
+    noteBlast(b);
+    const lead = BL.volley(blasts).get(b.id) === "lead";
+    if ( lead ) w.noFlash = true;
+    return { b, lead };
+  } catch { return null; }
+}
+const seatOpt = (k) => { try { return game.settings.get(MODULE_ID, k); } catch { return undefined; } };
+/** this seat's own needs for an impact frame (they only lower it): the cinematic opt-outs "no flash" / "no shake", reduced motion */
+const seatNeeds = () => ({ noFlash: !!seatOpt("cinNoFlash"), noShake: !!seatOpt("cinNoShake"), reduced: reducedMotion() || seatOpt("cinReduced") === "on" });
+/** this seat's camera: the centre of its window on the scene, its zoom, its window's width in scene px */
+const camNow = () => { try { const v = view(); return { x: (v.x0 + v.x1) / 2, y: (v.y0 + v.y1) / 2, z: canvas.stage?.scale?.x || 1, w: v.x1 - v.x0 }; } catch { return null; } };
+/** This seat's part: the impact frame of blast `b` with its main word `w` (a table word about to be played here). */
+function armBlast(w, { b, lead }, re = false) {
+  const vw = mapView(), at = camNow();
+  w.blast = { b, lead, at, keep: null, h: null, blowAt: null, ent: null };
+  const ent = w.blast.ent = { ...(re ? { re: true } : {}), seat: game.user?.id ?? "", id: b.id, kind: b.kind, magnitude: BL.drawnMag(b, lead), lead, ts: Math.round(b.t), text: w.text, rule: "ok" };
+  try {
+    if ( !BL.inView(b, vw) ) ent.rule = "view";
+    else if ( !hereVisible(b.x, b.y) ) ent.rule = "fog";
+    else {
+      let blowAt = null;
+      try { blowAt = L.contactAt(L.measure(w.text, { ...optsOf(w), reduced: false })?.plan, w.t); } catch { blowAt = null; }
+      if ( !Number.isFinite(blowAt) ) blowAt = w.t + BL.CONTACT_MS;
+      const keep = [], t0 = performance.now();
+      const h = L.impact.play(BL.specOf(b, { lead, sceneId: canvas.scene?.id ?? "", blowAt, keep, seat: seatNeeds() }));
+      stats.blastMs = (stats.blastMs ?? 0) + performance.now() - t0; stats.blasts = (stats.blasts ?? 0) + 1;
+      Object.assign(w.blast, { keep, h, blowAt });
+      // (guard: the flash drawings the engine kept / thinned on this seat - its own photosensitivity ration)
+      Object.assign(ent, { blow: Math.round(toShared(blowAt)), mode: h?.mode ?? null, step: h?.plan?.step ?? null, ms: Math.round(h?.plan?.ms ?? 0), guard: h?.plan?.guard ? [h.plan.guard.kept, h.plan.guard.dropped] : null });
+      if ( h?.alive ) impacts.add(h);
+      // (how it ended and the drawings this seat showed with their instants after the frame's start - for the two-seat takes)
+      Promise.resolve(h?.finished).then((why) => { ent.why = why; ent.trace = (h?.trace ?? []).map((x) => `${x.type}@${Math.round(x.at ?? -1)}`); ent.lag = Math.round(Math.max(0, ...(h?.trace ?? []).map((x) => x.lag || 0))); impacts.delete(h); }, () => impacts.delete(h));
+    }
+  } catch ( err ) { ent.rule = "error"; console.warn(`${MODULE_ID} | sfx: a blast's impact frame did not play`, err); }
+  blastLog.push(ent);
+  if ( blastLog.length > 200 ) blastLog = blastLog.slice(-120);
+}
+
+/** The word starts: has this seat's view moved since its frame was asked (a pan, a zoom)? Then the frame is asked again for the view as it
+    is - the same blast, seed and instant (the engine frees the stopped one's time window and flash slots) - or, off this view now, not at all. */
+function reBlast(w) {
+  try {
+    const B = w.blast;
+    if ( !B?.at || !BL.viewMoved(B.at, camNow()) ) return;
+    if ( B.h ) { try { B.h.stop(); } catch {} impacts.delete(B.h); }
+    armBlast(w, { b: B.b, lead: B.lead }, true);
+  } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a blast's impact frame was not asked again`, err); }
 }
 
 /** A gun's rattle: one syllable per round where and when it lands (its walk), one look for the whole burst (the engine's stream). */
@@ -1412,6 +1517,8 @@ function teardown(full = true) {
   burns.clear(); ledger.clear(); pageWaits.clear(); holdMemo.clear();
   fights.clear(); stormUp.clear(); closeMemo = { key: "", rp: null, m: new Map() }; onsetSeen.clear(); steamSeen.clear();
   uiCache = { t: -1e9, rects: [], boxes: [] };
+  for ( const h of impacts ) { try { h.stop(); } catch {} }
+  impacts.clear(); blasts = [];
 }
 function refresh() {
   // (SFXSIZE: destruction at size 0 takes its hooks off the display - nothing is computed per entry)
@@ -1463,6 +1570,10 @@ export const sfxApi = {
       was drawn by); `clear` empties it. The table picture's words (the ledger: key, box, life on the shared clock). */
   log: ({ clear = false } = {}) => { const l = seatLog.slice(); if ( clear ) seatLog = []; return l; },
   table: () => ledger.list.map((q) => ({ ...q })),
+  /** MAPBLAST: this seat's log of the impact frames of map blasts ({ id, kind, magnitude, lead, ts (shared: the word's start), blow
+      (shared: the blow), rule ("ok" | "view" | "fog"), mode, step, why (how it ended), drift (ms: the word's contact against the blow) });
+      `clear` empties it. */
+  blasts: ({ clear = false } = {}) => { const l = blastLog.map((q) => ({ ...q })); if ( clear ) blastLog = []; return l; },
   /** GMALLMAPS: the table's lettering options as this seat applies them; `open()` shows their window */
   prefs: () => tableNow(), open: () => UI.open(),
   core: C

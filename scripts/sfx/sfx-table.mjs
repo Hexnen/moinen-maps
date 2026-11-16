@@ -60,7 +60,10 @@ export function baseOpts(w, d) {
     // (a story's word sized by its rank as a share of the REFERENCE view height at the moment's reference zoom: the rank is the
     // hierarchy, the engine's ceiling share does not cut it again)
     ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, SEAT.REF_VH / z, w.shrink ?? 1), ceilK: 1 } : {}),
-    ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...(d.layer ?? {}) };
+    ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...(d.layer ?? {}),
+    // (MAPBLAST: the main word of a blast that leads its volley leaves its own flash accent to the blast's impact frame - the engine's
+    // `flash: false`, the table's decision, the same on every seat, also where the frame is not shown)
+    ...(w.noFlash ? { flash: false } : {}) };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
   // MAPDIRECT: a word with a WAY grows and leans along it and its own sideways motions go that way (sfx-direct lookOf: an ANGLE, the same
   // on every seat; the word is measured and placed with it); its knock is the seat's (sfx.mjs seatCall). A rider or a drifter keeps its own way.
