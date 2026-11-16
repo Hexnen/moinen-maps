@@ -63,6 +63,27 @@ export const nearFit = (e, r, reach = 1, x = e.cx, y = e.cy) => {
 export const burstR = (e) => Math.min(flashR(e), nearR(e) * 0.6);
 /* how far a star of radius 1 reaches: jitter, a long spike (x 1.45), the stretch along the blow */
 const starReach = (e, o) => (1 + (o.jitter ?? 0.24)) * ((o.long ?? 3) > 0 ? 1.45 : 1) * (e.dir != null ? (o.stretch ?? 1.25) : 1);
+/* ---------- SAKUGASTAR (1.9.28): the flash frames' star belongs to the token ----------
+   The owner on 1.9.27's film: «gwiazda za duża» (the star is too big). 1.9.27 kept the black frame's star (shadow) and the star window
+   (window) at the VIEW's size, counted as part of the flash: a red-and-yellow star over most of the screen round a token of a few percent of
+   it. Now, when the subject is a token, the star is the token's collar: fitted by its whole reach inside nearR (the same surroundings every
+   sticker keeps), two tones (the outer star and its core) so it reads round the figure; the black field stays the screen's flash and the
+   focus lines (both tones) start just past the star's tips and run off the screen, so the frame stays a burst over the whole picture.
+   No spike runs long (long 0): the reach is short, so the star itself can be as big as the surroundings allow. A subject that is no token
+   keeps 1.9.27's star. Same plans, flash classes, guard, timings. */
+export const FLASH_STAR = { spikes: 16, inner: 0.62, jitter: 0.2, stretch: 1.2, long: 0, coreK: 0.74 };
+export const flashStar = (e) => {
+  if ( !Number.isFinite(nearR(e)) ) return null;
+  const reach = starReach(e, FLASH_STAR), r = nearFit(e, Math.max(flashR(e) * 2.1, e.R * 1.6), reach, e.cx, e.cy);
+  return { r, reach, lineIn: r * reach * 1.04 };
+};
+export const WINDOW_STAR = { jitter: 0.25, stretch: 1.3, long: 0 };
+export const windowStar = (e) => {
+  const want = Math.max(flashR(e) * 2.3, unit(e) * 0.3);
+  if ( !Number.isFinite(nearR(e)) ) return { r: want, jitter: 0.25, long: 4, near: false };
+  const reach = starReach(e, WINDOW_STAR), r = nearFit(e, want, reach, e.cx, e.cy);
+  return { r, jitter: WINDOW_STAR.jitter, long: 0, near: true, reach, lineIn: r * reach + unit(e) * 0.016 };
+};
 
 /* ---------- the struck figure ----------
    The token's picture is read once (our own small software canvas: no read-back of the WebGL board) and turned into:
@@ -811,7 +832,7 @@ function lines(ctx, e, seed, o = {}) {
     fillPolys(ctx, G.speedLines(seed, { cx, cy, ang: e.dir, W: e.W, H: e.H, n: Math.round((o.n ?? 40) * 0.8), gap, fat: (o.fat ?? 1) * 1.35 }), col, key, kw);
     if ( sec ) fillPolys(ctx, G.speedLines(seed + 7, { cx, cy, ang: e.dir, W: e.W, H: e.H, n: Math.round((o.n ?? 40) * 0.4), gap: gap * 1.2, fat: (o.fat ?? 1) * 0.9 }), sec, skey, kw * 0.8);
   } else {
-    const rIn = Math.max(e.R * 1.7, u * 0.2) * (o.gap ?? 1);
+    const rIn = o.rIn ?? Math.max(e.R * 1.7, u * 0.2) * (o.gap ?? 1);
     fillPolys(ctx, G.focusLines(seed, { cx, cy, rIn, rOut: D * 1.05, n: o.n ?? 60, fat: (o.fat ?? 1) * 1.25 }), col, key, kw);
     if ( sec ) fillPolys(ctx, G.focusLines(seed + 7, { cx, cy, rIn: rIn * 1.15, rOut: D * 1.05, n: Math.round((o.n ?? 60) * 0.45), fat: (o.fat ?? 1) * 0.75 }), sec, skey, kw * 0.8);
   }
@@ -819,12 +840,12 @@ function lines(ctx, e, seed, o = {}) {
 function burst(ctx, e, seed, o = {}) {
   const u = unit(e), x0 = o.cx ?? e.hx, y0 = o.cy ?? e.hy;
   const r = o.flash ? (o.r ?? burstR(e)) : nearFit(e, o.r ?? burstR(e), starReach(e, o), x0, y0);   // SAKUGATOKEN: on the token's surroundings
-  const p = G.star(seed, { cx: x0, cy: y0, r, spikes: o.spikes ?? 15, inner: o.inner ?? 0.52, jitter: 0.24, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: o.long ?? 3 });
+  const p = G.star(seed, { cx: x0, cy: y0, r, spikes: o.spikes ?? 15, inner: o.inner ?? 0.52, jitter: o.jitter ?? 0.24, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: o.long ?? 3 });
   const lw = o.lw ?? Math.max(1.2, Math.min(u * 0.006, r * 0.06));
   if ( o.key ) shape(ctx, p, null, o.key, lw + Math.min(u * 0.011, r * 0.1));
   shape(ctx, p, o.fill ?? PAPER, o.stroke ?? INK, lw);
   if ( o.core ) {
-    const q = G.star(seed + 3, { cx: o.cx ?? e.hx, cy: o.cy ?? e.hy, r: r * 0.58, spikes: (o.spikes ?? 15) - 3, inner: 0.55, jitter: 0.2, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: 1 });
+    const q = G.star(seed + 3, { cx: o.cx ?? e.hx, cy: o.cy ?? e.hy, r: r * (o.coreK ?? 0.58), spikes: (o.spikes ?? 15) - 3, inner: 0.55, jitter: 0.2, stretch: e.dir != null ? (o.stretch ?? 1.25) : 1, ang: e.dir ?? 0, long: 1 });
     shape(ctx, q, o.core, null, 0);
   }
   return p;
@@ -899,10 +920,19 @@ const PAINT = {
     ctx.fillStyle = INK; ctx.fillRect(0, 0, e.W, e.H);
     const k = figUp(e), u = unit(e);
     const [big, small] = bigTone(e);
-    lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: small, key: INK, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
-    const r = Math.max(flashR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
-    /* SAKUGATOKEN: the black frame IS the flash: its star is the shape the whole screen turns into (flash: not held to the token) */
-    burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4, flash: true });
+    const fs = flashStar(e);
+    if ( fs ) {
+      /* SAKUGASTAR (1.9.28, the owner on 1.9.27's film: «gwiazda za duża»): the black field and its lines are the screen's flash; the star
+         is the token's collar (inside nearR, two tones), the focus lines start just past its tips and run off the screen in both tones, so
+         the burst still reads across the whole picture while the star itself stays on the token */
+      lines(ctx, e, f.seed, { n: 44, fat: 0.85, color: small, key: INK, second: big, radial: true, rIn: fs.lineIn });
+      burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r: fs.r, fill: big, stroke: PAPER, lw: Math.min(u * 0.005, fs.r * 0.05), core: small, ...FLASH_STAR, flash: true });
+    } else {
+      lines(ctx, e, f.seed, { n: 30, fat: 0.7, color: small, key: INK, second: null, radial: true, gap: 1.5 * Math.max(1, k * 0.6) });
+      const r = Math.max(flashR(e) * 2.1, (e.sil ? Math.max(e.sil.w, e.sil.h) * k * 0.78 : 0));
+      /* a subject that is no token (a point, an element): the star the whole screen turns into, as 1.9.26 / 1.9.27 drew it */
+      burst(ctx, e, f.seed + 1, { cx: e.cx, cy: e.cy, r, fill: big, stroke: PAPER, lw: u * 0.005, core: e.sil ? small : PAPER, spikes: 19, long: 5, stretch: 1.4, flash: true });
+    }
     sil(ctx, e, { color: PAPER, outline: INK, outlineW: u * 0.008, scale: k, art: "bw", own: "inv" });
   },
   glare(ctx, e, f) {
@@ -920,13 +950,15 @@ const PAINT = {
     if ( !sil(ctx, e, { color: INK, outline: PAPER, outlineW: u * 0.008, scale: k, art: "neg", own: "ink" }) ) burst(ctx, e, f.seed + 2, { cx: e.cx, cy: e.cy, r: burstR(e) * 1.3, fill: INK, stroke: PAPER, long: 4 });
   },
   window(ctx, e, f) {
-    const u = unit(e), r = Math.max(flashR(e) * 2.3, u * 0.3);   // SAKUGATOKEN: a full field (the flash): its window keeps 1.9.26's size
+    const u = unit(e), ws = windowStar(e), r = ws.r;   // SAKUGASTAR: round a token the star window is its collar; the black field stays the screen's flash
     ctx.fillStyle = INK; ctx.fillRect(0, 0, e.W, e.H);
-    const p = G.star(f.seed, { cx: e.cx, cy: e.cy, r, spikes: 17, inner: 0.6, jitter: 0.25, stretch: e.dir != null ? 1.3 : 1, ang: e.dir ?? 0, long: 4 });
+    if ( ws.near ) lines(ctx, e, f.seed + 9, { n: 40, fat: 0.8, color: fieldColor(e, e.tone.a), key: INK, second: PAPER, radial: true, rIn: ws.lineIn });
+    const p = G.star(f.seed, { cx: e.cx, cy: e.cy, r, spikes: 17, inner: 0.6, jitter: ws.jitter, stretch: e.dir != null ? 1.3 : 1, ang: e.dir ?? 0, long: ws.long });
     ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.beginPath(); path(ctx, p); ctx.fill(); ctx.restore();
     ctx.beginPath(); path(ctx, p); ctx.lineJoin = "miter"; ctx.miterLimit = 3;
-    ctx.lineWidth = u * 0.022; ctx.strokeStyle = e.tone.a; ctx.stroke();
-    ctx.lineWidth = u * 0.007; ctx.strokeStyle = PAPER; ctx.stroke();
+    const ow = ws.near ? Math.min(u * 0.022, r * 0.12) : u * 0.022;   // SAKUGASTAR: a collar-sized window keeps a keyline in proportion
+    ctx.lineWidth = ow; ctx.strokeStyle = e.tone.a; ctx.stroke();
+    ctx.lineWidth = ow * 0.32; ctx.strokeStyle = PAPER; ctx.stroke();
   },
   /* the figure dragged back along the blow: a swept streak (many close copies make ONE continuous shape, not bars) in two colours with
      an ink keyline, torn by thin dry-brush gaps, the figure itself on its front end */

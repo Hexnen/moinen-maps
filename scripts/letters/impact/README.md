@@ -234,6 +234,20 @@ Live (lane 5, 2026-11-15, GM 1600x900 + player 1366x768 at unequal zooms, 60 fps
 without target, knock-down, a crowd of 7 with one GM-hidden token never drawn on the player) showed every drawing on both seats at the
 same instants within one frame; no frame over 20 ms; the call's warm-up took 0-31 ms before the start (0 when the idle warm-up had run).
 
+### The flash frames' star is the token's (1.9.28 SAKUGASTAR)
+
+The owner on 1.9.27's film: «gwiazda za duża» (the star is too big). 1.9.27 had kept the black frame's star (`shadow`) and the star
+window (`window`) at the view's size, as part of the flash: round a 60 px token on a 1600 x 900 view the shadow's star reached about
+680 px from the token (most of the screen), the window about 700 px. Now, when the subject is a token:
+- `shadow`: the black field stays the flash (a full field, counted as before); the star is the token's collar, `flashStar(e)`: shape
+  `FLASH_STAR` (16 spikes, inner 0.62, no long spike, jitter 0.2, stretch 1.2 along the blow, a core in the second tone at 0.74), its
+  whole reach fitted inside `nearR` (90 px for that token, 3 token radii); two-tone focus lines start just past its tips (`lineIn`) and
+  run off the screen, so the frame still bursts over the whole picture.
+- `window`: the star-shaped window cut in the black is the token's collar too (`windowStar(e)`, no long spike, inside `nearR`, keyline
+  in proportion), with two-tone focus lines outside it; the rest of the screen is the black flash.
+- A subject that is no token (a point, an element) keeps 1.9.27's screen-sized star and window. Plans, flash classes, the guard,
+  timings and seat equality are unchanged (check-figures 3c measures the star and the window on a recording context).
+
 ### On the token, not on the screen (1.9.27 SAKUGATOKEN; replaces the cut-in above)
 
 The owner on the impact frames at full strength (the 1.9.23-1.9.26 cut-in, called "sakuga mad" at the table): «robi efekty tokenowe na
@@ -255,7 +269,7 @@ of the screen. Now:
   their chunks and ticks, puffs, cracks and shards, focus lines round the token, flares, the knock-back echoes, the smear streak, the ink
   panel and the gentle panel (`local.r`). Strokes and dot pitch scale down with the shape so a small sticker is not a blob.
 - **The screen keeps the flash and the effects.** Full-field frames (`slam`, `shadow`, `glare`, `swap`, `window`, `tear`),
-  the shadow's big star and the window's frame (`flashR`, the old sizes), speed lines across the screen, the chromatic split, the tear and
+  speed lines across the screen, the chromatic split, the tear and
   the frame punch are the screen's, unchanged. Flash rationing and every safety limit unchanged.
 - **Morph instead of growth.** On a full seat, a figure drawn on a drawing with a contact pop (`z` > 1) or a held cut-in (`cu`) is bent
   INSIDE its own outline (`morphAmt`, `morphed`): its picture is cut in 12 bands across the blow, each shifted along it by a seeded,

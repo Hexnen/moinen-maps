@@ -6,8 +6,8 @@
 // full / local / off, and the cost (a picture's art is worked out once, a bounded number of draw calls per drawing).
 // Run from check-impact.mjs (`run`), or alone: node scripts/letters/impact/check-figures.mjs -> "impact figures: N checks, F failed".
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK } from "./plan.mjs";
-import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, frameEnv, starOf, nearR, morphAmt, morphStats, panelPoly, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb, artJobs, warmBase } from "./draw.mjs";
+import { planImpact, safety, isFlash, peakOf, FRAMES, KINDS, KIND_IDS, LIMITS, TONES, FIG, FIG_BRIGHT, FIG_HELD, FIG_TWIN, isRed, TICK, INK } from "./plan.mjs";
+import { paintFrame, paintFigLayers, figTreat, popOf, cutScale, cutOffset, frameEnv, starOf, nearR, morphAmt, morphStats, panelPoly, heldPixels, relY, invPixels, postPixels, origPixels, redSafePixels, rimColor, ENLARGED, unpinkRgb, artJobs, warmBase, FLASH_STAR } from "./draw.mjs";
 
 const P0 = { enabled: true, motion: "full", flashes: true, photosafe: true, impact: "full" };
 const MAGS = [0.2, 0.45, 0.7, 1.1, 1.5, 1.9];   // one per step
@@ -327,6 +327,44 @@ export async function run(ok) {
         paintFrame(c, e, { type, seed: 3, back: FRAMES[type].back, full: FRAMES[type].full });
         const big = L.filter((a) => a.length === 5).reduce((m, a) => Math.max(m, Math.abs(a[3]), Math.abs(a[4])), 0);
         ok(big > 0 && big <= 60 + 1e-6, `figures: SAKUGATOKEN ${type} draws the struck figure at its token's size (${big.toFixed(1)} px of 60)`);
+      }
+    }
+    /* 3c. SAKUGASTAR (1.9.28, the owner on 1.9.27's film: «gwiazda za duża»). The flash frames' star (the black frame's two-tone star, the
+       star window cut in the black) round a struck TOKEN stays inside nearR at every token size, step, strength and direction (1.9.27 drew it
+       at the view's size: 3-9 x nearR); the frame is still a full field (the black rect) and its focus lines still run off the screen; a
+       subject that is no token keeps the screen-sized star. A recording context groups points per path and notes how each path is filled. */
+    { const paths = []; let cur = null;
+      const rec = () => { const st = { fillStyle: null, globalCompositeOperation: "source-over" }; return new Proxy(st, { get: (t, k) => {
+        if ( k in t ) return t[k];
+        if ( k === "beginPath" ) return () => { cur = { pts: [], fill: null, op: null }; paths.push(cur); };
+        if ( k === "moveTo" || k === "lineTo" ) return (x, y) => cur && cur.pts.push([x, y]);
+        if ( k === "fill" ) return () => { if ( cur ) { cur.fill = t.fillStyle; cur.op = t.globalCompositeOperation; } };
+        if ( k === "fillRect" ) return (x, y, w, h) => paths.push({ pts: [[x, y], [x + w, y + h]], fill: t.fillStyle, op: t.globalCompositeOperation, rect: true });
+        if ( k === "getImageData" ) return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4).fill(200) });
+        if ( k === "createImageData" ) return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+        return () => {};
+      }, set: (t, k, v) => ((t[k] = v), true) }); };
+      const far = (e, p) => p.pts.reduce((a, [x, y]) => Math.max(a, Math.hypot(x - e.cx, y - e.cy)), 0);
+      let n = 0, worst = 0, minR = Infinity;
+      for ( const size of [24, 60, 110, 240] ) for ( const step of [0, 2, 3, 5] ) for ( const mag of [0.4, 1.2, 2] ) for ( const dir of [0.3, null] ) for ( const tone of [TONES.hero, TONES.blood] ) {
+        const R = size / 2, sl = { src, sx: 0, sy: 0, sw: 64, sh: 64, w: size, h: size, rot: 0 };
+        const e = { W: 1600, H: 900, cx: 800, cy: 450, hx: 800 - Math.cos(dir ?? -1) * R * 0.85, hy: 450 - Math.sin(dir ?? -1) * R * 0.85, R, dir, mag, step, kind: "ko", tone, rimTone: "a", sil: sl, figs: [{ role: "target", cx: 800, cy: 450, sil: sl }], local: null, redOk: false, makeCanvas: fake };
+        const lim = nearR(e), slack = 900 * 0.016;
+        paths.length = 0; paintFrame(rec(), e, { type: "shadow", seed: 7 + step, back: FRAMES.shadow.back, full: true });
+        const stars = paths.filter((p) => p.fill && p.fill !== INK && p.pts.length === FLASH_STAR.spikes * 2);   // the guard may turn the tones (crimson): find the star by its shape
+        const sr = stars.length ? far(e, stars[0]) : Infinity, all = paths.reduce((a, p) => Math.max(a, far(e, p)), 0);
+        n++; worst = Math.max(worst, sr / lim); minR = Math.min(minR, sr / R);
+        ok(stars.length === 1 && sr <= lim + slack, `figures: SAKUGASTAR the black frame's star round a ${size} px token (step ${step}, m ${mag}, dir ${dir}) reaches ${sr.toFixed(0)} px (surroundings ${lim.toFixed(0)} px)`);
+        ok(paths.some((p) => p.rect && p.fill === INK) && all > 900, `figures: SAKUGASTAR the black frame stays a full field with lines across the screen (${size} px, step ${step})`);
+        paths.length = 0; paintFrame(rec(), e, { type: "window", seed: 7 + step, back: FRAMES.window.back, full: true });
+        const holes = paths.filter((p) => p.op === "destination-out"), wr = holes.length ? far(e, holes[0]) : Infinity;
+        ok(holes.length === 1 && wr <= lim + slack && paths.some((p) => p.rect && p.fill === INK) && paths.reduce((a, p) => Math.max(a, far(e, p)), 0) > 900, `figures: SAKUGASTAR the star window round a ${size} px token reaches ${wr.toFixed(0)} px (surroundings ${lim.toFixed(0)} px), the black field and lines take the screen`);
+      }
+      ok(worst > 0.7 && minR > 1.25, `figures: SAKUGASTAR the black frame's star fills the token's surroundings and stands out past the figure (worst ${worst.toFixed(2)} x nearR, at least ${minR.toFixed(2)} x the token's radius)`);
+      { const e = { W: 1600, H: 900, cx: 800, cy: 450, hx: 780, hy: 450, R: 30, dir: 0.3, mag: 1.2, step: 4, kind: "ko", tone: TONES.hero, rimTone: "a", sil: null, figs: [], local: null, redOk: false, makeCanvas: fake };
+        paths.length = 0; paintFrame(rec(), e, { type: "shadow", seed: 7, back: FRAMES.shadow.back, full: true });
+        const s = paths.filter((p) => p.fill && p.fill !== INK && p.pts.length === 38);
+        ok(s.length === 1 && far(e, s[0]) > 300, `figures: SAKUGASTAR a subject that is no token keeps the screen-sized star (${s.length ? far(e, s[0]).toFixed(0) : "none"} px)`);
       }
     }
     /* the morph: on the contact (z) and the hold (cu) of a full seat, never on the gentle panel; the struck figure more than the others;
