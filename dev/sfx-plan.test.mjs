@@ -12,6 +12,8 @@
 //            not due is one unit long past SLICE_MS at most
 //   ORDER    the builtin presets' pages come in the layout's order (the sliced layout is the one used), a page that does not is laid out
 //            whole, the same places
+//   WARM     a moment's words settled ahead (sfx-table warmMoment) leave nothing but the engine's settle memo: the events, the ledger and
+//            `recent` untouched, planMoment's picture the same with and without it - and no fresh settle left inside the flush
 //   SOURCE   sfx.mjs: every reader and writer of the ledger settles the pictures in flight; a job's deps are frozen at its start; a word
 //            is asked for 140 ms ahead and played at the table's instant as before
 import fs from "node:fs";
@@ -248,6 +250,32 @@ function rig(W, { cost = 0, S = SEATS[0] } = {}) {
   ok(!!p.table && sigT(p.table) === A.table && p.group.lay?.full === true && sigM(new Map([...p.group.lay.L.out].sort())) === sigM(new Map([...A.lay].sort())), "ORDER a page whose main word comes last: laid out whole, seatLayout's places");
 }
 
+/* ---------------------------------------------------------------- WARM */
+{
+  const { SETTLE } = await imp("scripts/letters/shape.mjs");
+  const due = (tag) => [{ key: `a${tag}`, voice: "crash", x: 2400, y: 3600, r: 320, t: 5000 }, { key: `b${tag}`, voice: "crash", x: 3900, y: 4300, r: 180, t: 5010 }, { key: `c${tag}`, voice: "fire", x: 1700, y: 4200, r: 200, t: 5020 }];
+  const plan = (sceneId, warm) => {
+    const W = world(3); before(W);
+    const d = { ...W.base(), sceneId }, evs = due(""), recent = [{ x: 0, y: 0, reach: 10, t: 0, prio: 0, voice: "crash" }];
+    const l0 = sigL(W.ledger), e0 = JSON.stringify(evs), r0 = JSON.stringify(recent);
+    let steps = 0, clean = true;
+    if ( warm ) {
+      const it = T.warmMoment(evs.map((e) => ({ ...e })), { ...d, ledger: { count: (...a) => W.ledger.count(...a), boxes: (...a) => W.ledger.boxes(...a), add: () => { clean = false; } }, memo: new Map(), warn: () => {} }, recent.map((r) => ({ ...r })));
+      while ( !it.next().done ) steps++;
+      clean = clean && sigL(W.ledger) === l0 && JSON.stringify(evs) === e0 && JSON.stringify(recent) === r0;
+    }
+    const f0 = SETTLE.fresh, out = T.planMoment(evs, d, recent);
+    return { sig: JSON.stringify(out.map((q) => q.placed), strip), ledger: sigL(W.ledger), fresh: SETTLE.fresh - f0, steps, clean, words: out.reduce((a, q) => a + (q.specs ?? 0), 0) };
+  };
+  // (two scenes: other seeds, so each run meets an engine memo that does not hold its words yet)
+  const cold = plan("warm-scene-A", false), warmA = plan("warm-scene-A", false);
+  const w = plan("warm-scene-B", true), ref = (() => { const { SETTLE: S2 } = { SETTLE }; S2.on = false; try { return plan("warm-scene-B", false); } finally { S2.on = true; } })();
+  ok(cold.words >= 2 && cold.fresh >= cold.words && warmA.fresh === 0 && warmA.sig === cold.sig, `WARM the probe: a moment of ${cold.words} words settles ${cold.fresh} plans fresh when the engine does not hold them, none the second time`);
+  ok(w.clean && w.steps >= w.words && w.words >= 2, `WARM warming a moment (${w.steps} steps) leaves its events, the ledger and the caller's recent list untouched`);
+  ok(w.fresh === 0 && w.words === cold.words, `WARM after it the moment's planning settles nothing fresh (${w.fresh}; ${cold.fresh} without)`);
+  ok(w.sig === ref.sig && w.ledger === ref.ledger, "WARM the moment's picture and ledger are the ones planned without it (the engine's memo off)");
+}
+
 /* ---------------------------------------------------------------- SOURCE */
 {
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
@@ -262,6 +290,13 @@ function rig(W, { cost = 0, S = SEATS[0] } = {}) {
   ok(/const oo = \{ \.\.\.o, at: sh\(at\), startAt: w\.t, reduced: reducedMotion\(\) \};/.test(src) && /const wait = w\.t - performance\.now\(\);\s*if \( wait > 4 \) later\(/.test(src), "SOURCE a word is played at the table's instant (startAt), as before");
   ok(/function uiBoxes\(force = false\) \{\s*const now = performance\.now\(\);\s*if \( !force && now - uiCache\.t < UI_MS \) return uiCache\.boxes;/.test(src) && /if \( wait > 30 && performance\.now\(\) \+ wait - uiCache\.t >= UI_MS \) warmUi\(wait - 25\);/.test(src),
     "SOURCE the walk over the seat's panels is made in an idle moment before a word only when the kept one would be too old at its instant");
+}
+
+{
+  const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
+  const wm = src.slice(src.indexOf("function warmMoment() {"), src.indexOf("function warmMoment() {") + 1600);
+  ok(/pending\.push\(e\);[\s\S]{0,260}warmMoment\(\);\n\}/.test(src) && /gatherTimer = 0; warmGen\+\+;/.test(src) && wm.includes("pending.map((e) => ({ ...e }))") && wm.includes("add: () => null") && wm.includes("memo: new Map()") && wm.includes("recent.map((r) => ({ ...r }))"),
+    "SOURCE a moment is warmed while its events are gathered - on copies, a memo of its own, the ledger only read - and the flush ends it");
 }
 
 if ( failed.length ) { console.error(failed.join("\n")); console.error(`sfx-plan: ${failed.length} failed, ${n} passed`); process.exit(1); }

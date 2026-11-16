@@ -241,6 +241,28 @@ function queue(e) {
   pending.push(e);
   engine();
   if ( !gatherTimer ) gatherTimer = setTimeout(flush, Math.max(0, Math.min(C.GATHER_MS, C.dueAt(e) + C.GATHER_MS - performance.now())));
+  warmMoment();
+}
+/** MAPPLAN: while a moment's events are gathered (GATHER_MS), in idle slices: the engine settles the words the moment is about to be
+    planned with (sfx-table warmMoment: nothing placed, nothing written - only the engine's own settle memo fills, which the flush's
+    planning, measures and plays then reuse) and this seat's panels are read when the walk kept would be too old at the flush. Live
+    2026-11-16 a flush was one task of 22-45 ms. An event that joins the moment starts it again; the flush ends it. */
+let warmGen = 0;
+function warmMoment() {
+  const g0 = gen, w0 = ++warmGen;
+  let it = null, ui = false;
+  const idleRun = (fn) => { try { if ( typeof requestIdleCallback === "function" ) { requestIdleCallback(fn, { timeout: 8 }); return; } } catch { /* below */ } setTimeout(fn, 4); };
+  const run = () => {
+    if ( g0 !== gen || w0 !== warmGen || !L || !pending.length || mode() === "off" || !canvas?.ready ) return;
+    const t0 = performance.now();
+    try {
+      if ( !ui ) { ui = true; if ( t0 + C.GATHER_MS + 30 - uiCache.t >= UI_MS ) { uiBoxes(true); idleRun(run); return; } }
+      // (the events as copies, a memo and a `recent` of its own, the ledger only read - and not settled: a page in flight is not hurried)
+      it ??= T.warmMoment(T.moments(pending.map((e) => ({ ...e })))[0] ?? [], { ...tdeps(), ledger: { count: (...a) => tableLedger.count(...a), boxes: (...a) => tableLedger.boxes(...a), add: () => null }, memo: new Map(), warn: () => {} }, recent.map((r) => ({ ...r })));
+      while ( !it.next().done ) if ( performance.now() - t0 > 4 ) { idleRun(run); return; }
+    } catch { /* the flush plans it */ }
+  };
+  idleRun(run);
 }
 
 /** Fire: a stroke's flames are on screen here (fire.mjs draw, through the bus): its waiting catch word goes, its sound may start. */
@@ -1136,7 +1158,7 @@ function uiBoxes(force = false) {
 /* ---------------------------------------------------------------- words out */
 
 function flush() {
-  gatherTimer = 0;
+  gatherTimer = 0; warmGen++;
   const now = performance.now();
   const due = pending.filter((e) => C.dueAt(e) <= now + 20), rest = pending.filter((e) => C.dueAt(e) > now + 20);
   pending = rest;

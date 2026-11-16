@@ -314,10 +314,7 @@ export function planMoment(due, d0, recent = []) {
   for ( const g of groups ) {
     // (an echo of a sound just played - a bomb's crater after its fireball - is part of it)
     if ( !g.main.det && C.isEcho(g, recent, G) ) { out.push({ g, echo: true, placed: [] }); continue; }
-    const specs = C.planCluster(g, { grid: G, sec: C.CAPS.high.sec, seed: d.sceneId, big: false, known: d.known });
-    // (the reference view of the moment: centred on the cluster, at the zoom that holds its reach)
-    const zr = g.span, z = SEAT.refZoom(G, zr), c = { x: g.x, y: g.y };
-    for ( const w of specs ) { if ( w.role === "main" ) w.obj = g.main.obj; w.z = z; w.zr = zr; w.ts = d.toShared(w.t); w.key = `${w.seed}|${w.role}`; }
+    const { specs, z, c } = momentSpecs(g, d);
     // the engine writes each word (its vocabulary: the kind, how loud, how long; seeded, the same on every seat); the words of one moment
     // differ from each other (avoid), nothing of a seat's history changes them
     const taken = [];
@@ -335,6 +332,36 @@ export function planMoment(due, d0, recent = []) {
   return out;
 }
 
+/** the specs of one cluster of a moment (sfx-core planCluster) on the moment's reference view: centred on the cluster, at the zoom that
+    holds its reach -> { specs, z, c } */
+function momentSpecs(g, d) {
+  const G = d.grid, specs = C.planCluster(g, { grid: G, sec: C.CAPS.high.sec, seed: d.sceneId, big: false, known: d.known });
+  const zr = g.span, z = SEAT.refZoom(G, zr), c = { x: g.x, y: g.y };
+  for ( const w of specs ) { if ( w.role === "main" ) w.obj = g.main.obj; w.z = z; w.zr = zr; w.ts = d.toShared(w.t); w.key = `${w.seed}|${w.role}`; }
+  return { specs, z, c };
+}
+/**
+ * MAPPLAN: the words a moment is ABOUT to be planned with (planMoment's first half: its clusters, each word written and measured), one
+ * word a step, nothing kept: no word is placed, nothing is written into the ledger (`d0.ledger` is only read), `recent` is the caller's
+ * copy. What stays is the engine's own memo of each word's settle (shape.mjs settleCenter: keyed by the plan's whole content, it hands
+ * back exactly what the settle made), so the moment's real planning, measures and plays a few frames later reuse it instead of
+ * settling a dozen words fresh inside one task (live 2026-11-16: the flush of a fire's catch with a storm's onset, and of a gun's
+ * burst, 22-45 ms). The caller runs it in idle slices while the moment's events are still gathered (sfx.mjs warmMoment) and gives it a
+ * memo of its own (`d0.memo`), so the real planning computes every value itself.
+ */
+export function* warmMoment(due, d0, recent = []) {
+  const G = d0.grid, d = atStep2(d0);
+  const groups = C.cluster(due, G).sort((a, b) => ((C.VOICES[b.main.voice]?.prio ?? 0) - (C.VOICES[a.main.voice]?.prio ?? 0)) || (b.rEq - a.rEq));
+  for ( const g of groups ) {
+    if ( !g.main.det && C.isEcho(g, recent, G) ) continue;
+    const { specs } = momentSpecs(g, d), taken = [];
+    for ( const w of specs ) { write(w, taken, d); w.alive = d.ledger.count(w.ts, w.ts + lifeMs(w)); measure(w, d); yield w; }
+    // (drawn at their own step too: restep's measure)
+    for ( const w of specs ) if ( w.text && !w.stream ) { try { measure(w, d0); } catch { /* the real planning tells */ } yield w; }
+    const main = specs.find((w) => w.role === "main");
+    if ( main ) recent.push({ x: g.x, y: g.y, reach: Math.max(g.span, (main.bh ?? 0) * 2), t: g.t, prio: C.VOICES[g.main.voice]?.prio ?? 0, voice: g.main.voice });
+  }
+}
 /**
  * The TABLE picture of a page (a preset firing, a plough, a flash in view): every word written in page order (its ground known from the
  * map: `p.ground`), sized on the reference view, measured by the engine, placed off the shared obstacles and the words the table already
