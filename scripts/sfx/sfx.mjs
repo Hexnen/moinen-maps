@@ -20,8 +20,8 @@
    seat rule.
    Settings (GMALLMAPS: all the TABLE's, world, written by a GM only, live on every seat; sfx-prefs.mjs, window sfx-table-ui.mjs, menu
    "Comic sound effects on the map" in the module's settings): "sfxLetters" (all / big only / off; was a client setting next to the
-   world switch "sfxLettersWorld", which the migration folds in), "sfxWordsWorld" (the word set; a seat's own override "sfxWords" is
-   gone), "sfxLayer" (was a client setting); SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (0 none, 1 smaller,
+   world switch "sfxLettersWorld", which the migration folds in), "sfxWordsWorld" (the word set, "en" / "pl", named by a GM's seat - MAPWIN:
+   never a seat's own interface language; a seat's own override "sfxWords" is gone), "sfxLayer" (was a client setting); SFXSIZE: "sfxSizeDestruction" / "sfxSizeFire" / "sfxSizeWeather" (0 none, 1 smaller,
    2 today's size, 3 bigger; sfx-size.mjs). Each seat's own: its performance mode (fewer side words up) and reduced motion (the
    module's own rule, config.reducedMotion, passed on). */
 import { MODULE_ID, reducedMotion } from "../config.mjs";
@@ -115,8 +115,9 @@ const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0,
 const get = (k, d) => { try { return game.settings.get(MODULE_ID, k); } catch { return d; } };
 // (GMALLMAPS: every value is the TABLE's - world settings the GM writes; no seat override any more)
 export const mode = () => PF.clean("sfxLetters", get("sfxLetters", "all"));
-// (every seat must see the same word for the same moment: the WORLD's word set, which the GM's language sets once)
-const lang = () => C.langOf(get("sfxWordsWorld", "auto"), game.i18n?.lang);
+// (every seat must see the same word for the same moment: the WORLD's word set alone. MAPWIN: a set no GM's seat has named yet ("auto")
+// is the shared one on every seat, never this seat's interface language - sfx-prefs wordsOf; fixWords names it)
+const lang = () => PF.wordsOf(get("sfxWordsWorld", "auto"));
 // SFXSIZE: the size step of a group's lettering (sfx-size.mjs; world settings, the GM's for the table: every seat letters the same)
 export const stepFor = (g) => SZ.stepOf(get(SZ.SIZE_SETTING[g], SZ.SIZE_DEFAULT));
 const grpOf = T.grpOf;
@@ -136,7 +137,7 @@ function registerSettings() {
   game.settings.register(MODULE_ID, "sfxLayer", { name: T("layer"), hint: T("layerHint"), scope: "world", config: false, restricted: true, type: String, default: "overlay",
     choices: Object.fromEntries(LAYER_IDS.map((k) => [k, T(`layers.${k}`)])), onChange: live() });
   game.settings.register(MODULE_ID, "sfxWordsWorld", { name: T("wordsWorld"), hint: T("wordsWorldHint"), scope: "world", config: false, restricted: true, type: String, default: "auto",
-    choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") }, onChange: live() });
+    choices: { auto: T("wordsAuto"), en: T("wordsEn"), pl: T("wordsPl") }, onChange: live(() => fixWords()) });
   game.settings.register(MODULE_ID, PF.MIGRATED_KEY, { scope: "world", config: false, type: Number, default: 0 });
   game.settings.registerMenu(MODULE_ID, "sfxTable", { name: T("table.menu"), label: T("table.open"), hint: T("table.menuHint"), icon: "fa-solid fa-burst",
     type: UI.TableMenu, restricted: false });
@@ -1319,7 +1320,18 @@ function onDeleted(doc) {
   const key = String(doc?.key ?? "");
   if ( !key.startsWith(`${MODULE_ID}.`) || !PF.TABLE_KEYS.includes(key.slice(MODULE_ID.length + 1)) ) return;
   for ( const g of SZ.SIZE_GROUPS ) if ( key.endsWith(`.${SZ.SIZE_SETTING[g]}`) ) { sizeChanged(g); UI.follow(); return; }
-  refresh(); UI.follow();
+  refresh(); UI.follow(); fixWords();
+}
+/* MAPWIN: the table's word set is NAMED ("en" / "pl") by the active GM's seat, from its interface language, whenever the world holds
+   none: at ready (a new world), and at once when the value turns "auto" again (a deleted document, a macro, an older window's
+   "Defaults"). Until then every seat letters the shared set (sfx-prefs wordsOf), so seats in two languages never letter two words. */
+let fixing = false;
+async function fixWords() {
+  if ( fixing || !game.user?.isActiveGM || PF.WORD_SETS.includes(get("sfxWordsWorld", "auto")) ) return false;
+  fixing = true;
+  try { await game.settings.set(MODULE_ID, "sfxWordsWorld", PF.wordsFor(game.i18n?.lang)); return true; }
+  catch { return false; }
+  finally { fixing = false; }
 }
 /* the migration (sfx-prefs migrationPlan), on the first GM seat after the update; a player is told once if his old values differed */
 const worldDoc = (k) => { try { return game.settings.storage?.get("world")?.getSetting?.(`${MODULE_ID}.${k}`, null) ?? null; } catch { return null; } };
@@ -1351,7 +1363,7 @@ async function engineMenu() {
   return false;
 }
 /** the table's lettering as this seat applies it (sfx-prefs tableOf over the world values) */
-export const tableNow = () => PF.tableOf((k) => get(k, PF.TABLE[k]?.def), game.i18n?.lang, C.langOf);
+export const tableNow = () => PF.tableOf((k) => get(k, PF.TABLE[k]?.def));
 
 export function registerSfx() {
   moduleApi.sfx = sfxApi;
@@ -1361,8 +1373,8 @@ export function registerSfx() {
     // GMALLMAPS: the GM's own old choices become the table's (once per world), before the word set is fixed below
     if ( game.user?.isActiveGM ) { try { await migrate(); } catch ( err ) { console.warn(`${MODULE_ID} | sfx: migration`, err); } }
     noticeOnce();
-    // the world's word set is fixed once, by the active GM's language (then every seat letters the same words)
-    if ( game.user?.isActiveGM && get("sfxWordsWorld", "auto") === "auto" ) game.settings.set(MODULE_ID, "sfxWordsWorld", C.langOf("auto", game.i18n?.lang)).catch(() => {});
+    // the world's word set is named by the active GM's seat from its language (then, and until then, every seat letters the same words)
+    await fixWords();
   });
   // (canvasTearDown cleared the old scene; at canvasReady the new scene's fire may already have shown its flames: kept)
   Hooks.on("canvasReady", () => { teardown(false); refresh(); });
@@ -1370,7 +1382,7 @@ export function registerSfx() {
   Hooks.on("preCreateSetting", guardWrite);
   Hooks.on("preUpdateSetting", guardWrite);
   Hooks.on("deleteSetting", onDeleted);
-  UI.wire({ table: tableNow, perf: () => perfMode(), reduced: () => reducedMotion(), engineMenu: engineMenu });
+  UI.wire({ table: tableNow, guiLang: () => game.i18n?.lang, perf: () => perfMode(), reduced: () => reducedMotion(), engineMenu: engineMenu });
   Hooks.on("moinenMapsPresets", (kind, data) => { if ( kind === "firing" ) onFiring(data?.rec); });
   Hooks.on("moinenMapsWeather", (kind) => onWeather(kind));                     // (MAPTHUNDER: the rain's hiss on a fire)
   Hooks.on("moinenMapsFire", (kind) => { if ( kind === "edited" || kind === "loaded" ) { if ( kind === "loaded" ) { fireSeen = new Map(); onFire(true); } else onFire(false); } });

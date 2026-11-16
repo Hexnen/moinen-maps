@@ -1,7 +1,7 @@
 /* GMALLMAPS: the map lettering's options are the TABLE's (owner, 2026-11-15: «wszystko mg wybiera dla stołu. wszystko»). Pure: no
    Foundry, no PIXI, no DOM (node-tested in dev/sfx-prefs.test.mjs); sfx.mjs registers the settings, sfx-table-ui.mjs is the window.
      sfxLetters        which sounds are lettered: all / big only / off           (was a CLIENT setting + the world switch sfxLettersWorld)
-     sfxWordsWorld     the word set: game language (fixed once from the GM's) / English / Polish   (a seat's own override sfxWords is gone)
+     sfxWordsWorld     the word set: English / Polish, named by a GM's seat (MAPWIN: never a seat's own language; wordsOf)   (a seat's own override sfxWords is gone)
      sfxLayer          where the words are drawn among the canvas layers           (was a CLIENT setting)
      sfxSize*          the size step per group, 0..3 (SFXSIZE; already world)
    Every one is a WORLD setting, written by a GM only (a player's write is cancelled on its own seat: guardWrite), applied live on every
@@ -17,6 +17,22 @@ import { SIZE_GROUPS, SIZE_SETTING, SIZE_DEFAULT, stepOf } from "./sfx-size.mjs"
 export const LAYER_IDS = ["ground", "tokens", "weather", "overlay", "top"];
 export const LETTERS = ["all", "big", "off"];
 export const WORDS = ["auto", "en", "pl"];
+/** MAPWIN: the word sets a GM can choose (the window's choices). "auto" is no choice: it is only what a world holds before a GM's seat
+    named a set (a new world, a deleted document, a macro), and it never means "this seat's interface language" - a table with seats in
+    two languages would letter two different words for one moment (ADVM 11). Until a GM's seat names the set (sfx.mjs fixWords: at ready,
+    and at once whenever the value turns "auto" again) EVERY seat letters SHARED_WORDS. */
+export const WORD_SETS = ["en", "pl"];
+export const SHARED_WORDS = "en";
+/** the word set every seat letters for a stored value: the set itself, anything else (not named yet) the shared one */
+export const wordsOf = (stored) => (WORD_SETS.includes(stored) ? stored : SHARED_WORDS);
+/** the word set a GM's seat names for the table from its own interface language (Polish -> "pl", any other -> "en") */
+export const wordsFor = (guiLang) => (String(guiLang ?? "").toLowerCase().startsWith("pl") ? "pl" : "en");
+/** The values the window's "Defaults" fills in: every key's default, the word set named from the GM's language (never "auto"). */
+export const defaultsFor = (guiLang) => Object.fromEntries(Object.keys(TABLE).map((k) => [k, k === "sfxWordsWorld" ? wordsFor(guiLang) : TABLE[k].def]));
+/** What a window shows and edits of the stored values: each made legal, the word set as every seat letters it (wordsOf). */
+export const shownOf = (get) => Object.fromEntries(Object.keys(TABLE).map((k) => [k, k === "sfxWordsWorld" ? wordsOf(get(k)) : clean(k, get(k))]));
+/** The keys whose edited value differs from what the table holds (the window's "unsaved" list; both as shownOf gives them). */
+export const changedKeys = (edited, table) => Object.keys(TABLE).filter((k) => k in edited && !same(edited[k], table[k]));
 
 /** every table key of the map lettering with its default and its legal values (the window's rows, in order) */
 export const TABLE = {
@@ -40,13 +56,13 @@ export function clean(key, v) {
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The table's lettering as every seat applies it, read from the WORLD values only (`get(key)` gives the stored or default value;
-    `guiLang` is used only while the word set is still "game language", before the GM's seat fixed it). */
-export function tableOf(get, guiLang = "en", langOf = (c, g) => (c === "en" || c === "pl" ? c : String(g ?? "en").startsWith("pl") ? "pl" : "en")) {
+/** The table's lettering as every seat applies it, read from the WORLD values only (`get(key)` gives the stored or default value).
+    MAPWIN: nothing of the seat goes in - not its interface language either (wordsOf). */
+export function tableOf(get) {
   const v = (k) => clean(k, get(k));
   return {
     mode: v("sfxLetters"),
-    lang: langOf(v("sfxWordsWorld"), guiLang),
+    lang: wordsOf(get("sfxWordsWorld")),
     layer: v("sfxLayer"),
     steps: Object.fromEntries(SIZE_GROUPS.map((g) => [g, v(SIZE_SETTING[g])]))
   };

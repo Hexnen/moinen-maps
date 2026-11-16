@@ -509,7 +509,8 @@ await group("MAINSIZE", async () => {
     rows.push(`${sn} s${step} base ${b.cap.toFixed(1)} now ${n.cap.toFixed(1)} (${n.rules})`);
     // (the rule: its share of the envelope at this step)
     const it = n.m, env = ((n.f.env.y1 - n.f.env.y0) / (it.box.y1 - it.box.y0)) * it.u, G = SEAT.MIN_GAIN, fl = Math.min(it.floor || Infinity, it.nom[0], env);
-    const d2 = Math.max(fl, Math.min(it.nom[1], env / G)), d1 = Math.max(fl, Math.min(it.nom[0], d2 / G)), want = [d1, d2, env][step - 1];
+    // (MAPWIN: step 1 at most STEP_K[1] x the drawn step 2 - written out here, not through SEAT.stepShares, so the rule itself is pinned)
+    const d2 = Math.max(fl, Math.min(it.nom[1], env / G)), d1 = Math.max(fl, Math.min(it.nom[0], d2 / G, d2 * SZ.STEP_K[1])), want = [d1, d2, env][step - 1];
     if ( Math.abs(n.cap - want) > 0.01 * want || !n.side || n.side.x !== 0 || n.side.y !== 1 ) bad.push(`${rows.at(-1)} want ${want.toFixed(1)} side ${JSON.stringify(n.side)}`);
   }
   if ( process.env.SEAT_VERBOSE ) console.log(rows.join("\n"));

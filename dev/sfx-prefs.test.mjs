@@ -51,7 +51,7 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
 const world = new Map();          // key -> Setting document { key, value, _stats }
 const seats = [];
 const notes = [];
-function makeSeat(name, isGM, local = {}) {
+function makeSeat(name, isGM, local = {}, { lang = "en", active = isGM } = {}) {
   const hooks = new Map(), reg = new Map(), store = new Map(Object.entries(local).map(([k, v]) => [`${MOD}.${k}`, JSON.stringify(v)]));
   const S = { name, isGM, hooks, reg, store, menus: new Map(), sfx: null };
   S.Hooks = {
@@ -66,8 +66,8 @@ function makeSeat(name, isGM, local = {}) {
     const raw = store.get(id); return raw === undefined ? structuredClone(c.default) : JSON.parse(raw);
   };
   S.game = {
-    user: { id: `${name}-id`, isGM, isActiveGM: isGM, can: () => isGM },
-    i18n: { lang: "en", localize: (k) => k, format: (k) => k, has: () => true },
+    user: { id: `${name}-id`, isGM, isActiveGM: active, can: () => isGM },
+    i18n: { lang, localize: (k) => k, format: (k) => k, has: () => true },
     modules: new Map([[MOD, { id: MOD, active: true, api: {} }]]), keybindings: { register() {} },
     settings: {
       settings: reg,
@@ -218,11 +218,64 @@ await group("MIGRATE", async () => {
   ok(r.st.lang === "en", "a GM's own English word set becomes the table's (instead of the language fix at ready)");
 });
 
+/* ---------------------------------------------------------------- MIXED (MAPWIN, ADVM 11): seats in two interface languages letter ONE word set */
+await group("MIXED", async () => {
+  const C = await import(pathToFileURL(path.join(root, "scripts/sfx/sfx-core.mjs")).href);
+  const langs = (...S) => S.map((q) => status(q).lang).join("/");
+  const stored = () => world.get(`${MOD}.sfxWordsWorld`)?.value;
+  ok(C.langOf("auto", "pl") !== C.langOf("auto", "en"), "the old resolution: 'game language' read per seat gives a Polish and an English seat two word sets");
+  // a new world, the GM's interface Polish, the player's English
+  reset();
+  let gm = await boot(makeSeat("gm", true, {}, { lang: "pl" })), pl = await boot(makeSeat("player", false, {}, { lang: "en" }));
+  ok(stored() === "pl" && langs(gm, pl) === "pl/pl", `a new world: the GM's seat names the set from its language, both seats letter it (${stored()}; ${langs(gm, pl)})`);
+  // the GM's old window: Defaults + Save stored "game language"
+  enter(gm); await gm.game.settings.set(MOD, "sfxWordsWorld", "auto");
+  ok(stored() === "pl" && langs(gm, pl) === "pl/pl", `'game language' written (an older window's Defaults, a macro): named again at once (${stored()}; ${langs(gm, pl)})`);
+  deleteSetting(`${MOD}.sfxWordsWorld`);
+  ok(stored() === "pl" && langs(gm, pl) === "pl/pl", `the document deleted (a reset): named again at once (${stored()}; ${langs(gm, pl)})`);
+  enter(gm); await gm.game.settings.set(MOD, "sfxWordsWorld", "en");
+  ok(stored() === "en" && langs(gm, pl) === "en/en", "the GM's own choice stays (English on a Polish GM seat)");
+  // the other way round, and a third seat
+  reset();
+  gm = await boot(makeSeat("gm", true, {}, { lang: "en" })); pl = await boot(makeSeat("player", false, {}, { lang: "pl" })); const p2 = await boot(makeSeat("player2", false, {}, { lang: "de" }));
+  ok(stored() === "en" && langs(gm, pl, p2) === "en/en/en", `an English GM, a Polish and a German player: one set (${langs(gm, pl, p2)})`);
+  // no seat may name the set (no active GM: players alone, or a second GM who is not the active one): 'game language' stays stored -
+  // every seat still letters the same shared set, none its own language
+  reset();
+  const a = await boot(makeSeat("playerPl", false, {}, { lang: "pl" })), b = await boot(makeSeat("playerEn", false, {}, { lang: "en" })), g2 = await boot(makeSeat("gm2", true, {}, { lang: "pl", active: false }));
+  ok(stored() === undefined && langs(a, b, g2) === `${PF.SHARED_WORDS}/${PF.SHARED_WORDS}/${PF.SHARED_WORDS}`, `nobody to name the set: every seat the shared one (${langs(a, b, g2)}), nothing written`);
+  enter(g2); await g2.game.settings.set(MOD, "sfxWordsWorld", "auto");
+  ok(stored() === "auto" && new Set([status(a).lang, status(b).lang, status(g2).lang]).size === 1, "'game language' stored with no active GM: still one set on every seat");
+  ok(on(a, () => a.sfx.tableNow().lang) === on(b, () => b.sfx.tableNow().lang), "and the window's table (api.sfx.prefs) says the same on both");
+  // the source: no seat's language in the runtime's resolution; the window offers the two sets only and its Defaults write nothing
+  const sfx = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8"), uiSrc = fs.readFileSync(path.join(root, "scripts/sfx/sfx-table-ui.mjs"), "utf8");
+  ok(/^const lang = \(\) => PF\.wordsOf\(get\("sfxWordsWorld", "auto"\)\);$/m.test(sfx) && !/C\.langOf\(/.test(sfx), "sfx.mjs resolves the word set from the stored value alone");
+  const lines = sfx.split(/\r?\n/).filter((l) => /i18n\??\.lang/.test(l));
+  ok(lines.length === 2 && lines.every((l) => /PF\.wordsFor\(game\.i18n\?\.lang\)|guiLang: \(\) => game\.i18n\?\.lang/.test(l)), `the interface language is read only to NAME the set on a GM's seat (${lines.length} lines)`);
+  ok(/const choicesOf = \(k\) => \(k === "sfxWordsWorld" \? PF\.WORD_SETS : PF\.TABLE\[k\]\.choices\);/.test(uiSrc) && !/wordsAuto|"Auto"/.test(uiSrc), "the window offers English / Polish only");
+  const body = (name) => { const i = uiSrc.indexOf(`static ${name}(`), j = uiSrc.indexOf("\n", i); return uiSrc.slice(i, j); };
+  ok(/this\.v = this\.defaults\(\); this\.render\(\);/.test(body("#reset")) && !/settings\.set/.test(body("#reset")) && !/settings\.set/.test(body("#discard")), "Defaults and Discard only fill the form: nothing is written before Save");
+  ok(/save\.disabled = !this\.dirty;/.test(uiSrc) && /reset\.disabled = PF\.changedKeys\(edited, this\.defaults\(\)\)\.length === 0;/.test(uiSrc) && /role="status" aria-live="polite"/.test(uiSrc) && /mm-sfxt-was/.test(uiSrc),
+    "the window says what is unsaved: a status line, the table's value on a changed row, Save only with a change, Defaults only when they differ");
+  for ( const lg of ["en", "pl"] ) { const j = JSON.parse(fs.readFileSync(path.join(root, `lang/${lg}.json`), "utf8"));
+    ok(["table.state.clean", "table.state.dirty", "table.state.dirtyOne", "table.was", "table.discard"].every((k) => typeof j[`MOINENMAPS.Sfx.${k}`] === "string") && /\{n\}/.test(j["MOINENMAPS.Sfx.table.state.dirty"]) && /\{value\}/.test(j["MOINENMAPS.Sfx.table.was"])
+      && !("MOINENMAPS.Sfx.world" in j) && !("MOINENMAPS.Sfx.worldHint" in j) && !("MOINENMAPS.Sfx.words" in j), `lang/${lg}.json: the status strings are there, the removed settings' strings are gone`); }
+});
+
 /* ---------------------------------------------------------------- PURE */
 await group("PURE", async () => {
   ok(PF.clean("sfxLetters", "x") === "all" && PF.clean("sfxLayer", "top") === "top" && PF.clean("sfxSizeFire", "9") === 3 && PF.clean("sfxSizeFire", null) === 2, "clean: illegal values fall back, sizes clamp");
+  // (MAPWIN: nothing of the seat goes into the table - a word set no GM named yet is the shared one, whatever the seat's language)
   const t = PF.tableOf((k) => PF.TABLE[k].def, "pl");
-  ok(t.mode === "all" && t.lang === "pl" && t.layer === "overlay" && JSON.stringify(t.steps) === JSON.stringify({ destruction: 2, fire: 2, weather: 2 }), "tableOf at the defaults (game language: the interface's)");
+  ok(t.mode === "all" && t.lang === PF.SHARED_WORDS && t.layer === "overlay" && JSON.stringify(t.steps) === JSON.stringify({ destruction: 2, fire: 2, weather: 2 }), "tableOf at the defaults (a word set not named yet: the shared one, not the interface's)");
+  ok(PF.wordsOf("pl") === "pl" && PF.wordsOf("en") === "en" && PF.wordsOf("auto") === PF.SHARED_WORDS && PF.wordsOf(undefined) === PF.SHARED_WORDS && PF.wordsOf("de") === PF.SHARED_WORDS, "wordsOf: a named set, else the shared one");
+  ok(PF.wordsFor("pl") === "pl" && PF.wordsFor("pl-PL") === "pl" && PF.wordsFor("en") === "en" && PF.wordsFor("de") === "en" && PF.wordsFor(undefined) === "en", "wordsFor: the GM's language names the set");
+  const dp = PF.defaultsFor("pl"), de = PF.defaultsFor("en");
+  ok(dp.sfxWordsWorld === "pl" && de.sfxWordsWorld === "en" && PF.TABLE_KEYS.every((k) => k === "sfxWordsWorld" || dp[k] === PF.TABLE[k].def) && !Object.values(dp).includes("auto"), "the window's Defaults: every default, the word set named from the GM's language, never 'game language'");
+  const shown = PF.shownOf((k) => ({ sfxWordsWorld: "auto", sfxLetters: "nonsense", sfxSizeFire: 9 })[k] ?? PF.TABLE[k].def);
+  ok(shown.sfxWordsWorld === PF.SHARED_WORDS && shown.sfxLetters === "all" && shown.sfxSizeFire === 3, "the window shows what every seat letters (legal values, the shared set while none is named)");
+  ok(JSON.stringify(PF.changedKeys({ ...shown }, shown)) === "[]" && JSON.stringify(PF.changedKeys({ ...shown, sfxLayer: "top", sfxSizeFire: 1 }, shown)) === JSON.stringify(["sfxLayer", "sfxSizeFire"])
+    && JSON.stringify(PF.changedKeys({ sfxLayer: shown.sfxLayer }, shown)) === "[]", "changedKeys: only the rows whose edited value differs from the table's");
   // (shareOf = the rule sfx.mjs flushMoment had inline before GMALLMAPS, on random moments)
   const C = await import(pathToFileURL(path.join(root, "scripts/sfx/sfx-core.mjs")).href);
   const old = (placed, big, caps, alive) => { let mine = big ? placed.filter((w) => w.role === "main" && (w.loud ?? 1) >= 0.2 + 0.8 * 0.34 - 1e-9) : placed;

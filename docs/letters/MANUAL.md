@@ -418,6 +418,12 @@ no fixed pixel sizes.
 **One language per world, not per client.** `lang: "auto"` follows each client's own interface language [C], so a GM in Polish and
 a player in English get different words from the same seed. When every client must see the same word, pass one language (a world
 setting of your module, or the GM's language sent with the event). English is first-class (section 14).
+The same trap one level up (moinen-maps MAPWIN, 2026-11-16) [V node, lane 5 live with a Polish GM seat and an English player seat]:
+a world setting whose default is "the game's language" is still read PER SEAT while no value is stored, so the two seats lettered
+KA-BUUM! and KA-BOOM! for one blast (the map's window wrote that default back with "Defaults" + "Save"). Store a NAMED set only
+("en" / "pl"): a GM's seat names it from its own language (at ready, and at once whenever the stored value is not a named set), the
+window offers the named sets only, and while nothing is named every seat reads ONE shared fallback, never its own interface language
+(`sfx-prefs.mjs` `wordsOf` / `wordsFor` / `SHARED_WORDS`, `sfx.mjs` `fixWords`).
 
 **Destruction and effects: letter the phases, not one moment** (owner's rulings, section 14).
 - Order: the blast, then debris falling, then fire whose intensity changes; a shock wave is its own lettered event.
@@ -715,7 +721,8 @@ Status: stable. [R] for the draw order, [V] for the ids.
 | `screen` | screen | DEFAULT: over the whole interface (tooltips and notifications stay on top) |
 
 `L.layers`, `L.defaults` (`{ world: "overlay", screen: "screen" }`) [V], `L.layerChoices(space, lang)` -> `{ id: label }` for a
-`game.settings.register` `choices` [V]. Keep your own client setting and pass `layer` per call. An unknown or wrong-space layer falls
+`game.settings.register` `choices` [V]. Keep the choice in a WORLD setting of your module (the GM's, for the table: section 14, "every
+option is chosen by the GM"; moinen-maps `sfxLayer`), never a client setting, and pass `layer` per call. An unknown or wrong-space layer falls
 back to the default with a warning.
 
 **Visibility.** A word that belongs to a token (`at` is a token, document or id, or `token` is given) is shown only while that token
@@ -1295,6 +1302,29 @@ values once (`localStorage["<module>.<key>"]`; an old world switch "for everyone
 machine or system decides (performance caps, reduced motion). Prove "no picture change at the defaults" by evaluating the runtime's
 own resolution lines from the base tree and the new one over the same stored values and comparing per-seat plan logs (with a probe).
 
+The map's settings by name, as they exist now (all world, `config: false`, restricted; nothing else of the map's lettering is a
+setting): `moinen-maps.sfxLetters` (`all` / `big` / `off`), `moinen-maps.sfxWordsWorld` (`en` / `pl`; `auto` only while no GM's seat
+has named a set, and then every seat letters English), `moinen-maps.sfxLayer` (`ground` / `tokens` / `weather` / `overlay` / `top`),
+`moinen-maps.sfxSizeDestruction` / `sfxSizeFire` / `sfxSizeWeather` (0..3, 2 = today's size), and the marker
+`moinen-maps.sfxTableMigrated`. GONE since GMALLMAPS: the client settings `sfxLetters`, `sfxLayer` and `sfxWords` (a seat's own word
+set) and the world switch `sfxLettersWorld` ("for everyone"): none is registered or read; the migration folded them in once (an old
+`sfxLettersWorld` = false became `sfxLetters` = `off`), and a world document `moinen-maps.sfxLettersWorld` left behind by an older
+version is inert (question GMALLMAPS-9).
+
+**A table window says what is saved** (moinen-maps MAPWIN, 2026-11-16) [V node `dev/sfx-prefs.test.mjs` MIXED / PURE, lane 5 live]: a
+window that edits table options in a form and writes them on "Save" must show the difference between the form and the table, or a
+GM takes "Defaults" for done (ADVM 11). The map's window: a status line (`role="status"`) over the buttons ("Saved. Every screen at
+the table shows these settings." / "Not saved: 2 changes. The table still sees the old values until you save."), the table's value
+under every changed control ("At the table: English"), "Save for the table" enabled only while something differs, "Discard", and
+"Defaults" disabled when the form already holds them. "Changed" is the form compared with the table (`changedKeys`), not "a control
+was touched": moving a slider back clears it, and another GM's save while this one edits updates the comparison, not the form.
+
+**The size steps as drawn** (moinen-maps MAPWIN) [V node `dev/sfx-same.test.mjs` SPAN, lane 5 live]: on a seat whose clean room is
+smaller than a word's step-2 size (the usual case: today's words fill their room) the three steps are shares of that room: step 3
+the room, step 2 the room / 1.15, step 1 0.7 x the step 2 as drawn (`sfx-seat.mjs` `stepShares`), so steps 1 and 3 stand 1.64 x apart
+(they stood 1.32 x apart: "size 3 against size 1 changes the main word only moderately"); with room for the step-3 size it is the
+slider's own 2 x; only the legibility floor closes the gap. Step 2 and step 3 are drawn exactly as before.
+
 No bridge (1.9.19 ENGDROP). plus-ultra since UNMIRROR (tag tactics-integrated-136) keeps no copy: it reads `L.table` / `L.seat`, writes
 `L.setTable`, and carries its old copy itself where it is newer. The engine writes nothing into plus-ultra's namespace. An OLDER
 plus-ultra (132-135, the GMALL mirror) next to this engine: its mirror writes the engine's old client keys, none of which is registered
@@ -1601,6 +1631,10 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
 - 2026-11-15 (GMALLMAPS, moinen-maps caller `tactics-zones-gmallmaps`, no engine change): section 15 "A caller's own options are the
   table's too" (the map's lettering options world + GM only + live + one window linking this engine's window; migration; the
   per-seat exceptions); `dev/sfx-prefs.test.mjs`, `dev/sfx-prefs-picture.test.mjs`.
+- 2026-11-16 (MAPWIN, moinen-maps caller `tactics-zones-mapwin`, no engine change): section 5 "One language per world" (a default
+  "game language" is still per seat: store a named set), section 7 (the layer choice is a world setting), section 15 (the map's
+  settings by name, what GMALLMAPS removed, "A table window says what is saved", "The size steps as drawn"), section 21a (the
+  impact mode is the table's); `dev/sfx-prefs.test.mjs` MIXED, `dev/sfx-same.test.mjs` SPAN.
 - 2026-11-15: IMPACT4 (1.9.21, `tactics-zones-impact4`): section 21a (held colours `n` / `h` / `d`, slices, pops `z`, own-art enlarged
   frames, figures that follow their tokens, one-second cuts, the length and hit-stop limits); impact README "The figures", "Kinds",
   "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
@@ -1727,7 +1761,8 @@ of at most 20 % of the view round the blow (1.8.2; before, the whole view).
   twin that would still change the scene keeps its ink only). Under the guard saturated red (R/(R+G+B) >= 0.7) covers at most 1 % of
   any drawing: red accents are drawn deep crimson. (Before 1.8.2 `ink` and `shatter` turned the whole view black and white uncounted on
   every hit, and the knock-out threw red spikes over its black frame: ADVI 9 and 18.)
-- `flashes` off, `motion: gentle`, the client setting `moinen-letters.impact = local` or a caller's `gentle: true`: the gentle variant
+- `flashes` off, `motion: gentle`, the table's `impact: "local"` (since 1.9.16 a row of the world Object `moinen-letters.table`, the
+  GM's; a photosensitive seat gets local by itself) or a caller's `gentle: true`: the gentle variant
   (no full frame, no inverted scene, no hit-stop, everything inside a panel of at most 20 % of the viewport; its panels still counted).
 - reduced motion (setting, OS switch, a caller's `true`): one still drawing, at most 4 ticks, at the instant of the full plan's blow.
   (1.9.24 ENG24) Every plan carries `plan.tableMs`, the table's length (the full plan before this seat's safety): a caller that waits

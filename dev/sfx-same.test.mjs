@@ -20,7 +20,7 @@ import { revTree } from "./lib/baseline.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const imp = (p) => import(pathToFileURL(path.join(root, p)).href);
 const PG = await imp("scripts/sfx/sfx-page.mjs");
-const T = await imp("scripts/sfx/sfx-table.mjs"), SEAT = await imp("scripts/sfx/sfx-seat.mjs");
+const T = await imp("scripts/sfx/sfx-table.mjs"), SEAT = await imp("scripts/sfx/sfx-seat.mjs"), SZ = await imp("scripts/sfx/sfx-size.mjs");
 const PREV = revTree(root, "2208be5", "scripts/sfx", fs.mkdtempSync(path.join(os.tmpdir(), "mapsame-prev-")));
 const PT = await import(pathToFileURL(path.join(PREV, "sfx-table.mjs")).href), PS = await import(pathToFileURL(path.join(PREV, "sfx-seat.mjs")).href);
 const { setup } = await imp("scripts/letters/testenv.mjs");
@@ -149,6 +149,38 @@ ok(pairs >= 20 && !pairBad.length, `SIDE: the take's GM and player seats show ev
 const oNow = orderFaults(false), oPrev = orderFaults(true);
 ok(oPrev.bad.length > 0, `PREV: the steps not apart as drawn on some seat (${oPrev.bad.length} of ${oPrev.cases}: ${oPrev.bad.slice(0, 3).join("; ")})`);
 ok(oNow.bad.length === 0, `ORDER: step 1 < 2 < 3 as drawn, each at least ${SEAT.MIN_GAIN} x apart unless at the floor (${oNow.cases} word x seat; ${oNow.bad.length} not: ${oNow.bad.slice(0, 4).join("; ")})`);
+// MAPWIN (ADVM 11: "size 3 against size 1 changes the main word only moderately" - 1.31 x live on both seats): steps 1 and 3 as DRAWN stand
+// at least MIN_GAIN / STEP_K[1] apart (1.64 x; the slider names 2 x, which a seat with room for its step-3 size gives) wherever the
+// legibility floor does not hold step 1 or 2 up or the view is too tight for any clean spot. The old rule (step 1 at most step 2 /
+// MIN_GAIN), counted on the same seats: the share of words under that span.
+const spanOf = (prev) => {
+  const need = (SEAT.MIN_GAIN / SZ.STEP_K[1]) * 0.999, low = [], all = []; let cases = 0;
+  for ( const S of SEATS ) {
+    const r = [1, 2, 3].map((s) => drawSeat(S, s, prev).out);
+    for ( const key of r[1].keys() ) {
+      const a = r.map((m) => m.get(key));
+      if ( !a.every((q) => q?.shown) || a.some((q) => q.rules.includes("floor") || q.rules.includes("tight")) ) continue;
+      cases++; const k = a[2].cap / a[0].cap; all.push(k);
+      if ( k < need ) low.push(`${S.name} ${a[1].w.text} ${k.toFixed(2)} (${a.map((q) => q.cap.toFixed(1)).join(" / ")})`);
+    }
+  }
+  all.sort((x, y) => x - y);
+  return { low, cases, need, med: all[all.length >> 1] ?? 0, min: all[0] ?? 0 };
+};
+const spNow = spanOf(false);
+ok(spNow.cases >= 60 && spNow.low.length === 0, `SPAN: step 3 at least ${spNow.need.toFixed(2)} x step 1 as drawn wherever the floor or a tight view does not hold a step (${spNow.cases} word x seat; least ${spNow.min.toFixed(2)}, median ${spNow.med.toFixed(2)}; ${spNow.low.length} not: ${spNow.low.slice(0, 4).join("; ")})`);
+{
+  // (the take's main word on its two seats, the reviewed case: both seats, and the same span on both)
+  const mainOf = (out) => [...out.values()].find((q) => q.w.role === "main"), span = (S) => { const a = [1, 3].map((s) => mainOf(drawSeat(S, s).out)); return a[1].cap / a[0].cap; };
+  const g = span(REC.gm), p = span(REC.p1);
+  ok(g >= spNow.need && p >= spNow.need && Math.abs(g - p) < 0.05, `SPAN: the take's main word, step 3 against step 1: GM ${g.toFixed(2)} x, player ${p.toFixed(2)} x (was 1.31 x live on both)`);
+  // (the rule before MAPWIN, written out: on a seat whose room is its step-2 size the span was MIN_GAIN squared)
+  const nom = [105, 150, 210], env = 100, fl = 20, old1 = Math.max(fl, Math.min(nom[0], Math.max(fl, Math.min(nom[1], env / SEAT.MIN_GAIN)) / SEAT.MIN_GAIN)), now = SEAT.stepShares(nom, env, fl);
+  ok(Math.abs(env / old1 - SEAT.MIN_GAIN ** 2) < 1e-9 && Math.abs(now[2] / now[0] - SEAT.MIN_GAIN / SZ.STEP_K[1]) < 1e-9 && now[1] === env / SEAT.MIN_GAIN && now[2] === env,
+    `SPAN: a seat whose room is under its step-2 size (the take's seats): was ${(env / old1).toFixed(2)} x, now ${(now[2] / now[0]).toFixed(2)} x; steps 2 and 3 drawn as before`);
+  const roomy = SEAT.stepShares([70, 100, 140], 140, fl), floorHeld = SEAT.stepShares([70, 100, 140], 100, 80);
+  ok(roomy[0] === 70 && roomy[1] === 100 && roomy[2] === 140 && floorHeld[0] === 80 && floorHeld[0] <= floorHeld[1], "SPAN: with room every step its own size (2 x); the legibility floor still holds step 1 up");
+}
 // (the take's main word, drawn: world cap and its share of the seat's height on screen)
 const mainRows = [];
 for ( const S of [REC.gm, REC.p1] ) for ( const step of [1, 2, 3] ) {

@@ -99,6 +99,18 @@ export function stepPx(px2, step, floor = 0) {
     hold a step-3 word that big anywhere clean draws it at the largest clean size not smaller than its step 2 ("full", question
     MAPSFXSEAT2-1) */
 export const MIN_GAIN = 1.15;
+/** MAPWIN: the sizes the three steps are DRAWN at inside one envelope `env` (the largest clean size on this seat, at most its step-3
+    size), from the steps' own sizes `nom` [1, 2, 3] and the legibility floor `fl`: step 3 the envelope; step 2 its own size, at most the
+    envelope / MIN_GAIN; step 1 its own size, at most STEP_K[1] x the step 2 AS DRAWN - the slider's own proportion kept where the seat
+    is short of room. Before, step 1 was held only MIN_GAIN under the drawn step 2, so on a seat whose room is under its step-2 size
+    (the usual case: today's words already fill their room) steps 1 and 3 stood 1.32 x apart instead of the 2 x the slider names (ADVM
+    11: 138.9 against 105.8 px on the GM's seat, 41.6 against 31.7 on the player's); now 1.64 x there (1.15 / 0.7), more with more
+    room, less only at the legibility floor. Steps 2 and 3 are drawn exactly as before. -> [d1, d2, d3] */
+export function stepShares(nom, env, fl = 0) {
+  const d2 = Math.max(fl, Math.min(nom[1], env / MIN_GAIN));
+  const d1 = Math.max(fl, Math.min(nom[0], d2 / MIN_GAIN, d2 * SZ.STEP_K[1]));
+  return [d1, d2, env];
+}
 const areaOf = (a) => (Number.isFinite(a) ? a : a && Number.isFinite(a.radius) ? a.radius : a && Number.isFinite(a.w) ? 0.5 * Math.sqrt(a.w * (a.h ?? a.w)) : 0);
 /**
  * The TABLE size of a map word in scene px (shared; play it with fit "world"): the engine's own model on the reference view at zoom `z`
@@ -307,7 +319,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       const o = { ...r.out, px: p.x, py: p.y, share: gS, wayCap: sizes[0] };
       if ( nomR && o.way ) {
         const st = it.step >= 1 && it.step <= 3 ? Math.round(it.step) : 2, env = o.cap, G = MIN_GAIN, fl = Math.min(it.floor > 0 ? it.floor : Infinity, nomR[0], env);
-        const d2 = Math.max(fl, Math.min(nomR[1], env / G)), d1 = Math.max(fl, Math.min(nomR[0], d2 / G)), dr = Math.min(env, [d1, d2, env][st - 1]);
+        const [d1, d2] = stepShares(nomR, env, fl), dr = Math.min(env, [d1, d2, env][st - 1]);
         const rr = o.rules.filter((q) => q !== "size");
         if ( Math.abs(dr - u) > 1e-6 ) rr.splice(1, 0, "size");
         if ( dr < nomR[st - 1] - 1e-6 ) rr.push("room");
@@ -448,7 +460,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     // (MAPSAME, the size: ONE layout for every step - the word's ENVELOPE, the largest size up to its step-3 size on this seat (`nom`
     // [step 1, 2, 3]: the engine's own size for this window and zoom at step 2 and the steps' shares) that stands clean on its side; then
     // each step draws its own share INSIDE that envelope, scaled about the envelope's point nearest the thing: step 3 the envelope,
-    // step 2 its own size but at most the envelope / MIN_GAIN, step 1 its own but at most step 2 / MIN_GAIN, none under the legibility floor.
+    // step 2 its own size but at most the envelope / MIN_GAIN, step 1 its own but at most STEP_K[1] x the drawn step 2 (MAPWIN, stepShares), none under the legibility floor.
     // So the sliders mean what they say as drawn on every seat (3 > 2 > 1, each at least MIN_GAIN apart wherever the floor allows), a
     // seat short of room keeps its words where they stand at every step (the same picture, only bigger or smaller), and the words laid out
     // after it keep off its envelope whatever the step - before, step 3 and step 2 of a crowded seat drew the same size (live 185 / 186,
@@ -481,7 +493,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     let pick;
     if ( env ) {
       const r = env.cap, G = MIN_GAIN, fl = Math.min(floorC, r);
-      const d3 = r, d2 = nom ? Math.max(fl, Math.min(nom[1], r / G)) : r, d1 = nom ? Math.max(fl, Math.min(nom[0], d2 / G)) : r;
+      const [d1, d2, d3] = nom ? stepShares(nom, r, fl) : [r, r, r];
       const dr = Math.min(r, nom ? [d1, d2, d3][step - 1] : Math.min(want, r));
       // (the step's word inside the envelope, on the same side of the thing in the same proportion: shrinkOnSide)
       const q = env.q, qd = shrinkOnSide(q, dr / r, sub, [kx, ky]);
@@ -508,7 +520,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     out.set(it.key, r);
     if ( it.main && mainF === null ) {
       const k0 = seen ? 1 : OFF_K;
-      if ( env && nom ) { const r3 = env.cap, fl = Math.min(floorC, r3), d2 = Math.max(fl, Math.min(nom[1], r3 / MIN_GAIN)), d1 = Math.max(fl, Math.min(nom[0], d2 / MIN_GAIN));
+      if ( env && nom ) { const r3 = env.cap, fl = Math.min(floorC, r3), [d1, d2] = stepShares(nom, r3, fl);
         mainF = [d1 / nom[0], d2 / nom[1], r3 / nom[2]].map((q) => Math.min(1, q) * k0); }
       else { const q = Math.min(1, pick.cap / Math.max(1e-9, want)) * k0; mainF = [q, q, q]; }
     }
@@ -729,7 +741,22 @@ export function shrinkOnSide(q, f, sub, ink = null) {
     // (smaller: inside `q`, so it stands where `q` stood clean; larger (the table drawing a step-2 place at step 3): as it falls)
     // (`ink` [kx, ky]: its ink inside q's ink - what q kept clean -, which also holds the box inside q)
     const kx = ink?.[0] > 0 ? Math.min(1, ink[0]) : 1, ky = ink?.[1] > 0 ? Math.min(1, ink[1]) : 1, qx = (q.x0 + q.x1) / 2, qy = (q.y0 + q.y1) / 2;
-    if ( f < 1 ) { cx = clamp(cx, qx - ((q.x1 - q.x0 - w) * kx) / 2, qx + ((q.x1 - q.x0 - w) * kx) / 2); cy = clamp(cy, qy - ((q.y1 - q.y0 - h) * ky) / 2, qy + ((q.y1 - q.y0 - h) * ky) / 2); }
+    if ( f < 1 ) {
+      const rx = ((q.x1 - q.x0 - w) * kx) / 2, ry = ((q.y1 - q.y0 - h) * ky) / 2;
+      cx = clamp(cx, qx - rx, qx + rx); cy = clamp(cy, qy - ry, qy + ry);
+      // (MAPWIN: a word at a corner of its thing - both offsets about equal - could tip over to the other side once that hold moved it,
+      // the more the smaller it is drawn (step 1 at 0.61 of its envelope: a fire's hiss right of its fire read as above it). Its lesser
+      // offset is drawn in toward the thing, inside `q`, until `q`'s side leads again)
+      // (and where that is not enough, its leading offset out from the thing, inside `q` too)
+      const sd = sideOfBox(q, sub), dx = Math.max(1, hw + w / 2), dy = Math.max(1, hh + h / 2), ax = () => (cx - sx) / dx, ay = () => (cy - sy) / dy;
+      if ( sd?.x && Math.abs(ay()) >= Math.abs(ax()) ) {
+        cy = clamp(sy + Math.sign(ay()) * Math.abs(ax()) * 0.98 * dy, qy - ry, qy + ry);
+        if ( Math.abs(ay()) >= Math.abs(ax()) ) cx = clamp(sx + sd.x * (Math.abs(ay()) / 0.98) * dx, qx - rx, qx + rx);
+      } else if ( sd?.y && Math.abs(ax()) > Math.abs(ay()) ) {
+        cx = clamp(sx + Math.sign(ax()) * Math.abs(ay()) * 0.98 * dx, qx - rx, qx + rx);
+        if ( Math.abs(ax()) > Math.abs(ay()) ) cy = clamp(sy + sd.y * (Math.abs(ax()) / 0.98) * dy, qy - ry, qy + ry);
+      }
+    }
   }
   return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
 }

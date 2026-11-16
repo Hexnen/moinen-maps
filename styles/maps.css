@@ -1201,10 +1201,28 @@ button.mm-z-menu-row:disabled .lb small { color: #f0a08f; opacity: 1; }
 .mm-sfxt-seat li i { font-size: 0.7rem; opacity: 0.6; }
 .mm-sfxt-seat li.is-on { color: inherit; }
 .mm-sfxt-seat li.is-on i { color: var(--mm-sfxt-accent); opacity: 1; }
+/* MAPWIN: what is only in the form. A changed row: a dot by its label and the table's value under its control; the status line over
+   the buttons (quiet while the form equals the table; raised, with "Discard", while it does not); Save / Defaults off when they would do nothing. */
+.mm-sfxt .mm-sfxt-row.is-changed > label::after { content: ""; display: inline-block; width: 0.45rem; height: 0.45rem; margin-left: 0.45rem; border-radius: 50%;
+  background: var(--mm-sfxt-accent); vertical-align: 0.08em; }
+.mm-sfxt .mm-sfxt-was { grid-column: 2; margin: 0; padding: 0; font-size: 0.8rem; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mm-sfxt .mm-sfxt-was[hidden] { display: none; }
+.mm-sfxt-state { display: flex; align-items: center; gap: 0.55rem; min-height: 2.35rem; margin: 0 0 0.5rem; padding: 0.3rem 0.4rem 0.3rem 0.7rem; border-radius: 8px;
+  border: 1px solid transparent; font-size: 0.82rem; line-height: 1.35; color: var(--mm-sfxt-muted);
+  transition: background-color 0.15s var(--mm-sfxt-ease), border-color 0.15s var(--mm-sfxt-ease), color 0.15s var(--mm-sfxt-ease); }
+.mm-sfxt-state > i { flex: none; opacity: 0.7; }
+.mm-sfxt-state .mm-sfxt-state-text { flex: 1 1 auto; min-width: 0; }
+.mm-sfxt-state.is-dirty { color: inherit; font-weight: 600; background: color-mix(in srgb, var(--mm-sfxt-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--mm-sfxt-accent) 55%, transparent); }
+.mm-sfxt-state.is-dirty > i { color: var(--mm-sfxt-accent); opacity: 1; }
+.mm-sfxt-state .mm-sfxt-discard { flex: none; width: auto; min-height: 0; height: 1.7rem; padding: 0 0.6rem; font-size: 0.8rem; line-height: 1; white-space: nowrap; }
+.mm-sfxt-state .mm-sfxt-discard[hidden] { display: none; }
+.mm-sfxt .form-footer button:disabled { opacity: 0.45; cursor: default; }
+.mm-sfxt .form-footer .mm-sfxt-save:disabled { color: inherit; background: transparent; border-color: var(--mm-sfxt-edge); }
 .mm-sfxt .form-footer { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
 .mm-sfxt .form-footer button { flex: 1 1 auto; white-space: nowrap; }
 .mm-sfxt .form-footer .mm-sfxt-save { color: var(--mm-sfxt-accent-ink); background: var(--mm-sfxt-accent); border-color: color-mix(in srgb, var(--mm-sfxt-accent) 70%, #000); }
-@media (prefers-reduced-motion: reduce) { .mm-sfxt .mm-sfxt-row { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .mm-sfxt .mm-sfxt-row, .mm-sfxt-state { transition: none; } }
 /* DROPS: the lens window (lens-look-ui.mjs): the lettering window's family, the rain's blue as accent; two looks as a radio pair */
 .mm-lenslook { --mm-sfxt-accent: #4f9de0; --mm-sfxt-accent-ink: #ffffff; --mm-ll-glint: #ffffff; }
 .mm-lenslook .mm-ll-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 0.55rem 0 0.5rem; }

@@ -129,25 +129,34 @@ const sha = (lines) => crypto.createHash("sha1").update(lines.join("\n")).digest
 
 /* ---- DEFAULTS: every seat's own values at their defaults, the world's as a table had them */
 const OLD_CLIENT_DEFAULTS = {};    // (a seat that never touched its own lettering options: nothing stored, the registered defaults)
+// (MAPWIN: `unnamed` = a world whose word set no GM's seat has named yet. Before, each seat lettered it in its OWN interface language -
+// the fault of ADVM 11: seat B (Polish interface) drew Polish words next to seat A's English ones. Now every seat letters the shared
+// set until a GM's seat names one (sfx-prefs wordsOf), so such a world must equal the base's "words fixed" to the shared set on BOTH
+// seats, and the two seats' word sets must be one)
 const WORLDS = [
-  { name: "fresh world", w: {} },
+  { name: "fresh world", w: {}, unnamed: true },
   { name: "words fixed English", w: { sfxWordsWorld: "en" } },
   { name: "words fixed Polish", w: { sfxWordsWorld: "pl" } },
   { name: "switch for everyone on", w: { sfxLettersWorld: true, sfxWordsWorld: "pl" } },
-  { name: "sizes at today's step", w: { sfxSizeDestruction: 2, sfxSizeFire: 2, sfxSizeWeather: 2 } }
+  { name: "sizes at today's step", w: { sfxSizeDestruction: 2, sfxSizeFire: 2, sfxSizeWeather: 2 }, unnamed: true }
 ];
 await group("DEFAULTS", async () => {
   let lines = 0, cases = 0, same = 0;
   for ( const W of WORLDS ) for ( const s of Object.keys(SEATS) ) {
     cases++;
-    const before = seatLog(s, "old", OLD_CLIENT_DEFAULTS, W.w), now = seatLog(s, "now", {}, W.w);
+    const before = seatLog(s, "old", OLD_CLIENT_DEFAULTS, W.unnamed ? { ...W.w, sfxWordsWorld: PF.SHARED_WORDS } : W.w), now = seatLog(s, "now", {}, W.w);
     lines += before.length;
     if ( sha(before) === sha(now) ) same++;
     else { console.log(`DIFF ${W.name} seat ${s}`); const a = new Set(before); for ( const q of now ) if ( !a.has(q) ) console.log("  +", q); }
     if ( process.env.PREFS_VERBOSE ) console.log(`  ${W.name} seat ${s}: ${sha(before)} / ${sha(now)} (${before.length} words)`);
   }
   ok(lines > 60, `the seats drew words (${lines} log lines)`);
-  ok(same === cases, `at the defaults every seat draws what it drew before (${same} of ${cases} seat logs equal)`);
+  ok(same === cases, `at the defaults every seat draws what it drew before (${same} of ${cases} seat logs equal; a word set not named yet = the base's fixed ${PF.SHARED_WORDS})`);
+  // (MAPWIN: the fault itself, on the base: a world with no word set named letters seat B, whose interface is Polish, in Polish; now not)
+  const setOf = (log) => [...new Set(log.map((q) => q.split("|").at(-1)))].join(",");
+  const oldA = setOf(seatLog("A", "old", OLD_CLIENT_DEFAULTS, {})), oldB = setOf(seatLog("B", "old", OLD_CLIENT_DEFAULTS, {})), nowA = setOf(seatLog("A", "now", {}, {})), nowB = setOf(seatLog("B", "now", {}, {}));
+  ok(oldA === "en" && oldB === "pl", `before: a word set not named yet lettered each seat in its own interface language (${oldA} / ${oldB})`);
+  ok(nowA === PF.SHARED_WORDS && nowB === PF.SHARED_WORDS, `now: one word set on both seats (${nowA} / ${nowB})`);
 });
 /* ---- the GM's own values before = the table's now: what the GM saw, every seat sees */
 await group("GMSEAT", async () => {
