@@ -107,13 +107,14 @@ const steamSeen = new Set();    // weather keys whose rain-on-fire hiss was deci
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
 const tableLedger = SEAT.makeLedger();
 // MAPPLAN: a page's table picture is planned in slices of a few ms (sfx-plan.mjs, `plans` below) instead of one task of 44-75 ms at its
-// firing. The pictures still in flight are finished before anything else reads or writes the ledger (plans.settle), so every reader
-// sees the ledger a page planned at once left, and the words come into it in the same order on every seat.
+// firing. The pictures still in flight are finished before anything else writes the ledger (plans.settle), and a reader gets the ledger
+// as the whole picture will leave it for the time it asks about (plans.read): every reader sees what a page planned at once left, and
+// the words come into the ledger in the same order on every seat.
 const ledger = {
   get list() { plans.settle(); return tableLedger.list; },
   add: (e) => { plans.settle(); return tableLedger.add(e); },
-  boxes: (...a) => { plans.settle(); return tableLedger.boxes(...a); },
-  count: (...a) => { plans.settle(); return tableLedger.count(...a); },
+  boxes: (t0, t1, skip) => plans.read(t0, t1, (l) => l.boxes(t0, t1, skip)),
+  count: (t0, t1) => plans.read(t0, t1, (l) => l.count(t0, t1)),
   has: (k) => { plans.settle(); return tableLedger.has(k); },
   get: (k) => { plans.settle(); return tableLedger.get(k); },
   prune: (now) => { plans.settle(); tableLedger.prune(now); },
@@ -127,8 +128,8 @@ const KNOCK_CONTACT = 60;       // MAPDIRECT: a knocked word's contact (ms after
 const PAGE_WAIT_MS = 4000;      // a page waits this long (shared ms after its firing's moment) for all its fire-layer strokes
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0,
   // (MAPPLAN: a page's planning in slices - units run, their ms and the longest; the longest slice; the times a word or another reader of
-  // the ledger had to finish a picture at once, and the longest such stretch)
-  planN: 0, planMs: 0, planMax: 0, sliceMax: 0, planForced: 0, planForcedMax: 0 };
+  // the ledger had to finish a picture at once, and the longest such stretch; the times a reader had a part of one planned for it)
+  planN: 0, planMs: 0, planMax: 0, sliceMax: 0, planForced: 0, planForcedMax: 0, planPeek: 0, planPeekMax: 0 };
 
 /* ---------------------------------------------------------------- settings */
 
@@ -674,6 +675,7 @@ function tablePage(p) {
 /* MAPPLAN (sfx-plan.mjs): a page's table picture and this seat's layout of it are made in slices of a few ms, in idle moments, instead of
    one task of 44-75 ms at a firing - the same picture, the same places, every word at its instant. This seat's part: */
 const plans = PLAN.makePlans({
+  ledger: tableLedger,
   now: () => performance.now(),
   idle: (fn, ms) => { try { if ( typeof requestIdleCallback === "function" ) { requestIdleCallback(fn, { timeout: ms }); return; } } catch { /* below */ } setTimeout(() => fn(null), Math.min(ms, 16)); },
   timer: (key, ms, fn) => later(key, ms, fn),

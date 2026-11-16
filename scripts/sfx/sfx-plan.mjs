@@ -8,8 +8,9 @@
  * main word's side, a word's size step; sfx-seat seatLayouter: one word's place), a slice at a time between frames, the words due first
  * planned first. What the table shows does not change:
  *   - the picture starts at the instant it started before (the page's first word, or the idle moment before it), from what every seat
- *     shares AS IT STOOD THEN (frozenDeps: the clock's offset, the size steps, the shared tokens and pins) and is finished before
- *     anything else reads or writes the ledger (settle; sfx.mjs wraps its ledger in it): the same picture as one planned at once;
+ *     shares AS IT STOOD THEN (frozenDeps: the clock's offset, the size steps, the shared tokens and pins), the pictures in the order
+ *     their pages began, and is finished before anything else WRITES the ledger (settle); a READER gets the ledger as the whole
+ *     picture will leave it for the time it asks about (read) - sfx.mjs wraps its ledger in both: the same picture as planned at once;
  *   - a word is asked for when it was before (140 ms ahead of its instant); what it needs is finished at once when the slices would
  *     not make it in time (PLAN_GUARD and what is left of it, measured), so no word starts later than it did;
  *   - the seat layout lays a page's words out in the order it always did, from ONE reading of the seat's view, panels, pins, tokens and
@@ -26,6 +27,7 @@ export const SLICE_WAIT = 32;     // the longest a slice waits for an idle momen
 export const SLICE_URGENT = 8;    // ... while a picture is still planned or a word of it is due soon
 export const PLAN_GUARD = 16;     // what a word needs is ready this long before its instant (plus what is left of it, measured), else at once
 export const UNIT_MS = 6;         // a unit's cost before any was measured (ms)
+export const LEDGER_MAX = 200;    // sfx-seat makeLedger's own length
 
 /** The deps a picture planned over several slices reads: `base` (sfx-table's deps) with the clock's offset, the size steps, the shared
     tokens and pins AS THEY STAND NOW (tokens / pins: every one of the scene, cut to a view on each call as the live lists were), and the
@@ -37,10 +39,10 @@ export function frozenDeps(base, { ledger, off, steps, tokens = [], pins = [] })
 }
 
 /**
- * env: { now() (ms), idle(fn, timeoutMs) (calls fn(deadline | null) in an idle moment, at the latest timeoutMs from now), timer(key, ms,
+ * env: { ledger (sfx-seat makeLedger: the table's own, not the caller's settling wrapper), now() (ms), idle(fn, timeoutMs) (calls fn(deadline | null) in an idle moment, at the latest timeoutMs from now), timer(key, ms,
  *        fn), untimer(key), deps() -> the frozen deps of a job begun now, snap(grp) -> { key, ctx (seatLayouter's: view, panels, pins,
  *        tokens, zoom, up), d (sfx-table deps), seat (seatItem's: vw, vh, zoom, scale) } this seat as it stands now, stats ({ planN,
- *        planMs, planMax, sliceMax, planForced, planForcedMax, seatMs, seatN, seatMax }), warn(msg, err) }
+ *        planMs, planMax, sliceMax, planForced, planForcedMax, planPeek, planPeekMax, seatMs, seatN, seatMax }), warn(msg, err) }
  */
 export function makePlans(env) {
   const jobs = new Map(), stats = env.stats ?? {};
@@ -52,8 +54,7 @@ export function makePlans(env) {
   function job(p) {
     if ( p.table ) return null;
     if ( p.job ) return p.job;
-    // (the pictures in flight first: this page is planned against their whole pictures, as before)
-    settle();
+    // (the pictures in flight come first - `open`: this page is planned against their whole pictures, as before; its own deps are read now)
     const d = env.deps();
     const j = { p, d, pl: T.pagePlanner(p, d), idx: new Map(p.pg.words.map((w, i) => [w.key, i])), ts: p.pg.words.map((w) => (Number.isFinite(w.t) ? d.toPerf(w.t) : Infinity)), grown: 0, at: [], want: -1, waits: [] };
     // (the page's located words are one picture: a seat lays them out together - sfx-seat seatLayout: each keeps its side of what it
@@ -88,6 +89,9 @@ export function makePlans(env) {
       table, then the rest of the layout -> is more left? */
   function unit(j) {
     const pl = j.pl, k = Math.min(j.want, pl.words.length - 1);
+    // (the tables in the order their pages began: an older picture still in flight is finished first)
+    const f = pl.done ? null : open(j);
+    if ( f ) { f.pl.step(); tableDone(f); return true; }
     if ( !pl.done && pl.planned <= k ) { pl.step(); tableDone(j); return true; }
     if ( growOne(j) ) return true;
     if ( k >= 0 && layOne(j, k) ) return true;
@@ -104,21 +108,68 @@ export function makePlans(env) {
     if ( !more ) { jobs.delete(j.p); if ( j.p.table ) j.p.job = null; }
     return more;
   }
-  /** the table pictures in flight, each finished at once (before another reader or writer of the ledger) */
+  /** the oldest job before `j` whose table is not whole yet (null: none) */
+  function open(j) {
+    for ( const q of jobs.values() ) { if ( q === j ) return null; if ( !q.p.table ) return q; }
+    return null;
+  }
+  /** the table pictures in flight, each finished at once, oldest first (before a writer of the ledger, or a reader it cannot answer) */
   function settle() {
     if ( !jobs.size || settling ) return;
     settling = true;
-    try { for ( const j of jobs.values() ) settleJob(j); } finally { settling = false; }
+    try { for ( const j of jobs.values() ) settleOne(j); } finally { settling = false; }
   }
-  function settleJob(j) {
+  function settleOne(j) {
     if ( j.p.table ) return;
     const t0 = env.now();
     try { while ( j.pl.step() ) { /* every unit left */ } } catch ( err ) { env.warn?.("a page's planning failed", err); j.pl.done = true; }
     tableDone(j);
     bump("planForced", 1); peak("planForcedMax", env.now() - t0);
   }
-  /** how long the units still between a job and its page word `k` take, by the units measured so far (ms) */
-  const est = (j, k) => (has(j, k) ? 0 : unitMs * (2 * Math.max(0, Math.min(k, j.pl.words.length - 1) + 1 - j.pl.planned) + 2));
+  /** one job's table at once (the older pictures in flight first) */
+  function settleJob(j) {
+    for ( const q of jobs.values() ) { if ( q === j ) break; settleOne(q); }
+    settleOne(j);
+  }
+  /**
+   * A READER of the ledger's words up during [t0, t1) (`fn(ledger)` reads it: boxes / count), while a picture is in flight. A page word
+   * not planned yet starts at its own moment or later, so one whose moment is t1 or later cannot be up in the window: the picture is
+   * planned only up to the last word that can (often two words of nine: a run of fire asks for the next second, a bomb's blast is 1.2 s
+   * away), and the reader gets the ledger AS THE WHOLE PICTURE WILL LEAVE IT for that window - the planned words at their step's size
+   * (the entries the picture writes at its end), in the same order. Anything it cannot answer exactly (two pictures in flight, a word
+   * of the window still to come, a ledger so full that the words to come may push a word of the window out): the pictures at once.
+   */
+  function read(t0, t1, fn) {
+    const raw = env.ledger;
+    if ( !jobs.size || settling ) return fn(raw);
+    let j = null, n = 0;
+    for ( const q of jobs.values() ) if ( !q.p.table ) { j ??= q; n++; }
+    if ( !j ) return fn(raw);
+    const ws = j.pl.words;
+    let k = -1;
+    for ( let i = 0; i < ws.length; i++ ) if ( !(ws[i].t >= t1) ) k = i;
+    if ( n > 1 || k >= ws.length - 1 || !Number.isFinite(t1) ) { settle(); return fn(raw); }
+    const a = env.now(), was = j.pl.planned;
+    try { j.pl.upTo(k); while ( growOne(j) ) { /* the planned words at their step */ } } catch ( err ) { env.warn?.("a page's planning failed", err); settle(); return fn(raw); }
+    if ( j.pl.planned > was ) { bump("planPeek", 1); peak("planPeekMax", env.now() - a); }
+    if ( j.pl.done ) { tableDone(j); return fn(raw); }
+    const tmp = SEAT.makeLedger(LEDGER_MAX);
+    tmp.list.push(...raw.list);
+    for ( const q of j.pl.table.values() ) if ( j.pl.isPlaced(q) ) tmp.add({ key: q.key, page: j.p.rec.id, box: T.lifeBox(q), t0: q.ts, t1: q.ts + T.lifeMs(q), main: q.role === "main" });
+    // (the words still to come each add an entry: the oldest entries they may push out of a full ledger must not be of this window)
+    const cut = tmp.list.length + (ws.length - j.pl.planned) - LEDGER_MAX;
+    if ( cut > 0 && tmp.list.slice(0, cut).some((q) => q.t1 > t0 && q.t0 < t1) ) { settle(); return fn(raw); }
+    return fn(tmp);
+  }
+  /** how long the units still between a job and its page word `k` take, by the units measured so far (ms) - the older pictures in
+      flight first */
+  const left = (q) => (q.p.table ? 0 : 2 * (q.pl.words.length - q.pl.planned) + 2);
+  function est(j, k) {
+    if ( has(j, k) ) return 0;
+    let u = 2 * Math.max(0, Math.min(k, j.pl.words.length - 1) + 1 - j.pl.planned) + 2;
+    for ( const q of jobs.values() ) { if ( q === j ) break; u += left(q); }
+    return unitMs * u;
+  }
 
   /* ---- this seat's layout of a page's group, a word at a time */
   function layBegin(grp, s = env.snap(grp)) {
@@ -181,7 +232,7 @@ export function makePlans(env) {
       for ( const q of jobs.values() ) if ( !j || (q.waits.length && !j.waits.length) ) j = q;
       if ( !j ) break;
       runUnit(j);
-      serve(j);
+      for ( const q of new Set([...jobs.values(), j]) ) serve(q);
       const now = env.now();
       // (a word due before another slice could bring what it needs: on, without a break)
       if ( j.waits.some((w) => now + PLAN_GUARD + 1.3 * est(j, w.k) >= w.t) ) continue;
@@ -211,7 +262,7 @@ export function makePlans(env) {
     j.want = Math.max(j.want, w.k);
     while ( !has(j, w.k) && jobs.has(j.p) && runUnit(j) ) n++;
     if ( n ) { bump("planForced", 1); peak("planForcedMax", env.now() - t0); }
-    serve(j);
+    for ( const q of new Set([...jobs.values(), j]) ) serve(q);
   }
   /**
    * Page word `k` of page `p`, due at `t` (the caller's clock), asked for now: `fn` runs as soon as the table holds the word (and every
@@ -228,5 +279,5 @@ export function makePlans(env) {
     env.timer(key, ms, () => { force(j, w); pump(); });
     pump();
   }
-  return { jobs, job, has, settle, settleJob, ask, pump, slice, layout, clear: () => jobs.clear(), unitMs: () => unitMs };
+  return { jobs, job, has, settle, settleJob, read, ask, pump, slice, layout, clear: () => jobs.clear(), unitMs: () => unitMs };
 }

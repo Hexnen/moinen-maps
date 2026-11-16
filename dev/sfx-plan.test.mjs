@@ -7,6 +7,11 @@
 //   JOB      a job run in slices - any slicing, a word asked for early, the live deps changing meanwhile, another reader or writer of the
 //            ledger in between (settled first) - leaves planPage's table, ledger and both seats' layouts; a word read right after its part
 //            is planned stands where the whole layout puts it
+//   READ     a reader of the ledger while a picture is in flight (plans.read: a run of fire asking what is up in its next second) gets
+//            what the page planned at once answers, for any window and any moment of the flight - mostly with only a part of the page
+//            planned for it; the picture it leaves is still the one planned at once
+//   FIFO     two pages in flight together (a second bomb 10-300 ms after the first) are planned in the order they began: the tables and
+//            the ledger of the two planned at once one after the other, the second page's word still on time
 //   TIME     on a virtual clock: a word asked 140 ms ahead goes on before its instant - with idle moments, with none (timeouts), with no
 //            slice at all (the guard), on a slow seat -; a word asked late goes on in the same call, with only its part planned; a slice
 //            not due is one unit long past SLICE_MS at most
@@ -14,7 +19,7 @@
 //            whole, the same places
 //   WARM     a moment's words settled ahead (sfx-table warmMoment) leave nothing but the engine's settle memo: the events, the ledger and
 //            `recent` untouched, planMoment's picture the same with and without it - and no fresh settle left inside the flush
-//   SOURCE   sfx.mjs: every reader and writer of the ledger settles the pictures in flight; a job's deps are frozen at its start; a word
+//   SOURCE   sfx.mjs: every writer of the ledger settles the pictures in flight, every reader of a time window goes through plans.read; a job's deps are frozen at its start; a word
 //            is asked for 140 ms ahead and played at the table's instant as before
 import fs from "node:fs";
 import path from "node:path";
@@ -137,6 +142,7 @@ function atOnce(preset, seed, step) {
 function rig(W, { cost = 0, S = SEATS[0] } = {}) {
   const st = { now: 1000, timers: new Map(), idles: [], stats: {}, S };
   const env = {
+    ledger: W.ledger,
     now: () => st.now,
     idle: (fn, ms) => st.idles.push({ fn, by: st.now + ms }),
     timer: (key, ms, fn) => st.timers.set(key, { at: st.now + Math.max(0, ms), fn }),
@@ -207,6 +213,76 @@ function rig(W, { cost = 0, S = SEATS[0] } = {}) {
   ok(froze === nv, `JOB the clock's offset, the size steps, the tokens and the pins changing under a job in flight do not change its picture (${froze}/${nv})`);
   ok(blind === nv, `JOB the probe is not blind: a writer that does not settle first leaves another ledger (${blind}/${nv})`);
   ok(sliced >= runs * 0.5, `JOB the sliced layout is the one used (${sliced}/${runs} layouts added word by word)`);
+}
+
+/* ---------------------------------------------------------------- READ */
+{
+  let runs = 0, same = 0, part = 0, after = 0, blind = 0, n = 0;
+  const ask = (l, a, b, skip) => JSON.stringify([l.boxes(a, b, skip), l.count(a, b)]);
+  // (windows about the page's start: before it, a run's next second at its firing, later seconds, its whole life, an open end)
+  const wins = [[-1500, -500], [-200, 800], [0, 1000], [13, 1013], [400, 1400], [900, 1900], [1500, 2500], [0, 6000], [2500, Infinity]];
+  for ( const preset of PRESETS ) for ( const seed of [777, 12] ) for ( const step of [1, 3] ) for ( const fly of [0, 6, 14, 40] ) for ( const [a, b] of wins ) {
+    const A = atOnce(preset, seed, step), t0 = T0 + a, t1 = T0 + b, want = ask(A.W.ledger, t0, t1);
+    const W = world(step); before(W);
+    const R = rig(W, { cost: 4 }), p = pageOf(preset, seed);
+    R.plans.ask(p, 0, R.now + 140, () => {});
+    if ( fly ) R.run(R.now + fly);
+    const flying = !p.table, raw = ask(W.ledger, t0, t1);
+    const got = R.plans.read(t0, t1, (l) => ask(l, t0, t1));
+    runs++;
+    if ( got === want ) same++; else failed.push(`READ ${preset} ${seed} step ${step} after ${fly} ms, window ${a}..${b}: not the answer of the page planned at once`);
+    if ( flying ) { n++; if ( !p.table ) part++; if ( raw !== want ) blind++; }
+    // (and twice: a second reader right after it)
+    if ( R.plans.read(t0, t1, (l) => ask(l, t0, t1, "nobody")) !== ask(A.W.ledger, t0, t1, "nobody") ) failed.push(`READ ${preset} ${seed} step ${step} after ${fly} ms, window ${a}..${b}: a second reader got another answer`);
+    R.run(R.now + 1500);
+    if ( p.table && sigT(p.table) === A.table && sigL(W.ledger) === A.ledger ) after++;
+  }
+  ok(runs >= 200 && same === runs, `READ a reader of the ledger while a page is in flight gets the answer of the page planned at once (${same}/${runs} readings: ${PRESETS.join(", ")}, ${wins.length} windows, 4 moments of the flight)`);
+  ok(after === runs, `READ the picture and the ledger left after a reading mid-flight are the ones planned at once (${after}/${runs})`);
+  ok(part >= n * 0.4, `READ mostly without the whole page planned for it (${part}/${n} readings mid-flight left the picture in flight)`);
+  ok(blind >= n * 0.2, `READ the probe is not blind: the ledger as it stands mid-flight answers otherwise (${blind}/${n})`);
+  // (a ledger near its length: the words to come may push a word of the window out - the answer still the one at once)
+  { let full = 0, m = 0;
+    for ( const pad of [190, 196, 199] ) for ( const [a, b] of [[-200, 800], [0, 1000], [900, 1900]] ) {
+      const fill = (W) => { for ( let i = 0; i < pad; i++ ) W.ledger.add({ key: `pad${i}`, box: { x0: 100 + i, y0: 100, x1: 160 + i, y1: 130 }, t0: T0 - 300 + i * 9, t1: T0 + 700 + i * 9 }); };
+      const WA = world(2); fill(WA); T.planPage(pageOf("bomb", 777), WA.base());
+      const W = world(2); fill(W);
+      const R = rig(W, { cost: 4 }), p = pageOf("bomb", 777), t0 = T0 + a, t1 = T0 + b;
+      R.plans.ask(p, 0, R.now + 140, () => {}); R.run(R.now + 6);
+      m++;
+      if ( R.plans.read(t0, t1, (l) => ask(l, t0, t1)) === ask(WA.ledger, t0, t1) ) { R.run(R.now + 1500); if ( sigL(W.ledger) === sigL(WA.ledger) ) full++; }
+    }
+    ok(full === m, `READ a ledger near its length (the words to come push its oldest out): still the answer at once (${full}/${m})`); }
+}
+
+/* ---------------------------------------------------------------- FIFO */
+{
+  let runs = 0, same = 0, timely = 0, blind = 0, forced = 0;
+  const AT2 = { x: AT.x + 420, y: AT.y + 260 };
+  for ( const preset of PRESETS ) for ( const step of [1, 2, 3] ) for ( const gap of [0, 10, 60, 300] ) for ( const v of ["idle", "timeout", "late", "read"] ) {
+    const mk = () => [pageOf("bomb", 777), pageOf(preset, 12, AT2, T0 + gap)];
+    const WA = world(step); before(WA); const [a1, a2] = mk(); const ta = sigT(T.planPage(a1, WA.base())), tb = sigT(T.planPage(a2, WA.base()));
+    const W = world(step); before(W);
+    const R = rig(W, { cost: 4 }), [p1, p2] = mk();
+    let at2 = null;
+    R.plans.ask(p1, 0, R.now + 140, () => {});
+    if ( gap ) R.run(R.now + gap, v === "timeout" ? () => "timeout" : () => "idle");
+    const due = v === "late" ? R.now - 20 : R.now + 140;
+    R.plans.ask(p2, 0, due, () => { at2 = R.now; });
+    if ( v === "read" ) R.plans.read(T0, T0 + 1000, (l) => l.count(T0, T0 + 1000));
+    R.run(R.now + 2500, v === "timeout" ? () => "timeout" : () => "idle");
+    runs++;
+    if ( p1.table && p2.table && sigT(p1.table) === ta && sigT(p2.table) === tb && sigL(W.ledger) === sigL(WA.ledger) && !R.plans.jobs.size ) same++;
+    else failed.push(`FIFO bomb + ${preset} step ${step}, ${gap} ms apart, ${v}: not the two pages planned at once, one after the other`);
+    if ( at2 !== null && (v === "late" || at2 <= due - PLAN.PLAN_GUARD) ) timely++;
+    if ( R.stats.planForced > 0 ) forced++;
+    // (the probe is not blind: the second page planned first leaves another picture)
+    if ( gap === 0 && v === "idle" ) { const WB = world(step); before(WB); const [b1, b2] = mk(); const t2 = sigT(T.planPage(b2, WB.base())), t1 = sigT(T.planPage(b1, WB.base())); if ( t1 !== ta || t2 !== tb || sigL(WB.ledger) !== sigL(WA.ledger) ) blind++; }
+  }
+  ok(runs >= 90 && same === runs, `FIFO two pages in flight together: the tables and the ledger of the two planned at once, in the order they began (${same}/${runs})`);
+  ok(timely === runs, `FIFO the second page's first word still goes on ahead of its instant (${timely}/${runs})`);
+  ok(blind >= 1, `FIFO the probe is not blind: planned in the other order the pictures differ (${blind} of ${runs / 16})`);
+  if ( process.env.PLAN_VERBOSE ) console.log(`  FIFO runs with a part finished at once: ${forced}/${runs}`);
 }
 
 /* ---------------------------------------------------------------- TIME */
@@ -280,8 +356,9 @@ function rig(W, { cost = 0, S = SEATS[0] } = {}) {
 {
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
   const fac = src.slice(src.indexOf("const ledger = {"), src.indexOf("};", src.indexOf("const ledger = {")));
-  ok(/const tableLedger = SEAT\.makeLedger\(\);/.test(src) && (fac.match(/plans\.settle\(\); (return )?tableLedger\./g) ?? []).length === 7 && /clear: \(\) => \{ plans\.clear\(\); tableLedger\.clear\(\); \}/.test(fac)
-    && ["list", "add", "boxes", "count", "has", "get", "prune"].every((k) => new RegExp(`(get )?${k}[:(]`).test(fac)), "SOURCE every reader and writer of the map's ledger first settles the pictures in flight");
+  ok(/const tableLedger = SEAT\.makeLedger\(\);/.test(src) && (fac.match(/plans\.settle\(\); (return )?tableLedger\./g) ?? []).length === 5 && /clear: \(\) => \{ plans\.clear\(\); tableLedger\.clear\(\); \}/.test(fac)
+    && fac.includes("boxes: (t0, t1, skip) => plans.read(t0, t1, (l) => l.boxes(t0, t1, skip)),") && fac.includes("count: (t0, t1) => plans.read(t0, t1, (l) => l.count(t0, t1)),") && src.includes("  ledger: tableLedger,\n  now: () => performance.now(),")
+    && ["list", "add", "boxes", "count", "has", "get", "prune"].every((k) => new RegExp(`(get )?${k}[:(]`).test(fac)), "SOURCE every writer of the map's ledger first settles the pictures in flight; a reader of a time window gets the whole pictures' answer (plans.read)");
   ok(/function tdeps\(\) \{\s*return \{ L, sizeFor: engineSizeFor, grid: grid\(\), sceneId: canvas\.scene\?\.id \?\? "", lang: lang\(\), known, ledger, toPerf, toShared,/.test(src), "SOURCE the moments and every other planner get that settling ledger");
   ok(/deps: \(\) => PLAN\.frozenDeps\(tdeps\(\), \{ ledger: tableLedger, off: toPerf\(0\), steps: new Map\(SZ\.SIZE_GROUPS\.map\(\(g\) => \[g, stepFor\(g\)\]\)\), tokens: sharedTokens\(null\), pins: sharedPins\(null\) \}\)/.test(src),
     "SOURCE a job's deps are frozen at its start: the clock's offset, the size steps, every shared token and pin");
