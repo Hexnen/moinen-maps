@@ -160,7 +160,10 @@ const main = fs.readFileSync(new URL("../scripts/main.mjs", import.meta.url), "u
 ok(main.includes("registerSfx();"), "main.mjs registers the sound effects");
 for ( const l of ["en", "pl"] ) {
   const j = JSON.parse(fs.readFileSync(new URL(`../lang/${l}.json`, import.meta.url), "utf8"));
-  for ( const k of ["set", "setHint", "all", "big", "off", "world", "worldHint", "words", "wordsHint", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layers.ground", "layers.tokens", "layers.weather", "layers.overlay", "layers.top"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
+  // (MAPWIN: "world" / "worldHint" / "words" / "wordsHint" named the world switch sfxLettersWorld and the seat's own word set sfxWords,
+  // both removed by GMALLMAPS: strings of settings that no longer exist must not ship)
+  for ( const k of ["world", "worldHint", "words", "wordsHint"] ) ok(!(`MOINENMAPS.Sfx.${k}` in j), `${l} no string of the removed setting MOINENMAPS.Sfx.${k}`);
+  for ( const k of ["set", "setHint", "all", "big", "off", "wordsAuto", "wordsEn", "wordsPl", "layer", "layerHint", "layers.ground", "layers.tokens", "layers.weather", "layers.overlay", "layers.top"] ) ok(typeof j[`MOINENMAPS.Sfx.${k}`] === "string", `${l} MOINENMAPS.Sfx.${k}`);
 }
 // (MAPSFXSEAT: the runtime is sfx.mjs + its table planning sfx-table.mjs, split out so two simulated seats can run it: dev/sfx-seat.test.mjs)
 const sfx = fs.readFileSync(new URL("../scripts/sfx/sfx.mjs", import.meta.url), "utf8") + fs.readFileSync(new URL("../scripts/sfx/sfx-table.mjs", import.meta.url), "utf8");

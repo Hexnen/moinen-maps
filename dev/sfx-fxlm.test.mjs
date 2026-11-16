@@ -312,7 +312,10 @@ group("NOTES", () => {
   ok(w.filter((x) => x.voice === "whump").length === 1 && w.find((x) => x.voice === "whump").path, "NOTES one bomb, one wave word (the riding one), not a burst shock and a dust shock");
   const walk = [0, 70, 90, 400, 410, 900].map((ms, i) => ({ x: i * 10, y: 0, ms: ms + 5000 }));
   ok(JSON.stringify(C.streamBeats(walk)) === JSON.stringify([0, 70, 90, 400, 410, 900]), "NOTES a gun's syllables fall on its rounds' own moments (shot-true), not evenly spread");
-  ok(/get\("sfxWordsWorld", "auto"\)/.test(sfx) && /"sfxWordsWorld", \{[^}]*scope: "world"/.test(sfx) && /isActiveGM && get\("sfxWordsWorld"/.test(sfx), "NOTES 'game language' follows the world's word set (fixed once by the GM): a Polish and an English seat see the same word");
+  // (MAPWIN: the set is NAMED by the active GM's seat - at ready and whenever it turns unnamed (fixWords) - and a set not named yet is
+  // the shared one on every seat (PF.wordsOf), not each seat's own language: dev/sfx-prefs.test.mjs MIXED boots the seats)
+  ok(/PF\.wordsOf\(get\("sfxWordsWorld", "auto"\)\)/.test(sfx) && /"sfxWordsWorld", \{[^}]*scope: "world"/.test(sfx) && /!game\.user\?\.isActiveGM \|\| PF\.WORD_SETS\.includes\(get\("sfxWordsWorld", "auto"\)\)/.test(sfx)
+    && /await fixWords\(\);/.test(sfx) && !/C\.langOf\(/.test(sfx), "NOTES 'game language' follows the world's word set (named by the GM's seat): a Polish and an English seat see the same word");
 });
 
 /* PHASES (live, FXLM2): a bomb's shock wave and its debris reach the gathering at their own moments, after the boom played; they are
