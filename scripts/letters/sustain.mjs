@@ -158,8 +158,17 @@ export function makeSustain(E) {
     };
     const seg = (q) => (q?.text ? { text: q.text, mood: q.mood, kmood: q.play?.mood, accent: q.accent, ms: q.ms, loud: q.loud } : null);
     /* the text of phrase i: the caller's function, WORD's flow, a vocabulary word, or the caller's text breathing */
-    const textAt = (i, L, extra, T) => {
-      if ( typeof o.words === "function" ) { try { const w = o.words(i, T - t0, L); if ( w ) return typeof w === "string" ? { text: w } : w; } catch {} }
+    /* the caller's own word for phrase i (`words` as a function): a string or { text, mood, accent, ms } and, since 1.9.25, the
+       phrase's own `treat` (one of the six treatments), `level` (0..1: how loud it stands), `scale` (its size, a share of the run's) and `colors` (its face) - a
+       score the caller writes phrase by phrase (a fire that builds), still seeded and on the run's clock on every seat */
+    const ownAt = (i, L, T) => {
+      if ( typeof o.words !== "function" ) return null;
+      try { const w = o.words(i, T - t0, L); if ( w ) return typeof w === "string" ? { text: w } : (w.text ? w : null); } catch {}
+      return null;
+    };
+    const textAt = (i, L, extra, T, own) => {
+      if ( own !== undefined ) { if ( own ) return own; }
+      else { const w = ownAt(i, L, T); if ( w ) return w; }
       const F = flowOf();
       if ( F ) { try { const w = seg(i === 0 ? F.onset : F.at(i - 1)); if ( w ) return w; } catch {} }
       const V = E.vocab();
@@ -194,16 +203,21 @@ export function makeSustain(E) {
 
     /* every seeded choice of phrase i at its instant T (the same on every seat, also for a phrase a late seat skips) */
     function decide(i, T) {
-      const L = lvAt(T);
+      let L = lvAt(T);
+      /* 1.9.25: the caller's word comes first: it may set this phrase's level and treatment (the seeded draws below stay as they were) */
+      const own = ownAt(i, L, T);
+      if ( own && Number.isFinite(own.level) ) L = clamp01(own.level);
       const fstyle = inv ? (flowOf() || null)?.style ?? null : null;
       const allowed = inv && fstyle && TREAT_BY_FLOW[fstyle] ? TREAT_BY_FLOW[fstyle] : null;
       const pool0 = ambient ? QUIET.filter((t) => !allowed || allowed.includes(t) || t === "breath") : (allowed ?? LIVE);
       const okT = (t) => !(t === "accent" && L < 0.45) && !(reduced && (t === "shed" || t === "echo" || t === "split"));
       let pool = pool0.filter((t) => t !== lastKind && okT(t));
       if ( !pool.length && allowed ) pool = pool0.filter(okT);   // a cycle repeats its split
-      const kind = i === 0 ? (allowed?.length === 1 && !reduced ? allowed[0] : "breath") : (o.treatments ? R.pick(o.treatments.filter((t) => t !== lastKind)) ?? "breath" : (R.pick(pool) ?? "breath"));
+      let kind = i === 0 ? (allowed?.length === 1 && !reduced ? allowed[0] : "breath") : (o.treatments ? R.pick(o.treatments.filter((t) => t !== lastKind)) ?? "breath" : (R.pick(pool) ?? "breath"));
+      /* (the caller's treatment for this phrase; a reduced seat gets none that scatters the word: it breathes instead) */
+      if ( own && LIVE.includes(own.treat) && !(ambient && !QUIET.includes(own.treat)) ) kind = reduced && (own.treat === "shed" || own.treat === "echo" || own.treat === "split") ? "breath" : own.treat;
       lastKind = kind;
-      const w = textAt(i, L, kind === "stretch" ? 1 + Math.round(2 * L) : 0, T);
+      const w = textAt(i, L, kind === "stretch" ? 1 + Math.round(2 * L) : 0, T, own);
       const side = i % 2 ? 1 : -1, u = U();
       const dxR = R.f(0.1, 0.6), dyR = ambient ? R.f(0.05, 0.45) : R.f(0, 0.12);
       const segMs = Number.isFinite(w.ms) && w.ms > 0 ? Math.max(500, Math.min(4000, w.ms)) : null;   // WORD's "current for" time
@@ -241,6 +255,8 @@ export function makeSustain(E) {
       else if ( ambient ) { const dy = -d.dyR * u; at = () => { const p = src() ?? last; return p ? { x: p.x + ph.dx, y: p.y + dy } : null; }; }
       else at = seatAt(ph);
       const base = { ...common(), ...(tr ?? { at }), seed: `${seed}:${i}`, mood: w.mood ?? o.mood ?? w.kmood, hold: life, rotation: d.rot, accent: w.accent };
+      if ( Array.isArray(w.colors) && w.colors.length ) base.colors = w.colors;   // 1.9.25: this phrase's own face (a caller's score)
+      if ( Number.isFinite(w.scale) && w.scale > 0 ) base.scale = w.scale;        // 1.9.25: and its own size, a share of the run's
       if ( clocked ) base.startAt = d.T;
       if ( inv ) base.kind = o.kind;
       /* MOTION2: invincible phrases keep the kind's motion; only an accent is pinned (a slam) */
@@ -305,7 +321,7 @@ export function makeSustain(E) {
       const q = at();
       if ( !q || (r && (up ? q.y - estH * 0.6 < r.y0 : q.y + estH * 0.6 > r.y1)) ) return;   // no room past the run's edge: the phrase plays alone
       c.h = track(E.play(text, { ...common(), seed: `${seed}:${d.i}:echo${j}`, at, scale: sh, magnitude: magOf(d.L), in: "pop", holdKind: "boil", out: "dissolve", hold: 240,
-        hollow: true, rotation: d.rot + (j % 2 ? 4 : -4), ...(clocked ? { startAt: d.T + 230 + 160 * (j - 1) } : {}) }));
+        hollow: true, rotation: d.rot + (j % 2 ? 4 : -4), ...(d.w?.colors ? { colors: d.w.colors } : {}), ...(clocked ? { startAt: d.T + 230 + 160 * (j - 1) } : {}) }));
     }
     /* a fragment rises from its own part of the word (syllable j over column j of the phrase) past the run's edge and drifts off,
        the fragments of one phrase fanning apart */
@@ -327,7 +343,7 @@ export function makeSustain(E) {
       const q0 = point(), r = roomAt(src() ?? last);
       if ( !q0 || (r && (up ? q0.from.y - estH / 2 < r.y0 : q0.from.y + estH / 2 > r.y1)) ) return;   // no room past the edge: no fragment
       f.h = track(E.play(text, { ...common(), seed: `${seed}:shed${d.i}:${j}`, path: { from: () => point()?.from ?? null, to: () => point()?.to ?? null, duration: 900, ease: "out", orient: "none" },
-        magnitude: magOf(d.L, 0.45), scale: SC, in: "pop", holdKind: "boil", out: "dissolve", hold: 600, hollow: ambient ? (o.hollow ?? true) : undefined,
+        magnitude: magOf(d.L, 0.45), scale: SC, in: "pop", holdKind: "boil", out: "dissolve", hold: 600, hollow: ambient ? (o.hollow ?? true) : undefined, ...(d.w?.colors ? { colors: d.w.colors } : {}),
         ...(clocked ? { startAt: d.T + d.life * (0.2 + 0.22 * j) } : {}) }));
     }
     /* the end: the words up play their exits; a live sound leaves a small tail trailing off along its drift, from the run's edge */

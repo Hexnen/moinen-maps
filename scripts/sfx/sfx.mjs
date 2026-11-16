@@ -47,6 +47,7 @@ import * as UI from "./sfx-table-ui.mjs";
 import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
 import * as T from "./sfx-table.mjs";
+import * as BURN from "./sfx-burn.mjs";
 import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
@@ -799,10 +800,13 @@ function reconcileBurn() {
     for ( const p of plans ) {
       // (the TABLE's live fires: the biggest ones, the same on every seat - not the biggest in this seat's view; this seat's performance
       // mode keeps fewer of them live, the rest burn quietly: its own need)
-      const isLive = p.live && live < Math.min(caps.live, C.CAPS.high.live);
+      // (MAPBURN: a smoulder is told as a score too - ADVM r2 item 8, K: the scene's standing fire lettered a small hollow word every 5-11 s,
+      // the engine's quiet mode; that mode is now only for the fires past this seat's cap)
+      const isLive = live < Math.min(caps.live, C.CAPS.high.live);
       // (a smaller fire whose phrases would sit on a bigger one's: heard in the bigger one's phrases, not lettered on top of them; the
       // table's phrase size - this seat's own lettering size setting moves its phrases off its panels only)
-      const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25;
+      // (MAPBURN: at the size the score's room has now - its top rung's share, sfx-burn topScale - so a smoulder's spots crowd by its own block)
+      const all = p.points.map((_, i) => p.at(i, now)), em = burnSize(p, isLive) * 1.25 * (isLive ? BURN.topScale(BURN.heatOf(p.level(now)).top) : 1);
       // (THUNDERFIT: the spots of ONE fire crowd each other too when its phrases are big for the way its path runs on this screen - a far
       // zoom, a bigger size step: live their phrases stood on each other; the first spot stays, a spot on an earlier one is heard in it)
       const idx = C.burnSpots(all, em), pts = idx.map((i) => all[i]);
@@ -831,7 +835,7 @@ function reconcileBurn() {
   // (MAPRIDE: a live run joins the shared clock only once this seat's clock has settled - live a player just after a reload was ~280 ms
   // off with the clock "ready" (ENGVIEW-1); its run waits a second or two for it, at most CLOCK_WAIT after the page loaded)
   const clockLate = (L?.clock?.error?.() ?? 0) > CLOCK_OK && performance.now() < CLOCK_WAIT;
-  for ( const [k, w] of want ) if ( !burns.has(k) && w.seat.length && !(w.live && clockLate) ) { const b = { plan: w.plan, live: w.live, idx: w.seat, sig: w.sig, off: rooms.get(k) ?? [], subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.seat); }
+  for ( const [k, w] of want ) if ( !burns.has(k) && w.seat.length && !(w.live && clockLate) ) { const b = { plan: w.plan, live: w.live, idx: w.seat, all: w.idx, sig: w.sig, off: rooms.get(k) ?? [], subs: [] }; burns.set(k, b); b.subs = startBurn(w.plan, w.live, w.seat); }
   stats.burns = burns.size;
   if ( burns.size || (stepFor("fire") > 0 && [...(Fire.allStrokes?.() ?? new Map()).values()].some((s) => s.k === "fire")) ) scheduleBurn(1000);
 }
@@ -869,10 +873,17 @@ function burnRooms(want) {
     const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
     const maxShift = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45;
     for ( const [key, w] of want ) {
-      const p = w.plan, sc = L?.prefs?.scale ?? 1, k = burnSize(p, w.live) * sc, arr = [], st = stepFor("fire");
+      const p = w.plan, sc = L?.prefs?.scale ?? 1, arr = [], st = stepFor("fire");
+      // (MAPBURN: the score's room - its roar's size x the share its heat reaches now: a smoulder keeps a smaller block clear than a blaze,
+      // and the block grows with the fire, the engine reads `room` every frame - at THIS seat's size: the table's inside the seat's own
+      // bounds - sfx-burn seatSize: far out the smallest phrase still legible (ADVM r2 item 8, J: unreadable chips at zoom 0.143), close in
+      // the roar no taller than ROAR_VH of this window; the quiet mode keeps the engine's own clamp)
+      const ts = w.live ? BURN.topScale(BURN.heatOf(p.level(now)).top) : 1, vh = globalThis.innerHeight || 900;
+      const seatK = (kk) => (w.live ? BURN.seatSize(kk, { zoom: z, vh, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) : kk);
+      const k0 = burnSize(p, w.live) * sc, k = seatK(k0) * ts;
       // (smaller on this seat where the table's size has no clean room - down to the legibility floor of its window, never under it -,
       // laid out from the lower steps up so a higher step never letters a run smaller: sfx-seat burnRoom; question MAPRIDE-3)
-      const kMin = Math.min(k, SZ.floorPx(globalThis.innerHeight || 900, 1, L.sizeModel) / z), below = [1, 2, 3].filter((s) => s < st).map((s) => burnSize(p, w.live, s) * sc);
+      const kMin = Math.min(k, (w.live ? BURN.minSize({ zoom: z, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) * ts : SZ.floorPx(vh, 1, L.sizeModel) / z)), below = [1, 2, 3].filter((s) => s < st).map((s) => seatK(burnSize(p, w.live, s) * sc) * ts);
       // (a spot off this screen stays where it is: its words are not pulled into view, and it takes no room here)
       const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
       // (MAPSAME: one whose run would still reach into this view, cut at its edge, is not lettered here - sfx-seat offSpot)
@@ -881,7 +892,8 @@ function burnRooms(want) {
       // its phrases spread past the block and a fire burning just above the GM's view lettered into it, cut by the top edge - ADVM r2 item 6, A)
       for ( const i of w.idx ) if ( !on.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }
       const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion });
-      on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / k }; if ( r[j].ok ) taken.push(r[j].box); });
+      // (`f`: this seat's size for the run as a share of the table's - over 1 far out)
+      on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / (k0 * ts) }; if ( r[j].ok ) taken.push(r[j].box); });
       out.set(key, arr);
     }
   } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's room`, err); }
@@ -897,16 +909,31 @@ function runClock(p, now = sharedNow()) {
   if ( !Number.isFinite(p.start) ) return NaN;
   return p.start + Math.floor(Math.max(0, now - p.start) / RUN_EPOCH) * RUN_EPOCH;
 }
+/** MAPBURN: the cap height of the engine's lettering per unit of `size` in the table's face (League Gothic 1.27, another face its own):
+    the seat bounds of a scored run are heights on this screen */
+let capMemo = null;
+function capK() {
+  let face = ""; try { face = String(L?.invFace?.() ?? ""); } catch {}
+  if ( capMemo?.face === face ) return capMemo.k;
+  let k = 1.27;
+  try { const z = L.sizeOf("FWOOM", { kind: C.kindOf("fire", known), space: "world", size: 100, fit: "world" }); if ( z?.sizeK > 0 ) k = z.sizeK; } catch {}
+  capMemo = { face, k };
+  return k;
+}
 function burnSize(p, live, step = stepFor("fire")) {
   // (MAPRIDE: the level at the run's shared start, not this seat's now: the same size on every seat, one joining late too)
   const zoom = SEAT.refZoom(grid(), 0), lv = p.level(Number.isFinite(p.start) ? p.start : sharedNow());
-  const px = SEAT.REF_VH * (live ? 0.035 + 0.03 * Math.min(1, lv / 0.9) : 0.03);
+  // (MAPBURN: a scored run's size is its ROAR's - the biggest phrase, the others are shares of it, sfx-burn RUNGS - the same for every
+  // fire: how big a fire letters is how high its heat lets it climb, not another size per level; the quiet mode as before)
+  const px = SEAT.REF_VH * (live ? BURN.ROAR_REF : 0.03); void lv;
   // (SFXSIZE: at the fire group's size step; the phrase spacing and the panel shifts use this size too)
   return SZ.sizeAt(Math.max(4, px / zoom), step);
 }
 function startBurn(p, live, idx = null) {
   const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), G = grid();
   const kind = C.kindOf("fire", known);
+  // (MAPBURN: the table's spots of this fire, in order: which voice of the score a spot is - the same on every seat, whichever it letters)
+  const idxAll = burns.get(p.key)?.all ?? idx ?? [0];
   // (each spot keeps its own index - its seed and its place on the path - whichever spots are lettered)
   return (idx ?? p.points.map((_, i) => i)).map((i) => {
     try {
@@ -920,16 +947,29 @@ function startBurn(p, live, idx = null) {
       // entry gone from `burns` it fell back to the table's raw spot with no room - live 2026-11-15 A, the old run's exit phrases jumped to
       // the unshifted spot and rose past the GM's top edge, under the challenges panel; ADVM r2 item 6)
       const last = { at: null, room: null };
-      return L.sustain({ kind, space: "world", at: () => { const b = burns.get(p.key);
+      // (MAPBURN: the fire's SCORE - sfx-burn burnScore: the vocabulary's fire ladder climbed in stanzas that grow to a roar, each phrase
+      // its own word, size, treatment and heat colour, from shared data (the fire's id, the phrase's index, the fire's level at the phrase's
+      // instant of the run's clock), so every seat letters the same phrase at the same instant; a second and third spot of one fire
+      // start further on in the arc and stay a rung under the first, which owns the roar. This seat only floors a phrase's size at its
+      // window's legibility floor - the ladder flattens far out, the words and instants stay the table's)
+      const score = live ? BURN.burnScore({ seed: `${seed}|${i}`, heat: (ms) => p.level(Number.isFinite(t0) ? t0 + ms : sharedNow()), word: (q) => { const w = L.word(kind, { ...q, lang: lang() }); return { text: w.text, mood: w.mood }; },
+        colors: p.colors ?? null, reduced: red, spot: Math.max(0, idxAll.indexOf(i)) }) : null;
+      const words = score ? (n, ms) => { const w = score(n, ms); if ( !w ) return null;
+        const fl = BURN.floorScale(k, { zoom: canvas.stage?.scale?.x || 1, capK: capK(), floorPx: SZ.floorPx(globalThis.innerHeight || 900, 1, L.sizeModel) });
+        return { ...w, scale: Math.max(w.scale, Math.min(fl, BURN.fitScale(w.text.length, w.top))) }; } : undefined;
+      return L.sustain({ kind, space: "world", ...(words ? { words, fit: "world" } : {}), at: () => { const b = burns.get(p.key);
           if ( !b && last.at ) return last.at;
           const q = (b?.plan ?? p).at(i, sharedNow()), o = b?.off?.[i];
           return (last.at = o ? { x: q.x + o.dx, y: q.y + o.dy } : q); },
         level: startAt !== undefined ? (ms) => p.level(t0 + (Number.isFinite(ms) ? ms : sharedNow() - t0)) : () => p.level(sharedNow()),
         ...(startAt !== undefined ? { startAt } : {}),
-        // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width)
+        // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width;
+        // MAPBURN: the width of the roar's block - a fire grows into it, the score letters a long word smaller before the engine squeezes it)
         room: () => { const b = burns.get(p.key); return b ? (last.room = b.off?.[i]?.room ?? null) : last.room; }, maxWidth: SEAT.RUN.mw * k,
         seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size,
-        ...(p.colors ? { colors: p.colors } : {}), glow: "auto", reduced: red, ...(live ? {} : { mode: "ambient" }), ...layerOpts(),
+        // (MAPBURN: no glow where the word stands over the scene's lighting - there it is not darkened, and the glow was a soft orange box
+        // behind the letters that outlived them (ADVM r2 item 8); the quiet mode's words solid on the heat ramp, not hollow)
+        ...(p.colors ? { colors: p.colors } : live ? {} : { colors: [BURN.RUNGS[2].face] }), glow: BURN.glowFor(layerOpts().layer, "auto"), reduced: red, ...(live ? {} : { mode: "ambient", hollow: false }), ...layerOpts(),
         // (EFFECTS1, FXLM2 leftover: the engine's "echo" treatment trails two copies of a phrase beside it - over a fire they sat on
         // the phrase itself and on the next one; a burning fire's phrases breathe, stretch, split, shed and flare, without the echo)
         ...(live ? { treatments: BURN_TREATMENTS } : {}),

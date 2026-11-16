@@ -650,6 +650,30 @@ a page load `L.clock.ready()` can be true with `L.clock.error()` ~280 ms (the fi
 the same otherwise). Take `startAt` when `L.clock.error()` is small (e.g. under 15 ms; it took ~5 s after the load here), or take it
 again and restart the run once it is.
 
+**4a. A caller's score for a lasting sound (1.9.25 MAPBURN, map `startBurn`).** A run left to the engine picks each phrase's word from
+the kind's flow and its treatment at random from the seed: a fire lettered the same three or four words for 20 s with nothing that
+builds (ADVM r2 item 8). `words(k, ms, level)` may now return, beside `text` / `mood` / `ms` / `accent`, the phrase's own `treat`,
+`level` (its loudness), `scale` (its size as a share of the run's `size`) and `colors` (its face): the caller writes the SCORE and the
+engine letters, seats and clocks it. Rules that make it the same on every seat:
+- decide a phrase from the seed, its index `k` and `ms` (the run's clock) only; the engine asks for every phrase in order from the
+  first on every seat (a late seat replays the past), so a small memo "the word before" is safe;
+- return the word's `mood` (the vocabulary's: `L.word(kind, ...).mood`). A phrase with no mood has it read from its letters and its
+  design then follows the words this seat drew before: a late seat lettered the same phrase another height (node: 8-24 px off for the
+  whole run; with the mood 3 px);
+- size the run for its BIGGEST phrase (`size` = the roar, the others are shares) with `fit: "world"`, and lay the room and `maxWidth`
+  out for `size` x the biggest share used; a long word must be lettered smaller by the score (about one `size` per letter in League
+  Gothic), not squeezed by `maxWidth`;
+- a `treat` not allowed in the mode (ambient: only the quiet ones) or under reduced motion falls back to the seeded pick / "breath".
+```js
+const score = burnScore({ seed, heat: (ms) => fire.levelAt(start + ms), word: (q) => L.word("fire", { ...q, lang }) });   // map: scripts/sfx/sfx-burn.mjs
+L.sustain({ kind: "fire", space: "world", fit: "world", size, words: (k, ms) => score(k, ms), startAt, room, maxWidth: 13 * size * topShare, glow: false });
+```
+The map's score: the vocabulary's fire ladder (`intensity` 1 ember ticks .. 5 an inferno's roar) climbed in stanzas of four phrases
+(rise, rise, peak, fall), three stanzas growing to a slammed roar, the top rung from the fire's heat at the phrase's instant; faces on
+a light heat ramp (amber to white-hot: the engine's fire orange was unreadable on flames); no glow on the layers over the scene's
+lighting (the glow was a soft orange box that outlived the letters). [V node: `check-sustain.mjs` 10, `dev/sfx-burnscore.test.mjs`;
+V live: see the map's report]
+
 **5. The impact's strength ladders (plus-ultra `tierOf`).** `L.impact.tierOf(m)` (0..3 at `L.impact.tiers` = [0.35, 0.85, 1.35]),
 `L.impact.stepOf(m)` (0..5 at `L.impact.steps`), `L.impact.seriesBoost(n)`. A plan's tier is `tierOf(min(2, magnitude +
 seriesBoost(series)))`, the same as `L.impact.plan(...).tier` for every magnitude 0..2 and series 0 / 1 / 3. [V node]
@@ -1606,6 +1630,8 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   "Safety", "Cost"; `check-figures.mjs` sections 2b-2d and the follow check.
 - 2026-11-15: ENGPINK (1.9.22, `tactics-zones-engpink`): section 13 "No pink" (the band, the replaced colours, the computed shades),
   section 14 ruling row, section 15 palette row; `check-pink.mjs` (check.mjs 8g and 16).
+- 2026-11-16: MAPBURN (1.9.25, `tactics-zones-mapburn`): "4a. A caller's score for a lasting sound" (`words` may return `treat` /
+  `level` / `scale` / `colors`; give the mood; size for the biggest phrase); `check-sustain.mjs` 10, map `dev/sfx-burnscore.test.mjs`.
 - 2026-11-15: ENG24 (1.9.24, `tactics-zones-eng24`): section 21a (`plan.tableMs`, the loaded / cold seat, steps 0-2 length); impact
   README "Nothing the first use costs", "What each step does"; `check-seats.mjs` slow seats, `check-figures.mjs` art jobs,
   `check-impact.mjs` tableMs and step lengths.

@@ -958,8 +958,12 @@ export function mergeRects(list, gap = 0, grow = 1) {
  * half-width hw) and `maxWidth` RUN.mw the engine keeps the run inside it as one block and skips fragments past its edge, its ink
  * leaving it by at most 0.14 (smooth motion) or ~1.1 across and ~0.3 up / down (stepped: the boil) - the `margin` this seat reserves
  * round the room. Before, the map reserved -3.1 .. +1.1 and passed no room: live the run stood on the macro bar and the bomb's pin.
+ * MAPBURN: the run is now a SCORE (sfx-burn: each phrase its own word and size, the roar the biggest and the longest - up to WIDE of the
+ * run's sizes wide) and `k` is its roar's size x the share its heat reaches. Measured again on the engine (1.9.25, node, the map's own
+ * call, fit "world", size 60, heat 0.12 / 0.42 / 0.72, both motion types, 20-45 s each): ink within 14.4 across, 3.85 up and 5.1 down
+ * (smooth), half-width to 9.3 (stepped) - dev/sfx-burnscore.test.mjs holds it.
  */
-export const RUN = { up: 3.6, down: 4.2, hw: 3.5, mw: 5, margin: { smooth: { x: 0.2, u: 0.1, d: 0.1 }, stepped: { x: 1.15, u: 0.35, d: 0.3 } } };
+export const RUN = { up: 3.9, down: 5.2, hw: 7.6, mw: 13, margin: { smooth: { x: 0.2, u: 0.1, d: 0.1 }, stepped: { x: 1.8, u: 0.35, d: 0.3 } } };
 /** the room the engine keeps a run to, round its spot `q` */
 export const runBox = (q, k) => ({ x0: q.x - RUN.hw * k, x1: q.x + RUN.hw * k, y0: q.y - RUN.up * k, y1: q.y + RUN.down * k });
 /** what this seat keeps clear for it: the room and the margin its ink may leave it by in this motion type */

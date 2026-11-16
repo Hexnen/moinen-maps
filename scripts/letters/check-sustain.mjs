@@ -168,6 +168,30 @@ async function engineChecks(dir) {
     E.restoreWarn?.();
   });
 
+  /* 10. (1.9.25 MAPBURN) a caller's score: `words` may give each phrase its own treatment, loudness, size share and face; a call
+     whose function returns none of them letters exactly what it did (the same words, sizes and places as with a plain string) */
+  await block("score", async () => {
+    const mk = async (words) => {
+      const E = await setup(); const L = E.engine; L.lookStyle("invincible");
+      const s = L.sustain({ kind: "fire", lang: "en", space: "world", fit: "world", at: () => ({ x: 2000, y: 1500 }), seed: "sg-score", size: 60, keepInView: false, level: 0.6, startAt: E.now(), words });
+      const rows = new Map();
+      for ( let t = 0; t < 6000; t += 33 ) { await E.tick(33, 33); for ( const h of s.handles ) if ( h.text && h.sprite?.visible && !rows.has(h) ) rows.set(h, { text: h.text, size: h.size, col: h.opts?.colors?.[0] ?? null, slam: h.opts?.in === "slam", y: Math.round(h.sprite.position.y) }); }
+      s.stop({ quick: true }); E.restoreWarn?.();
+      return [...rows.values()];
+    };
+    const T4 = ["TIK", "FWUFF", "KRAKK", "GROOOM!"];
+    const sc = (i) => ({ text: T4[i % 4], mood: "fire", ms: 900, scale: [0.5, 0.65, 0.8, 1][i % 4], colors: [["#ffc530", "#ffd83a", "#ffe566", "#fff9dc"][i % 4]], level: [0.2, 0.4, 0.6, 0.9][i % 4], treat: i % 4 === 3 ? "accent" : "breath" });
+    const a = await mk(sc);
+    const by = (t) => a.filter((r) => r.text === t);
+    ok(a.length >= 5 && by("TIK").length && by("GROOOM!").length, `sustain score: the caller's phrases are lettered (${a.map((r) => r.text).join(" ")})`);
+    ok(by("TIK").every((r) => Math.abs(r.size - 30) < 0.01) && by("FWUFF").every((r) => Math.abs(r.size - 39) < 0.01) && by("GROOOM!").every((r) => Math.abs(r.size - 60) < 0.01), `sustain score: each phrase at its own share of the run's size (${a.map((r) => r.size.toFixed(0)).join(" ")})`);
+    ok(by("TIK").every((r) => r.col === "#ffc530") && by("GROOOM!").every((r) => r.col === "#fff9dc"), "sustain score: each phrase in its own face");
+    ok(by("GROOOM!").every((r) => r.slam) && by("TIK").every((r) => !r.slam), "sustain score: the phrase's own treatment (the accent slams in, the others do not)");
+    const plain = await mk((i) => T4[i % 4]), obj = await mk((i) => ({ text: T4[i % 4] }));
+    ok(plain.length >= 3 && JSON.stringify(plain) === JSON.stringify(obj), "sustain score: a function that gives only the text letters as before (string and { text } alike)");
+    ok(plain.every((r) => r.size <= 60.01 && r.col === null) && plain.filter((r) => Math.abs(r.size - 60) < 0.01).length >= 3, `sustain score: with no share and no face the run's own size and palette (${plain.map((r) => `${r.size.toFixed(1)}/${r.col}`).join(" ")})`);
+  });
+
   console.log(`sustain-engine: ${n} checks, ${failed} failed`);
   return failed;
 }
