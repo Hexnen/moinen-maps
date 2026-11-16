@@ -187,7 +187,8 @@ export function createImpact(L, tools = null) {
       /* pictures are painted once and shown once: a software canvas keeps the whole cost inside paint() (a GPU canvas defers the
          tessellation of thousands of halftone dots to the frame that first shows it: measured as a stall of several hundred ms) */
       makeCanvas: (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; },
-      ctx2d: (c) => c.getContext("2d", { willReadFrequently: true }) };
+      ctx2d: (c) => c.getContext("2d", { willReadFrequently: true }),
+      ctxLayer: (c) => c.getContext("2d") };   // CRITFREEZE: a figure layer is shown, never read (draw.mjs ctxLayer)
     /* where the blow lands: on the struck figure's rim on the side it comes from; the weak steps put it right on the rim (the figure
        stays in sight), a figure struck from nowhere in particular gets its rim spot from the seed */
     const rim = sub.sil && plan.step <= 2 ? (plan.step <= 1 ? 0.95 : 0.85) : 0.7;
@@ -705,6 +706,42 @@ export function createImpact(L, tools = null) {
     };
     if ( idleQ.length ) (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 50)))(step, { timeout: 2000 });
   }
+  /* CRITFREEZE (live, two seats, a critical with two figures, asked ~200 ms before its start: the arts its drawings need, a held twin per
+     figure and tone, are 3 jobs of ~31 ms, one task each, in the last frames before the blow: display frames of 50-67 ms as the word lands).
+     I.warmFor(spec): a caller that knows the blow before it knows its instant (a roll whose dice still tumble) names it; the figures' bases
+     and then the very arts I.play(spec) would queue as jobs are worked out one per idle moment of the page (the same plan, the same seeded
+     walk: artJobs). Nothing is painted, shown or counted (no window, no flash budget); the arts are kept with the figures' pictures, so the
+     play finds them made and queues nothing. What is not made by then is made by the play, as before: the picture is the same either way.
+     -> the pieces of work queued (0: nothing to show on this seat) */
+  let forQ = [], forOn = false;
+  const forIdle = (fn) => (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 30)))(fn, { timeout: 250 });
+  function forStep() {
+    forOn = false;
+    while ( forQ.length && !forQ[0].length ) forQ.shift();
+    const fn = forQ[0]?.shift();
+    if ( !fn ) return;
+    const t0 = now();
+    try { fn(); } catch {}
+    const ms = now() - t0;
+    stats.warmFor = (stats.warmFor ?? 0) + 1; stats.warmForMs = (stats.warmForMs ?? 0) + ms; if ( ms > (stats.warmForMax ?? 0) ) stats.warmForMax = ms;
+    if ( forQ.some((q) => q.length) ) { forOn = true; forIdle(forStep); }
+  }
+  function warmFor(spec0 = {}) {
+    try {
+      const spec = { ...(spec0 && typeof spec0 === "object" ? spec0 : {}) };
+      if ( modeFor(prefs(), { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle }) === "off" ) return 0;
+      const plan = planImpact(spec), sub = subjectOf(spec);
+      if ( sub.hidden || !plan.frames.length ) return 0;
+      const env = envOf(spec, plan, sub);
+      const q = (env.figs ?? []).filter((g) => g?.sil).map((g) => () => warmBase(env, [g]));
+      if ( !q.length ) q.push(() => warmBase(env, []));
+      q.push(() => { for ( const job of artJobs(env, plan) ) q.push(job); });
+      if ( forQ.length > 3 ) forQ.splice(0, forQ.length - 3);   // (a few blows named at once at most: the older ones are made by their play)
+      forQ.push(q);
+      if ( !forOn ) { forOn = true; forIdle(forStep); }
+      return q.length;
+    } catch { return 0; }
+  }
   /* ENG24 (CALLER5-E4): the first impact of a session was cold (its frames ran about twice as long as later ones: the painters' code not yet
      compiled, the backdrop filters not yet built). Once per page, while the browser is idle: every frame type painted once on a tiny canvas,
      then every backdrop filter shown for one frame on a 1 px box. Nothing a user can see */
@@ -747,7 +784,7 @@ export function createImpact(L, tools = null) {
   try { globalThis.Hooks?.on?.("canvasTearDown", stopAll); } catch {}
 
   const api = {
-    play, prepare, plan: planFor, show: show1, stopAll, pick, mode, setMode, warm,
+    play, prepare, plan: planFor, show: show1, stopAll, pick, mode, setMode, warm, warmFor,
     /* IMPACT5 (item 11.2): what THIS seat shows ("full" | "local" | "static" | "off": its own photosensitivity and motion settings applied);
        mode() stays the table's setting */
     seatMode: () => modeFor(prefs(), { osReduced: osReduced() }),

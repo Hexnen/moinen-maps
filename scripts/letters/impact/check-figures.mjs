@@ -260,6 +260,22 @@ export async function run(ok) {
       const cutArt = plan.frames.filter((f) => f.fig && f.fig !== "r" && f.fig !== "p").length * 2;
       ok(made - layers <= cutArt, `figures: painting after the jobs makes only its layers and cut-outs of arts already worked out (${made - layers} > ${cutArt}) ${JSON.stringify(o)}`);
     }
+    /* CRITFREEZE: a figure layer is painted on the context the env hands for layers (ctxLayer: a plain 2D context, drawn by the graphics
+       card), every layer and nothing else; the layers and their draws are the very same as on the read-back context */
+    { const plan = planImpact({ kind: "crit", magnitude: 1.9, seed: "layers" });
+      const go = (hook) => {
+        const figsL = [{ role: "target", cx: 900, cy: 450, sil: { src: fake(120, 120), sx: 0, sy: 0, sw: 120, sh: 120, w: 100, h: 100, rot: 0 } }, { role: "from", cx: 500, cy: 420, sil: { src: fake(100, 100), sx: 0, sy: 0, sw: 100, sh: 100, w: 90, h: 90, rot: 0 } }];
+        let asked = 0, read = 0; const xs = [], out = [];
+        const e = env({ figs: figsL, sil: figsL[0].sil, figLayers: true, ctx2d: (c) => { read++; const x = mkCtx(c); if ( !hook ) xs.push(x); return x; }, ...(hook ? { ctxLayer: (c) => { asked++; const x = mkCtx(c); xs.push(x); return x; } } : {}) });
+        warmBase(e); for ( const j of artJobs(e, plan) ) j();
+        read = 0; xs.length = 0;
+        for ( const f of plan.frames ) for ( const l of paintFigLayers(e, f, 1) ) out.push([Math.round(l.x), Math.round(l.y), l.size, l.canvas.width]);
+        return { asked, read, out: JSON.stringify(out), n: out.length, draws: xs.reduce((a, x) => a + x.log.draws, 0) };
+      };
+      const a = go(true), b = go(false);
+      ok(a.n >= 6 && a.asked === a.n, `figures: every figure layer is painted on the layer context (${a.asked} of ${a.n})`);
+      ok(a.out === b.out && a.draws > 0 && a.draws === b.draws && b.asked === 0, `figures: the layers and their draws are the same on either context (${a.draws} / ${b.draws} draws)`);
+      ok(/x = ctxLayer\(e, c\)/.test(await (await import("node:fs/promises")).readFile(new URL("./draw.mjs", import.meta.url), "utf8")), "figures: paintFigLayers asks the layer context"); }
   }
 
   /* 4. the player on a fake browser: which figures take part on a seat (its own process: it replaces globals) */
@@ -342,6 +358,37 @@ async function life(ok) {
   h = I.play({ kind: "crit", magnitude: 1.9, seed: 7, subject: tgt, from: att, also: [flip] });
   for ( let t = 0; t < h.plan.ms + 100; t += 16 ) await E.tick(16);
   ok(!h.alive && (await h.finished) === "done" && started && document.body.children.flatMap((r) => r.children ?? []).length === 0, "figures life: a critical with three figures plays out and leaves nothing");
+  /* CRITFREEZE: a blow named ahead (I.warmFor: its instant not known yet) has its figures' arts worked out one piece per idle moment;
+     nothing is shown, painted or counted; the play that follows queues no art job (without the naming it queues some) and plans the same */
+  { await E.tick(1500);
+    const kidsNow = () => document.body.children.flatMap((r) => r.children ?? []).length;
+    /* (the fake page's pictures are empty: for this block every new canvas reads back a painted disc, so the figures have art to work out) */
+    const mk0 = document.createElement;
+    document.createElement = (t) => { const el = mk0.call(document, t);
+      if ( t === "canvas" ) el.getContext("2d").createImageData = (w, h) => ({ data: new Uint8ClampedArray(Math.max(0, w * h * 4) | 0) });
+      if ( t === "canvas" ) el.getContext("2d").getImageData = (x, y, w, h) => { const d = new Uint8ClampedArray(Math.max(0, w * h * 4) | 0);
+        for ( let j = 0; j < h; j++ ) for ( let i = 0; i < w; i++ ) if ( Math.hypot(i - w / 2, j - h / 2) < Math.min(w, h) * 0.45 ) { const o = (j * w + i) * 4; d[o] = (i * 7 + j * 3) & 255; d[o + 1] = (i * 2 + j * 5) & 255; d[o + 2] = (i + j * 9) & 255; d[o + 3] = 255; }
+        return { data: d }; };
+      return el; };
+    const c1 = tok("c1", 1900, 1000), c2 = tok("c2", 1500, 1000), w1 = tok("w1", 1900, 1000), w2 = tok("w2", 1500, 1000);
+    const cold = I.play({ kind: "crit", magnitude: 1.9, seed: 8, subject: c1, from: c2 }); const coldJobs = cold.jobN, coldPlan = JSON.stringify(cold.plan.frames.map((f) => [f.type, f.fig, f.seed, f.at, f.ms])); cold.stop();
+    await E.tick(600);
+    const flashes0 = I.stats.played, done0 = I.stats.warmFor ?? 0;
+    const n = I.warmFor({ kind: "crit", magnitude: 1.9, seed: 8, subject: w1, from: w2 });
+    ok(n >= 2 && kidsNow() === 0 && (I.stats.warmFor ?? 0) === done0, `figures life: warmFor queues its work and does none of it in the call (${n} pieces, ${kidsNow()} elements)`);
+    let most = 0, last = I.stats.warmFor ?? 0;
+    for ( let t = 0; t < 3000; t += 16 ) { await E.tick(16); const d = (I.stats.warmFor ?? 0) - last; last += d; if ( d > most ) most = d; }
+    ok((I.stats.warmFor ?? 0) - done0 >= n && most === 1, `figures life: the named blow's art is worked out one piece per idle moment (${(I.stats.warmFor ?? 0) - done0} pieces, ${most} at most at once)`);
+    ok(kidsNow() === 0 && I.stats.played === flashes0, "figures life: warmFor shows nothing and counts no impact");
+    const hw = I.play({ kind: "crit", magnitude: 1.9, seed: 8, subject: w1, from: w2 });
+    ok(coldJobs >= 3 && hw.jobN === 0, `figures life: after warmFor the play queues no art job (${hw.jobN}; without it ${coldJobs})`);
+    ok(JSON.stringify(hw.plan.frames.map((f) => [f.type, f.fig, f.seed, f.at, f.ms])) === coldPlan, "figures life: the play after warmFor plans the very same drawings");
+    hw.stop(); await E.tick(600);
+    await I.setMode("off"); ok(I.warmFor({ kind: "crit", magnitude: 1.9, seed: 9, subject: w1, from: w2 }) === 0, "figures life: warmFor with impact frames off = nothing"); await I.setMode("full");
+    let threw = false; try { I.warmFor(); I.warmFor(null); I.warmFor({ subject: { destroyed: true } }); } catch { threw = true; }
+    ok(!threw, "figures life: warmFor without a blow to name does not throw");
+    await E.tick(1500);
+    document.createElement = mk0; }
 }
 
 if ( process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href ) {

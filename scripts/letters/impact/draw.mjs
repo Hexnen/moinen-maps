@@ -132,6 +132,12 @@ export function inkPixels(d, w, h, mask, neg = false) {
   return out;
 }
 const ctx2d = (e, c) => (e.ctx2d ? e.ctx2d(c) : c.getContext("2d"));
+/* CRITFREEZE (live, two seats, a critical with two figures: of the 0.7 s its 19 drawings took to paint, 0.57 s was the raster of the 38 figure
+   layers, 15 ms each, on the page's own thread: every drawing canvas was a read-back canvas (willReadFrequently: rastered in software), and a
+   figure layer is some forty scaled copies of the art). A figure LAYER is only ever shown, never read: the env may hand it a plain 2D
+   context (ctxLayer: the browser draws it with the graphics card where it can, 4 ms a layer live); the art canvases, whose pixels the
+   treatments read, keep ctx2d. The same draws either way */
+const ctxLayer = (e, c) => (e.ctxLayer ? e.ctxLayer(c) : ctx2d(e, c));
 /* FIN-ENGINE: the figure of a token picture (cut-out, inked art, tints) is worked out once per picture and shared by every impact on it
    (before: once per impact; a series of five blows did the cut-out five times) */
 const SHARED = new WeakMap();
@@ -712,7 +718,7 @@ export function paintFigLayers(e, f, q = 1) {
   tr.list.forEach((g, i) => {
     if ( e.local && Math.hypot(g.cx - e.cx, g.cy - e.cy) > e.local.r ) { drawFig(skipCtx, e, f, g, tr.each[i], R, 1, 0); return; }   // outside the gentle panel: nothing (the draws keep the seeded order)
     const zz = tr.zs[i], size = Math.ceil(Math.hypot(g.sil.w, g.sil.h) * zz * 1.12 + u * 0.08 + 8), [dx, dy] = tr.offs[i];
-    const c = e.makeCanvas(Math.max(2, Math.round(size * q)), Math.max(2, Math.round(size * q))), x = ctx2d(e, c);
+    const c = e.makeCanvas(Math.max(2, Math.round(size * q)), Math.max(2, Math.round(size * q))), x = ctxLayer(e, c);
     x.setTransform?.(q, 0, 0, q, 0, 0);
     drawFig(x, e, f, { ...g, cx: size / 2, cy: size / 2 }, tr.each[i], R, zz, tr.slices[i]);
     out.push({ g, canvas: c, x: g.cx + dx - size / 2, y: g.cy + dy - size / 2, size, dx, dy });
