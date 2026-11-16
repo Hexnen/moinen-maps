@@ -244,7 +244,12 @@ export const OUT_RANK = 1;
 /** MAPBURN2 (the owner, 2026-11-16: the fire words are too big and too frequent): a fire's catch and its flare are lettered at the
     smallest story rank too - an exact share of the reference view (sfx-events RANK_SHARE[1], 4 %), no longer the engine's natural size
     for their loudness (live a square-wide fire's catch stood 9-11 % of the view tall); its going-out hiss a notch under them */
-export const FIRE_RANK = 1, OUT_SHRINK = 0.8;
+export const FIRE_RANK = 1;
+/** MAPBURN3: every fire event word is a caption beside the flames, a notch or two under the smallest story rank (shares of sfx-events
+    RANK_SHARE[1], 4 % of the reference view): a catch and a flare 3.2 % - a little over a burning line's roar (2.8 %), they are the
+    story's turns -, every hiss (the fire going out, the eraser, rain on the fire) 2.8 %. Before: the catch and flare 4 %, the
+    going-out hiss 4 % too (its `shrink` never reached the word), the eraser's hiss the engine's natural size (live 40-57 px caps). */
+export const FIRE_SHRINK = 0.8, OUT_SHRINK = 0.7;
 /** MAPBURN2: and a fire that catches within CATCH_QUIET of another fire's catch in the same area of the map (sfx-burn AREA_VH: one
     reference view height a side) is not lettered again - a fire spreading stroke by stroke said FWOOOOFF for every stroke */
 export const CATCH_QUIET = 8000;
@@ -394,7 +399,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
   if ( k === "erase" ) {
     if ( prev || st.o !== undefined || !ctx.burning?.(st) ) return out;
     if ( inWin(st.g ?? st.q) ) push({ key: `${st.id}|douse`, voice: "douse", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(st.g ?? st.q, from),
-      m: clamp(0.25 + 0.2 * Math.log1p(rG), 0.15, 0.6), ms: 1100, box: pathBox(p, st.r ?? 50) });
+      m: clamp(0.25 + 0.2 * Math.log1p(rG), 0.15, 0.6), ms: 1100, box: pathBox(p, st.r ?? 50), rank: FIRE_RANK, shrink: OUT_SHRINK });
     return out;
   }
   if ( k !== "fire" ) return out;                 // (smoke makes no sound of its own)
@@ -402,11 +407,11 @@ export function strokeEvents(st, prev, from, to, ctx) {
   const relit = !prev || (prev.g ?? prev.q) !== lit;
   // the catch: when its flames show here (gate), played late too when the stroke is new here (it reached this client on release)
   if ( relit && (st.o === undefined || st.o > lit + 400) && inWin(lit, prev ? late : ctx.newLate ?? NEW_LATE) )
-    if ( !ctx.heard?.(st, lit) ) push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, ms: 1400, colors, gate: st.id, box, rank: FIRE_RANK });
+    if ( !ctx.heard?.(st, lit) ) push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, ms: 1400, colors, gate: st.id, box, rank: FIRE_RANK, shrink: FIRE_SHRINK });
   // a level raised: the fire flares up (at the ramp's start)
   if ( prev && st.lt !== undefined && st.lt !== prev.lt && (st.lv ?? 2) > (st.l0 ?? prev.lv ?? 2) + 0.2 && inWin(st.lt) && !ctx.flared?.(st) ) {
     const c = pathCentre(p);
-    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box, level: st.lv, rank: FIRE_RANK });
+    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box, level: st.lv, rank: FIRE_RANK, shrink: FIRE_SHRINK });
   }
   // put out (or a preset's fire whose out time comes): a quiet hiss at its middle, as long as its flames take to die
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
@@ -534,7 +539,8 @@ export function planCluster(g, o = {}) {
       h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
   const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp, level: main.level, way: main.way ?? null, wind: main.wind ?? null });
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp, level: main.level, way: main.way ?? null, wind: main.wind ?? null,
+      ...(Number.isFinite(main.cover) ? { cover: main.cover } : {}) });
   // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
   if ( VOICES[main.voice]?.stream && main.path?.length ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t, ...(Number.isFinite(main.dir) ? { dir: main.dir } : {}) };
   // a thing that travels: its word rides its path
@@ -544,6 +550,8 @@ export function planCluster(g, o = {}) {
   mw.textLoud = clamp(0.2 + 0.8 * (main.m ?? magnitude(main.r / grid)), 0, 1);
   // (MAPTHUNDER: an event that knows its place in the story's hierarchy - a fire going out - is sized by that rank, as a page's word)
   if ( Number.isFinite(main.rank) ) mw.rank = main.rank;
+  // (MAPBURN3: and its notch under that rank - an event's `shrink` never reached its word: the going-out hiss was lettered at the full rank)
+  if ( Number.isFinite(main.shrink) ) mw.shrink = main.shrink;
   words.push(mw);
   if ( o.big || !(o.sec > 0) || single ) return words;
   // satellites: the biggest other members out at the edge, each its own voice, quieter, staggered
@@ -587,7 +595,7 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
   if ( role !== "main" ) delete stage.push;
   return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null, extra.kp ?? null), mat: extra.mat ?? null, emat: engineMatOf(voice, extra.mat ?? null), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
     magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
-    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift, ...(Number.isFinite(extra.level) ? { level: extra.level } : {}),
+    stage, cover: extra.cover ?? V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift, ...(Number.isFinite(extra.level) ? { level: extra.level } : {}),
     // (MAPDIRECT: debris of a moment keeps its look - it already grows away from its blast, `from` - and is knocked the way it was thrown)
     ...(extra.way ? { way: extra.way, flat: true } : {}), ...(extra.wind ? { wind: extra.wind } : {}) };
 }

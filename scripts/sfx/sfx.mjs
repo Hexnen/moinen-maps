@@ -82,6 +82,8 @@ const spoken = new Map();      // MAPBURN2: `${area}|${turn}` -> the line's shar
 const burnLog = [];            // MAPBURN2: the last lines of this seat (api.sfx.burnLines(): two seats compare)
 let fireSeen = new Map();      // fire stroke id -> the stroke as last seen
 let burnTimer = 0;
+const fireStage = new Map();   // MAPBURN3: fire event key -> its stage entry (sfx-burn stageEntry + spoke / why / by): the one stage of every fire word
+let linesUp = [];              // MAPBURN3: the burning lines up on this seat ({ h, cx, cy, t0 }): they leave before an event word lands in their areas
 let lastPlaced = [];          // the last words placed here (for checks: text, role, scene box, penalties)
 let recent = [];               // main words played lately (an echo of one is not lettered again)
 let shooters = [];             // gun firings from a token here: { pts (where its rounds land, scene px), t1 (perf ms) }
@@ -542,11 +544,16 @@ function steamFires(s, steam) {
   const fires = [...all.values()].filter((st) => st.k === "fire" && FM.burningAt(st, s.t));
   if ( !fires.length ) return;
   const geo = Fire.geo(), FP = Fire.params0();
-  const plans = C.burnGroups(fires, G).map((g) => C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, FP), levelNow: (st, t) => FM.levelNow(st, Number.isFinite(t) ? t : undefined) }))
+  const plans = C.burnGroups(fires, G).map((g) => ({ ...C.burnPlan(g, { grid: G, catchMs: (st) => FM.catchMs(st, geo, FP), levelNow: (st, t) => FM.levelNow(st, Number.isFinite(t) ? t : undefined) }), group: g }))
     .sort((a, b) => b.prio - a.prio).slice(0, 2);
   for ( const pl of plans ) {
-    const w = EV.steamWord({ ...pl, points: [pl.at(0, s.t)] }, s.t, steam, canvas.scene?.id ?? "");
-    if ( !w ) continue;
+    const w0 = EV.steamWord({ ...pl, points: [pl.at(0, s.t)] }, s.t, steam, canvas.scene?.id ?? "");
+    if ( !w0 ) continue;
+    // (MAPBURN3: a fire word as the others - at its fire's rim (not on the flames), and only when the stage of its area is free: the
+    // second fire's hiss in the same or a touching area is not lettered, nor one within STAGE.quiet of another hiss there)
+    const w = rimEvent(w0, pl.st, pl.group);
+    if ( !w ) { stageSkip(`steam|${s.t}|${pl.key}`, s.t, { why: "deep" }); continue; }
+    if ( !stageAsk({ key: `steam|${s.t}|${pl.key}`, type: "steam", t: s.t, x: w.x, y: w.y, ms: w.ms }) ) continue;
     const ids = pl.key.split("+");
     const p = storyPage(`steam|${s.t}|${pl.key}`, s.t, [{ ...w, key: "steam" }], null, "fire");
     p.still = () => ids.some((id) => { const st = Fire.allStrokes?.()?.get(id); return !!st && FM.burningAt(st, sharedNow()); });
@@ -619,6 +626,9 @@ function planPage(rec, tries = 0) {
   let pg;
   try { pg = PG.firingPage(rec, { grid: grid(), strokes: all, wayOf: MC.wayOf, headAt: MC.headAt, fallAt: landingFallAt, lift: 0.5 }); }
   catch ( err ) { console.warn(`${MODULE_ID} | sfx: a firing's page failed`, err); return; }
+  // (MAPBURN3: the page's fire words - its fires' one catch, their arranged hisses - are fire words as any other: at their fire's rim,
+  // and on the one stage of their area; decided here, when the page is planned, from the firing's record: the same on every seat)
+  try { pageFireWords(rec, pg, all); } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a page's fire words`, err); }
   // (MAPSFXSEAT: the ground under the impact from the map's own pixels, the same on every seat, known before any word is written)
   const p = { rec, pg, ground: groundAt(rec) };
   pages.set(rec.id, p);
@@ -725,6 +735,8 @@ function pageWordNow(p, w, here) {
   if ( !q ) return;
   // (MAPBLAST: lead or quiet is the table's - decided before this seat's own rules, so the word is the same word on every seat)
   const bl = w.role === "main" ? blastLead(q, p.bl) : null;
+  // (MAPBURN3: a page's fire word that found the stage of its area taken - pageFireWords - is not lettered, on any seat)
+  if ( w.staged ) { seatSkip(q, "stage"); return; }
   const still = here.still;
   if ( still === false || typeof still === "string" ) { seatSkip(q, typeof still === "string" ? still : "gone"); return; }   // (MAPTHUNDER: "yield")
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
@@ -856,7 +868,7 @@ function onFire(first = false) {
   const now = sharedNow(), all = Fire.allStrokes?.() ?? new Map(), seen = new Map();
   const on = mode() !== "off" && Fire.shownHere?.();
   const geo = Fire.geo(), P = Fire.params0(), G = grid();
-  const burningList = [...all.values()].filter((s) => s.k === "fire" && FM.burningAt(s, now));
+  const fireList = [...all.values()].filter((s) => s.k === "fire"), burningList = fireList.filter((s) => FM.burningAt(s, now));
   const T = FM.timing(geo, P);
   // (MAPBURN2: `heard` - another fire caught in this stroke's area of the map within CATCH_QUIET before it (the table's strokes and
   // their shared catch moments: the same on every seat; of two that caught at one instant the first id speaks))
@@ -874,7 +886,19 @@ function onFire(first = false) {
     if ( !on ) continue;
     // a scene that opens: the stroke counts as seen - only its moments still to come; later, what is new or changed
     const evs = first ? C.strokeEvents(st, null, now + 1, now + MAX_AHEAD, { ...ctx, late: 0, newLate: 0 }) : C.strokeEvents(st, prev, now, now + MAX_AHEAD, ctx);
-    for ( const e of evs ) add({ ...e, t: toPerf(e.t) });
+    for ( const e of evs ) {
+      const type = FIRE_EVENT[e.voice];
+      // (MAPBURN3: every fire event word - a catch, a flare, a fire going out, the eraser's hiss - stands at its fire's rim and asks the
+      // one stage of its area first (sfx-burn stageSilent): a firing's own fires are told by its page - pageFireWords)
+      if ( !type || isOwned(e) ) { add({ ...e, t: toPerf(e.t) }); continue; }
+      const ts = e.t + (e.gate ? CATCH_SHOW_MS : 0);
+      if ( fireStage.has(e.key) ) { if ( fireStage.get(e.key).spoke ) add({ ...(fireStage.get(e.key).ev ?? e), t: toPerf(e.t) }); continue; }
+      const q = rimEvent(e, st, st.k === "erase" ? fireList.filter((f) => overlapsStroke(f, st)) : null);
+      if ( !q ) { stageSkip(e.key, ts, { why: "deep" }); continue; }
+      if ( !stageAsk({ key: e.key, type, t: ts, x: q.x, y: q.y, ms: e.ms }) ) continue;
+      fireStage.get(e.key).ev = q;
+      add({ ...q, t: toPerf(e.t) });
+    }
   }
   for ( const id of fireSeen.keys() ) if ( !seen.has(id) ) cancelObj(id);    // (removed: undone, cleared)
   fireSeen = seen;
@@ -884,6 +908,87 @@ function overlapsStroke(f, er) {
   const r = (f.r ?? 50) + (er.r ?? 50), p = f.p ?? [], ex = er.p?.[0], ey = er.p?.[1];
   for ( let i = 0; i + 1 < p.length; i += 2 ) if ( Math.hypot(p[i] - ex, p[i + 1] - ey) < r ) return true;
   return false;
+}
+
+/* ---------------------------------------------------------------- MAPBURN3: the one stage of every fire word */
+
+/** the fire events of the fire layer's strokes by their voice (sfx-burn EVENTS) */
+const FIRE_EVENT = { fire: "catch", flare: "flare", out: "out", douse: "douse" };
+/** an area's side (scene px): the lines' cells, the same on every seat */
+const cellSize = () => (BURN.AREA_VH * SEAT.REF_VH) / SEAT.refZoom(grid(), 0);
+/** a word sent off at shared instant `ts` (its own exit plays) */
+function stopAt(h, ts) {
+  const g0 = gen;
+  setTimeout(() => { if ( g0 === gen ) { try { h.stop(); } catch { /* gone */ } } }, Math.max(0, toPerf(ts) - performance.now()));
+}
+function stageSkip(key, ts, why) {
+  stats.staged = (stats.staged ?? 0) + 1;
+  seatLog.push({ seat: game.user?.id ?? "", key, role: "main", ts: Math.round(ts), rule: why?.why ?? "stage", ...(why?.by ? { by: why.by } : {}), skipped: true });
+  if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
+}
+/** A fire event word `e` ({ key, type, t (shared ms: its word's instant), x, y (its word's place), ms }) asks the stage of its area:
+    -> true (it speaks: the stage is its own for its standing time, a burning line up there leaves before it lands) | false. Asked once
+    per event, when every seat learns of it (the strokes, the weather, a firing's record): the same answer on every seat. */
+function stageAsk(e) {
+  const old = fireStage.get(e.key);
+  if ( old ) return old.spoke;
+  const now = sharedNow();
+  for ( const [k, o] of fireStage ) if ( o.t1 + BURN.STAGE.quiet < now ) fireStage.delete(k);
+  const c = BURN.stageEntry(e, cellSize()), why = BURN.stageSilent([...fireStage.values()].filter((o) => o.spoke), c);
+  fireStage.set(c.key, Object.assign(c, { spoke: !why, ...(why ?? {}) }));
+  if ( why ) { stageSkip(c.key, c.t, why); return false; }
+  for ( const l of linesUp ) if ( BURN.touching(l, c) && l.t0 < c.t1 && c.t - BURN.STAGE.clear < l.t0 + BURN.LINE.slot ) stopAt(l.h, c.t - BURN.STAGE.clear);
+  return true;
+}
+/** what a fire word's rim place keeps off: the tokens and pins every seat counts (the layout would move a word standing on one) */
+const keepOffBoxes = () => [...sharedTokens(null), ...sharedPins(null)];
+/** a fire event word this seat moved (off a panel, a word up): does it still keep off the flames? (sfx-burn SEAT_COVER) */
+function offFlames(w, at) {
+  const now = sharedNow(), fires = [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire" && FM.burningAt(s, now));
+  if ( !fires.length || !(w.size > 0) ) return true;
+  return BURN.coverOk(at, BURN.EVENT_BOX.hw * w.size, BURN.EVENT_BOX.hh * w.size, BURN.fireShape(fires), BURN.SEAT_COVER);
+}
+/** the event words that speak (what a burning line gives way to) */
+const stageSpoken = () => [...fireStage.values()].filter((o) => o.spoke);
+/** which fire event a word is (a moment's word by its voice, a page's by its key) | null */
+function fireTypeOf(w) {
+  if ( w.stream || grpOf(w) !== "fire" ) return null;
+  if ( !w.page ) return FIRE_EVENT[w.voice] ?? null;
+  const k = String(w.key ?? "");
+  return /\|catch$/.test(k) ? "catch" : /\|out\d+$/.test(k) ? "out" : /\|steam$/.test(k) ? "steam" : null;
+}
+/** the strokes burning together with fire stroke `st` (its group: the flames a word keeps off) */
+function groupOf(st, fires = null) {
+  const list = fires ?? [...(Fire.allStrokes?.() ?? new Map()).values()].filter((s) => s.k === "fire");
+  const now = sharedNow(), live = list.filter((f) => f.id === st.id || f.o === undefined || f.o > now);
+  return C.burnGroups(live, grid()).find((g) => g.some((s) => s.id === st.id)) ?? [st];
+}
+/** A fire event word moved to its fire's RIM (sfx-burn rimSpot, as a burning line): `e` its event or page word ({ x, y, r, rank, shrink }),
+    `st` its stroke, `group` the flames (default: the strokes burning with `st`). Its box there is its subject and it may stand on it
+    (`cover` 1): before, its subject was the fire's whole box - on a big fire a small word hid a small share of that box, so it was
+    lettered ON the flames at the fire's start. -> the event at the rim | null (no rim within sfx-burn RIM_REACH: deep inside a fire
+    bigger than a view the flames are the picture). Pure of this seat: the table's size, the scene's grid. */
+function rimEvent(e, st, group = null) {
+  const G = grid(), g = group ?? groupOf(st);
+  if ( !g.length ) return { ...e };
+  const size = SZ.sizeAt(EV.rankSize(e.rank ?? C.FIRE_RANK, SEAT.REF_VH / SEAT.refZoom(G, 0), e.shrink ?? 1), stepFor("fire"));
+  const hw = (e.voice === "flare" ? BURN.EVENT_BOX.roar : BURN.EVENT_BOX.hw) * size, hh = BURN.EVENT_BOX.hh * size;
+  const r = BURN.rimSpot({ x: e.x, y: e.y }, BURN.fireShape(g), { hw, hh, dir: DIR.plumeDeg(DIR.windOf(st)), reach: BURN.RIM_REACH * cellSize(), keepOff: keepOffBoxes() });
+  if ( !r.clean ) return null;
+  return { ...e, x: r.x, y: r.y, box: { x0: r.x - hw, y0: r.y - hh, x1: r.x + hw, y1: r.y + hh }, cover: 1 };
+}
+/** The fire words of a firing's page (its fires' one catch, their arranged hisses): moved to the rim and asked on the stage, in time order.
+    A word the stage refuses keeps its place in the page (`staged`: pageWordNow leaves it out). */
+function pageFireWords(rec, pg, all) {
+  const fires = [...all.values()].filter((s) => s.k === "fire");
+  const list = (pg.words ?? []).filter((w) => w.role === "catch" || w.role === "out").sort((a, b) => a.t - b.t);
+  for ( const w of list ) {
+    const st = all.get(w.role === "catch" ? w.gate : w.id); if ( !st ) continue;
+    const q = rimEvent(w, st, groupOf(st, fires)), ts = Number(w.t) + (w.gate ? CATCH_SHOW_MS : 0), key = `pg|${rec.id}|${w.key}`;
+    if ( !q ) { w.staged = true; stageSkip(key, ts, { why: "deep" }); continue; }
+    Object.assign(w, { x: q.x, y: q.y, box: q.box, cover: 1 }); delete w.cands;
+    if ( !stageAsk({ key, type: w.role, t: ts, x: w.x, y: w.y, ms: w.ms }) ) w.staged = true;
+  }
 }
 
 /* ---------------------------------------------------------------- a burning fire's sound: its lines */
@@ -981,14 +1086,23 @@ function burnRooms(want) {
       // laid out from the lower steps up so a higher step never letters a run smaller: sfx-seat burnRoom; question MAPRIDE-3)
       const kMin = Math.min(k, (w.live ? BURN.minSize({ zoom: z, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) * ts : SZ.floorPx(vh, 1, L.sizeModel) / z) * BK), below = [1, 2, 3].filter((s) => s < st).map((s) => seatK(burnSize(p, w.live, s) * sc) * ts * BK);
       // (a spot off this screen stays where it is: its words are not pulled into view, and it takes no room here)
-      const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
+      // (MAPBURN3: a spot with no rim within reach - deep inside a fire bigger than a view - is not lettered, on any seat)
+      const deep = w.idx.filter((i) => p.at(i, now).deep);
+      for ( const i of deep ) arr[i] = { dx: 0, dy: 0, box: null, ok: false, deep: true };
+      const on = w.idx.filter((i) => { const q = p.at(i, now); return !q.deep && q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
       // (MAPSAME: one whose run would still reach into this view, cut at its edge, is not lettered here - sfx-seat offSpot)
       // (MAPEDGE: its run kept to its own block - the block offSpot judged - so a run "out" of this view stays out: with no room the engine let
       // its phrases spread past the block and a fire burning just above the GM's view lettered into it, cut by the top edge - ADVM r2 item 6, A)
-      for ( const i of w.idx ) if ( !on.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }
+      for ( const i of w.idx ) if ( !on.includes(i) && !deep.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }
       if ( on.length ) hard ??= [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)];
       const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard: hard ?? [], soft, taken, maxShift, motion });
       // (`f`: this seat's size for the run as a share of the table's - over 1 far out)
+      // (MAPBURN3: where this seat had to move the word - off a panel, a pin, a token, a word up - it still keeps off the flames: a
+      // place that puts more of the fire under it than the rim allows (sfx-burn COVER) is no room, the line is left out on this seat)
+      on.forEach((i, j) => {
+        const o = r[j];
+        if ( o.ok && (o.dx || o.dy) ) { const q = p.at(i, now), kk = (ks * o.k) / k; if ( !BURN.coverOk({ x: q.x + o.dx, y: q.y + o.dy }, BURN.WORD_BOX.hw * kk, BURN.WORD_BOX.hh * kk, shapeOf(p), BURN.SEAT_COVER) ) r[j] = { ...o, ok: false, flames: true }; }
+      });
       on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / (k0 * ts) }; if ( r[j].ok ) taken.push(r[j].box); });
       out.set(key, arr);
     }
@@ -1008,20 +1122,38 @@ function capK() {
 }
 /** MAPBURN2: a fire's spots moved to its rim for a word of size `ks` (scene px): `p.at` gives the word's place from here on, `p.at0`
     the table's spot (the areas sort by it). Worked out again only when the fire, the spot or the size moved. */
-const rimMemo = new Map();
+const rimMemo = new Map(), shapeMemo = new Map();
+const sigOf = (p) => (p.group ?? []).map((s) => `${s.id}:${s.p?.length ?? 0}:${Math.round(s.r ?? 0)}`).join();
+/** a fire's flames readied for point tests (sfx-burn fireShape), kept while its strokes stay as they are */
+function shapeOf(p) {
+  const sig = sigOf(p), m = shapeMemo.get(p.key);
+  if ( m?.sig === sig ) return m.shape;
+  const shape = BURN.fireShape(p.group ?? []);
+  shapeMemo.set(p.key, { sig, shape }); if ( shapeMemo.size > 24 ) shapeMemo.delete(shapeMemo.keys().next().value);
+  return shape;
+}
+let keepOffMemo = { t: -1e12, sig: "", boxes: [] };
+/** the keep-off boxes, read at most twice a second (`sig`: where they are, to a quarter square) */
+function keepOffAt(now) {
+  if ( Math.abs(now - keepOffMemo.t) < 500 ) return keepOffMemo;
+  const boxes = keepOffBoxes(), G = grid();
+  return (keepOffMemo = { t: now, boxes, sig: boxes.map((b) => `${Math.round(b.x0 / (G / 4))},${Math.round(b.y0 / (G / 4))}`).join(";") });
+}
 function rimAt(p, ks) {
   if ( p.at0 ) return;
-  const at0 = (p.at0 = p.at), sig = (p.group ?? []).map((s) => `${s.id}:${s.p?.length ?? 0}:${Math.round(s.r ?? 0)}`).join(), G = grid();
+  const at0 = (p.at0 = p.at), sig = sigOf(p), G = grid();
   const hw = BURN.WORD_BOX.hw * ks, hh = BURN.WORD_BOX.hh * ks;
-  let shape = null;
+  // (MAPBURN3: the rim no farther than RIM_REACH areas from the spot - `deep`: none there, the spot is not lettered)
+  const reach = BURN.RIM_REACH * cellSize();
   p.at = (i, now) => {
-    const q = at0(i, now), key = `${p.key}|${i}`, tag = `${sig}|${Math.round(q.x / (G / 4))},${Math.round(q.y / (G / 4))}|${Math.round(ks)}`;
+    // (the tokens and pins every seat counts: the rim place keeps off them - the tag follows them as they move)
+    const off = keepOffAt(now);
+    const q = at0(i, now), key = `${p.key}|${i}`, tag = `${off.sig}|${sig}|${Math.round(q.x / (G / 4))},${Math.round(q.y / (G / 4))}|${Math.round(ks)}`;
     const m = rimMemo.get(key);
-    if ( m?.tag === tag ) return { x: m.x, y: m.y };
-    shape ??= BURN.fireShape(p.group ?? []);
-    const r = BURN.rimSpot(q, shape, { hw, hh, dir: DIR.plumeDeg(DIR.windOf(p.st)) });
-    rimMemo.set(key, { tag, x: r.x, y: r.y }); if ( rimMemo.size > 64 ) rimMemo.delete(rimMemo.keys().next().value);
-    return { x: r.x, y: r.y };
+    if ( m?.tag === tag ) return { x: m.x, y: m.y, ...(m.deep ? { deep: true } : {}) };
+    const r = BURN.rimSpot(q, shapeOf(p), { hw, hh, dir: DIR.plumeDeg(DIR.windOf(p.st)), reach, keepOff: off.boxes });
+    rimMemo.set(key, { tag, x: r.x, y: r.y, deep: !r.clean }); if ( rimMemo.size > 64 ) rimMemo.delete(rimMemo.keys().next().value);
+    return { x: r.x, y: r.y, ...(r.clean ? {} : { deep: true }) };
   };
 }
 /** The cap height (scene px) of a burning fire's biggest word - its roar: a share (sfx-burn ROAR_REF) of the REFERENCE view's height at
@@ -1071,11 +1203,17 @@ function letterLine(line, now) {
   const v = line.voice, i = v.i, b = burns.get(v.key), p = b?.plan;
   const no = BURN.lineNo(line, p?.start), rec = { area: line.area, turn: line.turn, t: line.t0, key: v.key, i, n: no };
   const note = (r) => { burnLog.push({ ...rec, ...r }); if ( burnLog.length > 40 ) burnLog.shift(); };
+  const [acx, acy] = String(line.area).split(",").map(Number);
   try {
     if ( !p ) return;
+    // (MAPBURN3: the one stage - a line whose slot meets a fire event word's standing time in its area or one that touches it gives
+    // way; the table's rule, before any of this seat's own)
+    const ev = BURN.lineYields(stageSpoken(), acx, acy, line.t0);
+    if ( ev ) return note({ out: "stage", by: ev.key });
     const o = b.off?.[i];
+    if ( o?.deep ) return note({ out: "deep" });
     // (a spot with no clean room on this seat, or off this view: not lettered here - the table's line is the same, this seat leaves it out)
-    if ( !b.idx.includes(i) ) return note({ out: "room" });
+    if ( !b.idx.includes(i) ) return note({ out: o?.flames ? "flames" : "room" });
     if ( o?.off ) return note({ out: "view" });
     const seed = `${canvas.scene?.id ?? ""}|burn|${p.seedId}`, red = reducedMotion(), kind = C.kindOf("fire", known);
     // (which voice of the score a spot is: its place among the table's spots of this fire - the second and third start further on in
@@ -1097,7 +1235,13 @@ function letterLine(line, now) {
     const call = BURN.lineCall(ph, { kind, seed: `${seed}|${i}|${no}`, size, at, startAt: toPerf(line.t0), reduced: red,
       glow: BURN.glowFor(layerOpts().layer, "auto"), extra: { lang: lang(), ...layerOpts() } });
     const h = L.play(call.text, call.opts);
-    if ( h ) { b.subs.push(h); Promise.resolve(h.finished).finally(() => { const j = b.subs.indexOf(h); if ( j >= 0 ) b.subs.splice(j, 1); }); }
+    if ( h ) {
+      b.subs.push(h);
+      // (MAPBURN3: its whole life inside its own slot - sent off LINE.exit before the slot ends -, and known to the stage while it is up)
+      const up = { h, cx: acx, cy: acy, t0: line.t0 }; linesUp.push(up);
+      stopAt(h, line.t0 + BURN.LINE.slot - BURN.LINE.exit);
+      Promise.resolve(h.finished).finally(() => { const j = b.subs.indexOf(h); if ( j >= 0 ) b.subs.splice(j, 1); linesUp = linesUp.filter((l) => l !== up); });
+    }
     note({ text: ph.text, rung: ph.rung, scale: +ph.scale.toFixed(3), size: +size.toFixed(1), x: Math.round(at.x), y: Math.round(at.y) });
   } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a fire's line did not start`, err); }
 }
@@ -1360,8 +1504,8 @@ function logCall(w, call) {
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }
 /** a table word this seat does not draw, by one of its own needs (logged like a call) */
-function seatSkip(w, why) {
-  seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, ts: Math.round(w.ts ?? toShared(w.t)), rule: why, skipped: true });
+function seatSkip(w, why, more = null) {
+  seatLog.push({ seat: game.user?.id ?? "", key: w.key ?? `${w.seed}|${w.role}`, text: w.text, role: w.role, ts: Math.round(w.ts ?? toShared(w.t)), rule: why, skipped: true, ...(more ?? {}) });
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }
 
@@ -1375,7 +1519,12 @@ function play(w) {
     let h, call = null;
     try {
       if ( w.stream ) h = playStream(w);
-      else { call = seatCall(w); if ( !call.o ) { seatSkip(w, call.fit?.rule === "noroom" ? "noroom" : "off"); return; } h = L.play(w.text, call.o); }
+      else {
+        call = seatCall(w); if ( !call.o ) { seatSkip(w, call.fit?.rule === "noroom" ? "noroom" : "off"); return; }
+        // (MAPBURN3: a fire event word this seat had to move stands on the flames now: left out here)
+        if ( fireTypeOf(w) && call.o.at && Math.hypot(call.o.at.x - w.x, call.o.at.y - w.y) > 1 && !offFlames(w, call.o.at) ) { seatSkip(w, "flames", { at: { x: Math.round(w.x), y: Math.round(w.y) }, seatAt: { x: Math.round(call.o.at.x), y: Math.round(call.o.at.y) } }); return; }
+        h = L.play(w.text, call.o);
+      }
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;
@@ -1384,6 +1533,8 @@ function play(w) {
     // (MAPBLAST: the blast's impact frame, called ahead, keeps this word readable on its drawings from the word's first frame on)
     if ( w.blast ) { reBlast(w); w.blast.keep?.push(h); try { const c = L.contactAt(h); if ( Number.isFinite(c) && Number.isFinite(w.blast.blowAt) ) w.blast.ent.drift = Math.round(c - w.blast.blowAt); } catch { /* the log only */ } }
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
+    // (MAPBURN3: a fire event word is gone when its standing time on the stage is over - sfx-burn standOf)
+    { const ft = fireTypeOf(w); if ( ft ) stopAt(h, (w.ts ?? toShared(w.t)) + BURN.standOf(ft, w.ms) - BURN.STAGE.tail); }
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
     // (EFFECTS2: a cave-in's word sinks as it holds, so what it covers reaches half its height lower; REQUESTS EFFECTS2-4)
     const b0 = call?.box ?? w.box, bx = b0 && w.voice === "cavein" ? { ...b0, y1: b0.y1 + (b0.y1 - b0.y0) * 0.5 } : b0;
@@ -1531,7 +1682,7 @@ function teardown(full = true) {
   detonating = null; ploughs.clear(); soon = []; flashSeen.clear(); clearTimeout(stormTimer); stormTimer = 0;
   clearTimeout(burnTimer); burnTimer = 0;
   for ( const b of burns.values() ) for ( const s of b.subs ) { try { s.stop({ quick: true }); } catch {} }
-  burns.clear(); burnOrder = []; spoken.clear(); rimMemo.clear(); ledger.clear(); pageWaits.clear(); holdMemo.clear();
+  burns.clear(); burnOrder = []; spoken.clear(); rimMemo.clear(); shapeMemo.clear(); fireStage.clear(); linesUp = []; ledger.clear(); pageWaits.clear(); holdMemo.clear();
   fights.clear(); stormUp.clear(); closeMemo = { key: "", rp: null, m: new Map() }; onsetSeen.clear(); steamSeen.clear();
   uiCache = { t: -1e9, rects: [], boxes: [] };
   for ( const h of impacts ) { try { h.stop(); } catch {} }
@@ -1582,7 +1733,7 @@ export const sfxApi = {
   /** Play events now (scene px): `api.sfx.test([{ voice: "crash", x, y, r: 300 }])`. */
   test: (events) => { const t = performance.now() + 30; for ( const [i, e] of events.entries() ) add({ key: `test|${Date.now()}|${i}`, t, ...e }); },
   /** The interface panels this client keeps words off (client px), and the fire sounds burning. */
-  ui: () => uiCache.rects, placed: () => lastPlaced.slice(), burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length, idx: b.idx })), burnLines: () => burnLog.slice(),
+  ui: () => uiCache.rects, placed: () => lastPlaced.slice(), burns: () => [...burns.entries()].map(([k, b]) => ({ key: k, live: b.live, n: b.subs.length, idx: b.idx })), burnLines: () => burnLog.slice(), fireStage: () => [...fireStage.values()].map(({ ev, ...o }) => ({ ...o })),
   /** MAPSFXSEAT: this seat's log of every lettering call (the table's word - text, seed, size, place, shared moment - and the seat rule it
       was drawn by); `clear` empties it. The table picture's words (the ledger: key, box, life on the shared clock). */
   log: ({ clear = false } = {}) => { const l = seatLog.slice(); if ( clear ) seatLog = []; return l; },

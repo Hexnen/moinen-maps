@@ -570,7 +570,7 @@ function pageWordPlan(p, w0, word, sd, env, d) {
     // (EFFECTS2: a story's words are sized by rank as a share of the REFERENCE view: readable, a lower rank never bigger)
     rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
-    cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
+    cover: w.cover ?? (w.role === "main" ? 0.3 : 0.25), subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
     // (MAPDIRECT: its way - its own, or for a piece thrown out of the blast from the impact to the landing lettered here; its fire's wind)
     ...(wayFor(w, G) ? { way: wayFor(w, G), ...(w.thrown ? { flat: true } : {}) } : {}), ...(w.wind ? { wind: w.wind } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };

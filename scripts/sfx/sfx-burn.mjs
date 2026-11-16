@@ -162,9 +162,13 @@ const hash32 = (s) => { let h = 2166136261; for ( let i = 0; i < s.length; i++ )
 const h01 = (s) => hash32(String(s)) / 4294967296;
 const mod = (a, n) => ((a % n) + n) % n;
 
-/** a slot (ms), the colours a turn goes through, how long before its instant a line is handed to the engine, and the share of a line's
-    standing time after which a seat that comes late no longer letters it (it would only show its exit) */
-export const LINE = { slot: 1800, colours: 4, lead: 150, join: 0.5 };
+/** a slot (ms), the colours a turn goes through, how long before its instant a line is handed to the engine, the share of a line's
+    standing time after which a seat that comes late no longer letters it (it would only show its exit), and how long before its
+    slot ends a line still up is sent off (`exit`).
+    MAPBURN3: a slot is 2.4 s (it was 1.8 s) and a line's whole life is inside its own slot - measured on the engine a line stands
+    1.65-2.3 s and its exit fades for 0.35 s more, so with 1.8 s slots the lines of two areas that touch stood together for up to
+    0.9 s. Now any four areas that meet at a corner (four colours, four slots) never have two lines up at once. */
+export const LINE = { slot: 2400, colours: 4, lead: 150, join: 0.5, exit: 640 };
 export const TURN_MS = LINE.slot * LINE.colours;
 /** which turns an area takes, by the hottest fire in it (1 = speaks): a blaze every turn, a fire two in three, a smoulder every other */
 export const SPEAK = { smoulder: [1, 0], fire: [1, 1, 0], blaze: [1] };
@@ -216,6 +220,67 @@ export function linesIn(areas, from, to) {
   return out.sort((a, b) => a.t0 - b.t0 || (a.area < b.area ? -1 : 1));
 }
 
+/* ---------------------------------------------------------------- MAPBURN3: ONE STAGE for every word of a fire
+   The owner's ruling (2026-11-16) is about every word a fire makes, not only its burning lines: MAPBURN2 bounded the lines per area,
+   but a catch, a flare, a going-out hiss, the eraser's hiss and the rain's hiss were lettered beside them unbounded - live up to three
+   fire words stood at once and an event word with a line under it covered 16 % of the fire. Now every fire word asks the same stage:
+     - the stage is the map's AREAS (the lines' cells). A fire EVENT word (catch, flare, out, douse, steam) holds its area and the
+       eight round it from its instant for its standing time (`stand`): another event word whose time meets it there is not
+       lettered (the earlier decided one speaks), a burning line whose slot meets it is left out, and a line already up leaves
+       `clear` ms before the event's word lands;
+     - hisses (a fire going out, the eraser, rain on the fire) are one class: an area hisses at most once in `quiet` ms;
+     - every event word is gone when its standing time is over (the caller sends it off), a line when its slot is.
+   So in any four areas that meet at a corner - any window the size of an area lies inside such a block - at most ONE fire word of
+   any kind is up at a time; a whole reference view (3 x 2 areas) holds at most two.
+   The decisions are made from the fire events themselves in the order every seat gets them (shared strokes, shared weather, shared
+   firing records, the shared clock): the same on every seat that is at the table. */
+
+/** `clear`: ms before an event word's instant a line up in its areas is sent off (its exit takes about half a second); `quiet`: an
+    area's hisses are this far apart at least; `tail`: ms before its standing time ends an event word still up is sent off */
+export const STAGE = { clear: 600, quiet: 8000, tail: 500 };
+/** the fire event words: their class and how long each holds the stage (ms from its instant; a going-out hiss lasts as its flames die:
+    its own `ms` and `pad`, inside [min, max]) */
+export const EVENTS = {
+  catch: { cls: "rise", stand: 2600 },
+  flare: { cls: "rise", stand: 2500 },
+  out: { cls: "hiss", pad: 900, min: 2200, max: 4400 },
+  douse: { cls: "hiss", stand: 2200 },
+  steam: { cls: "hiss", stand: 2900 }
+};
+export const standOf = (type, ms) => { const E = EVENTS[type] ?? EVENTS.catch; return E.stand ?? clamp((Number.isFinite(ms) ? ms : 1600) + E.pad, E.min, E.max); };
+/** two areas that are the same or touch (a side or a corner) */
+export const touching = (a, b) => Math.abs(a.cx - b.cx) <= 1 && Math.abs(a.cy - b.cy) <= 1;
+/** a fire event as the stage knows it: { key, type, t (shared ms: its word's instant), x, y (its word's place), ms? } -> with its area and its end */
+export function stageEntry(e, cell) {
+  const { cx, cy } = cellOf(e, cell);
+  return { key: String(e.key), type: e.type, cls: (EVENTS[e.type] ?? EVENTS.catch).cls, t: e.t, t1: e.t + standOf(e.type, e.ms), cx, cy };
+}
+/** May the event `c` (a stageEntry) be lettered, given the entries that speak already (`spoken`)? -> null (it speaks) | { why: "stage" |
+    "quiet", by } (pure: the same answer from the same entries) */
+export function stageSilent(spoken, c) {
+  for ( const o of spoken ) {
+    if ( o.key === c.key ) continue;
+    if ( touching(o, c) && c.t < o.t1 && o.t < c.t1 ) return { why: "stage", by: o.key };
+    if ( c.cls === "hiss" && o.cls === "hiss" && o.cx === c.cx && o.cy === c.cy && Math.abs(c.t - o.t) < STAGE.quiet ) return { why: "quiet", by: o.key };
+  }
+  return null;
+}
+/** Does a burning line of area (cx, cy) whose slot begins at `t0` give way to an event word that speaks? -> the entry | null */
+export function lineYields(spoken, cx, cy, t0) {
+  const t1 = t0 + LINE.slot;
+  for ( const o of spoken ) if ( touching(o, { cx, cy }) && t0 < o.t1 && o.t - STAGE.clear < t1 ) return o;
+  return null;
+}
+/** the half sizes of a fire event word's box in its sizes (a catch is eight or nine letters, a flare's roar up to fourteen): the box
+    the table's layout keeps for it (live: 3.5 x 1.2 sizes for nine letters) - a smaller one found rim places the layout then moved */
+export const EVENT_BOX = { hw: 4.6, hh: 1.25, roar: 6.4 };   // (`roar`: the half width of a flare's long roar)
+/** how far from its fire spot a word may stand to find the fire's rim, in areas: a spot deeper inside a fire than that is not
+    lettered - inside a fire bigger than the view the flames are the picture (before, such a word stood on the flames) */
+export const RIM_REACH = 0.75;
+/** what a seat's own shift of a fire word may put under it (a little over the rim's COVER: the seat moved it off a panel or a word up;
+    more than this and the word is left out on that seat - it would stand on the flames) */
+export const SEAT_COVER = { fire: 0.22, word: 0.5 };
+
 /* ---- the rim */
 /** how much of a fire may stand under its word (share of the fire's area), and how much of the word's box may stand on flames */
 export const COVER = { fire: 0.15, word: 0.35 };
@@ -253,6 +318,8 @@ export function coverOf(c, hw, hh, shape, nx = 9, ny = 3) {
   const word = n / (nx * ny);
   return { word, fire: shape.area > 0 ? Math.min(1, (word * 4 * hw * hh) / shape.area) : 0 };
 }
+/** is a word's box at `c` within what a fire lets a word cover (MAPBURN3: asked again where a seat moved the word) */
+export const coverOk = (c, hw, hh, shape, cover = COVER) => { if ( !shape?.list?.length ) return true; const m = coverOf(c, hw, hh, shape); return m.fire <= cover.fire && m.word <= cover.word; };
 /** the sides a word tries, from the side the fire's sparks go (`dir`, degrees, screen: -90 = up) */
 const SIDES = [0, -35, 35, -70, 70, -110, 110, 180];
 /**
@@ -260,9 +327,13 @@ const SIDES = [0, -35, 35, -70, 70, -110, 110, 180];
  * are under each other; the nearest such place, an earlier side (nearer the sparks' way) preferred by `hh` a step.
  * -> { x, y, d, deg, word, fire, clean } (pure: the same on every seat)
  */
-export function rimSpot(q, shape, { hw, hh, dir = -90, cover = COVER } = {}) {
+export function rimSpot(q, shape, { hw, hh, dir = -90, cover = COVER, reach = Infinity, keepOff = null } = {}) {
+  // (MAPBURN3 `keepOff`: boxes the word may not stand on - the tokens and pins every seat counts. Live: a rim place on a token was
+  // moved by the layout, off the token and onto the flames; the rim is now looked for where the layout will leave the word alone)
+  const hit = keepOff?.length ? (c) => keepOff.some((b) => c.x + hw > b.x0 && c.x - hw < b.x1 && c.y + hh > b.y0 && c.y - hh < b.y1) : () => false;
   if ( !shape?.list?.length ) return { x: q.x, y: q.y, d: 0, deg: dir, word: 0, fire: 0, clean: true };
-  const step = Math.max(1, hh * 0.5), dMax = Math.hypot(shape.box.x1 - shape.box.x0, shape.box.y1 - shape.box.y0) + 2 * (hw + hh);
+  // (MAPBURN3 `reach`: no farther from the spot than that - past it the answer is the least covering place found, `clean` false)
+  const step = Math.max(1, hh * 0.5), dMax = Math.min(reach, Math.hypot(shape.box.x1 - shape.box.x0, shape.box.y1 - shape.box.y0) + 2 * (hw + hh));
   let best = null, least = null;
   SIDES.forEach((off, rank) => {
     const a = ((dir + off) * Math.PI) / 180, ux = Math.cos(a), uy = Math.sin(a);
@@ -270,7 +341,7 @@ export function rimSpot(q, shape, { hw, hh, dir = -90, cover = COVER } = {}) {
       if ( best && d + rank * hh * 0.6 >= best.cost ) break;
       const c = { x: q.x + ux * d, y: q.y + uy * d }, m = coverOf(c, hw, hh, shape);
       if ( !least || m.fire < least.fire ) least = { ...c, d, deg: dir + off, ...m, clean: false };
-      if ( m.fire <= cover.fire && m.word <= cover.word ) { best = { ...c, d, deg: dir + off, ...m, clean: true, cost: d + rank * hh * 0.6 }; break; }
+      if ( m.fire <= cover.fire && m.word <= cover.word && !hit(c) ) { best = { ...c, d, deg: dir + off, ...m, clean: true, cost: d + rank * hh * 0.6 }; break; }
     }
   });
   const r = { ...(best ?? least) }; delete r.cost;

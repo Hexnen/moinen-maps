@@ -172,11 +172,14 @@ export function steamOnsets(keys, steamAt) {
   }
   return out;
 }
-/** the hiss of rain on a fire group (sfx-core burnPlan `p`, the steam share `steam`): the fire's own place, rank 2, rising as steam */
+/** the hiss of rain on a fire group (sfx-core burnPlan `p`, the steam share `steam`): the fire's own place, rising as steam.
+    MAPBURN3: a fire word like the others - the smallest story rank a notch down (STEAM_SHRINK: 2.8 % of the reference view, as the
+    fire's other hisses; it was rank 2, 5.5 %: live 41-57 px caps on a fire whose burning words are 23-28 px) */
+export const STEAM_SHRINK = 0.7;
 export function steamWord(p, t, steam = 0.5, seed = "") {
   const q = p.points?.[0] ?? null; if ( !q ) return null;
   return { role: "main", key: "steam", kind: "hiss", wo: { loud: clamp(0.3 + 0.35 * steam, 0.3, 0.65), long: 0.85 }, t, x: q.x, y: q.y, r: p.r ?? 50,
-    rank: 2, ms: 1800, drift: true, wind: DIR.windOf(p.st), stage: { in: "pop", holdKind: "boil", out: "dissolve" }, seed: `${seed}|steam|${p.key}|${t}` };
+    rank: 1, shrink: STEAM_SHRINK, ms: 1800, drift: true, wind: DIR.windOf(p.st), stage: { in: "pop", holdKind: "boil", out: "dissolve" }, seed: `${seed}|steam|${p.key}|${t}` };
 }
 
 /**

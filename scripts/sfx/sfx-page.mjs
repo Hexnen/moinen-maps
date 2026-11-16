@@ -15,7 +15,7 @@
    Owner's answer 3 (binding unless changed): BOOM / BUM only for blasts with fire (the burst), a hero landing THOOM / DUUM (thud), a
    fireless blast KROOM / KRUUM (concussion), a cave-in BTHOOM (sfx-core). */
 
-import { hashStr } from "./sfx-core.mjs";
+import { hashStr, FIRE_SHRINK, OUT_SHRINK } from "./sfx-core.mjs";
 import * as DIR from "./sfx-direct.mjs";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -275,7 +275,8 @@ export function firingPage(rec, ctx = {}) {
   if ( first ) {
     const lv = first.lv ?? 1, p = first.p ?? [at.x, at.y];
     W({ key: "catch", role: "catch", kind: "fire", wo: { stage: "ignite", loud: clamp(0.25 + 0.15 * lv, 0.3, 0.6) }, t: Number(first.q), gate: first.id, x: p[0], y: p[1],
-      r: first.r ?? grid * 0.3, rank: lv >= 2 ? 2 : 1, ms: 900, stage: { in: "rise" },
+      // (MAPBURN3: a fire word as any other fire's catch - rank 1 a notch down, sfx-core FIRE_SHRINK; it was rank 2 for a fire of level 2 and up)
+      r: first.r ?? grid * 0.3, rank: 1, shrink: FIRE_SHRINK, ms: 900, stage: { in: "rise" },
       cands: burning.map((s) => ({ x: s.p?.[0] ?? at.x, y: s.p?.[1] ?? at.y, ms: Number(s.q) - T0, gate: s.id })).sort((a, b) => a.ms - b.ms) });
   }
   arrangeOuts(burning, { seed, grid }).forEach((h, i) => { out.owned.out.set(h.id, h.o); W({ ...h, key: `out${i}` }); });
@@ -307,7 +308,7 @@ export function arrangeOuts(fires, { seed = "", grid = 100 } = {}) {
     const last = i === pick.length - 1 && pick.length > 1, p = s.p ?? [0, 0], c = centre(p);
     const sd = (i % 2 ? 1 : -1) * (h01(`${seed}|outside`) < 0.5 ? 1 : -1);
     return { role: "out", id: s.id, o: Number(s.o), kind: "fire", wo: { stage: "out", loud: clamp(0.32 - 0.05 * i, 0.15, 0.32), long: last ? 1 : clamp(0.45 + 0.12 * i, 0.4, 0.8) },
-      t: Number(s.o), x: c.x + sd * grid * 0.35, y: c.y - grid * 0.2, r: s.r ?? grid * 0.3, rank: 1, shrink: Math.pow(0.9, i), ms: last ? 2600 : 1600, drift: true, side: sd, wind: DIR.windOf(s),
+      t: Number(s.o), x: c.x + sd * grid * 0.35, y: c.y - grid * 0.2, r: s.r ?? grid * 0.3, rank: 1, shrink: OUT_SHRINK * Math.pow(0.9, i), ms: last ? 2600 : 1600, drift: true, side: sd, wind: DIR.windOf(s),
       stage: { in: "pop", out: "dissolve" } };
   });
 }

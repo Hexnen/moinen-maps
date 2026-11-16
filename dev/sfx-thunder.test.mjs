@@ -136,7 +136,8 @@ const closeOf = (st) => { const m = new Map(); return (j) => { if ( !m.has(j) ) 
   ok(EV.steamOnsets(keys, () => 0.6).length === 0, "STEAM: already steaming before the change - no new hiss");
   ok(EV.steamOnsets(keys, () => 0.05).length === 0, "STEAM: a drizzle that never steams - no hiss");
   const pl = { key: "f1", r: 60, points: [{ x: 700, y: 900 }] }, w = EV.steamWord(pl, s[0].t, 0.6, "s");
-  ok(w.kind === "hiss" && w.rank === 2 && w.x === 700 && w.y === 900 && w.t === s[0].t && w.drift && KINDS.has(w.kind), "STEAM: a rising hiss at the fire, rank 2");
+  // (MAPBURN3, restated: rank 2 before - the owner's ruling makes every fire word small; the hiss is rank 1 a notch down, with the other hisses)
+  ok(w.kind === "hiss" && w.rank === 1 && w.shrink === EV.STEAM_SHRINK && w.x === 700 && w.y === 900 && w.t === s[0].t && w.drift && KINDS.has(w.kind), "STEAM: a rising hiss at the fire, a fire word's size (rank 1, a notch down)");
 }
 
 /* ---------------------------------------------------------------- OUT */

@@ -100,7 +100,7 @@ for ( const [heat, top] of [[0.12, 3], [0.42, 4], [0.72, 5]] ) {
 /* LINE (MAPBURN2: restated from ENGINE. The owner's ruling of 2026-11-16 took the unbroken run away - "a phrase is always up" was
    the complaint itself -, so the engine checks are held on what the runtime does now: every phrase of the score lettered as ONE word,
    sfx-burn lineCall on L.play, the way scripts/sfx/sfx.mjs letterLine calls it) */
-async function line({ size = 60, motion = "smooth", heat = 0.72, seed = "score", lines = 12, late = 0, reduced = false }) {
+async function line({ size = 60, motion = "smooth", heat = 0.72, seed = "score", lines = 12, late = 0, reduced = false, sendOff = false }) {
   const E = await setup(); const L = E.engine; L.lookStyle("invincible"); L.motionMode?.(motion);
   const ts = BURN.topScale(BURN.heatOf(heat).top), k = size * ts;
   const score = BURN.burnScore({ seed, heat: () => heat, word: (q) => { const w = L.word("fire", { ...q, lang: "en" }); return { text: w.text, mood: w.mood }; }, reduced });
@@ -110,8 +110,10 @@ async function line({ size = 60, motion = "smooth", heat = 0.72, seed = "score",
     const call = BURN.lineCall(ph, { kind: "fire", seed: `${seed}|0|${i}`, size, at: AT, startAt: t0, reduced, glow: BURN.glowFor("overlay"), extra: { lang: "en", layer: "overlay" } });
     const h = L.play(call.text, call.opts);
     const ext = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }, seen = [];
-    let cap = 0, lastUp = 0, glow = false;
+    let cap = 0, lastUp = 0, glow = false, sent = false;
     for ( let t = 0; t < BURN.LINE.slot * 2; t += 33 ) {
+      // (MAPBURN3: the runtime sends a line off LINE.exit before its slot ends - sfx.mjs letterLine, stopAt)
+      if ( sendOff && !sent && E.now() - t0 >= BURN.LINE.slot - BURN.LINE.exit ) { sent = true; try { h.stop(); } catch {} }
       await E.tick(33, 33);
       const d = drawnOf(h); if ( !d || d.a < LEGIBLE_ALPHA ) continue;
       for ( const p of d.P ) { ext.x0 = Math.min(ext.x0, p.x); ext.x1 = Math.max(ext.x1, p.x); ext.y0 = Math.min(ext.y0, p.y); ext.y1 = Math.max(ext.y1, p.y); }
@@ -139,6 +141,15 @@ for ( const motion of ["smooth", "stepped"] ) for ( const heat of [0.12, 0.42, 0
     ok(peak.length && low.length && Math.max(...peak) > Math.max(...low) * 1.25, `LINE heat ${heat}: the roar is lettered over 1.25x the embers' size (${peak.map((x) => x.toFixed(0)).join()} vs ${low.map((x) => x.toFixed(0)).join()})`);
     const k0 = r.out[0].cap / r.out[0].ph.scale; const ks = r.out.map((o) => o.cap / o.ph.scale / 60); ok(Math.min(...ks) >= 0.85 && Math.max(...ks) <= 1.15, `LINE heat ${heat}: each word at its rung's share of the fire's size (caps ${Math.min(...ks).toFixed(2)}..${Math.max(...ks).toFixed(2)} of size x share: the word's mood)`); void k0;
   }
+}
+// (MAPBURN3: a line sent off LINE.exit before its slot ends is gone inside its slot - the next area's line, in the next slot, never
+// stands beside it. Before: a natural line stood up to 1.6 slots, into its neighbour's slot)
+for ( const motion of ["smooth", "stepped"] ) for ( const heat of [0.12, 0.42, 0.72] ) {
+  const r = await line({ motion, heat, seed: `off-${motion}-${heat}`, sendOff: true }), n = await line({ motion, heat, seed: `off-${motion}-${heat}` });
+  const late = Math.max(...r.out.map((o) => o.lastUp)), free = Math.max(...n.out.map((o) => o.lastUp));
+  ok(late <= BURN.LINE.slot && r.out.every((o) => o.cap > 0 && !o.alive), `LINE ${motion} heat ${heat}: sent off ${BURN.LINE.exit} ms before its slot ends a word is gone inside it (last seen ${late.toFixed(0)} of ${BURN.LINE.slot} ms; left alone: ${free.toFixed(0)})`);
+  const stood = Math.min(...r.out.map((o) => o.lastUp));
+  ok(stood >= 1200, `LINE ${motion} heat ${heat}: ... and still stands long enough to be read (${stood.toFixed(0)} ms at least)`);
 }
 {
   // (a seat that comes 500 ms into a line - under LINE.join of its standing time - letters the same word, in step from then on)
