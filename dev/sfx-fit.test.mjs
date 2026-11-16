@@ -218,7 +218,8 @@ await group("BURN", () => {
   // (two fires: the smaller one is crowded by the bigger one's phrases)
   ok(C.burnCrowded([{ x: 1300, y: 1000 }], [{ x: 1000, y: 1000, em: 60 }], 20) && !C.burnCrowded([{ x: 1300, y: 1000 }], [{ x: 1000, y: 1000 }], 20), "a small fire is crowded by the BIGGER phrases");
   ok(/const idx = C\.burnSpots\(all, em\), pts = idx\.map\(\(i\) => all\[i\]\);/.test(sfx) && /spots\.push\(\.\.\.pts\.map\(\(q\) => \(\{ x: q\.x, y: q\.y, em \}\)\)\);/.test(sfx), "the runtime letters only the kept spots and records their size");
-  ok(/return \(idx \?\? p\.points\.map\(\(_, i\) => i\)\)\.map\(\(i\) => \{/.test(sfx) && /seed: `\$\{seed\}\|\$\{i\}`/.test(sfx), "a kept spot keeps its own seed (the same phrases as today)");
+  // (MAPBURN2: restated - the spots are no longer mapped to runs; a kept spot is a voice with its own seed, lettered when its area speaks)
+  ok(/idx: w\.idx\.filter\(\(i\) => r\[i\]\?\.ok !== false\), all: w\.idx/.test(sfx) && /seed: `\$\{seed\}\|\$\{i\}`/.test(sfx), "a kept spot keeps its own seed (the same words as today)");
   ok(sfx.includes("if ( r[j].ok ) taken.push(r[j].box);"), "a spot moved off a panel keeps off the next spot");
 });
 
