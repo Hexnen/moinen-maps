@@ -216,7 +216,7 @@ await group("RULE", async () => {
   // (two words of one picture up at the same time: the second keeps off the first)
   const lay = SEAT.seatLayout([{ ...it, key: "a", life: [0, 1000] }, { ...it, key: "b", prio: 1, life: [500, 1500], box: { x0: 1950, y0: 1460, x1: 2150, y1: 1540 } }], { view, zoom: 1 });
   ok(on2(inkBox(lay.get("a").box, it.ink), inkBox(lay.get("b").box, it.ink)) === 0, "a word never lands on another word up with it");
-  ok(/const lay = groupLayout\(w\.group, vw, zoom, sc\)/.test(SRC) && /p\.group = \{ words:/.test(SRC) && /for \( const w of grp\.words \) w\.group = grp;/.test(SRC) && /SEAT\.seatLayout\(items, \{ view: vw, panels: ui, pins, tokens: sharedTokens\(vw\), zoom, up \}\)/.test(SRC) && /const up = \[\.\.\.alive\]\.filter\(\(r\) => r\.box && r\.grp !== grp\)/.test(SRC), "the runtime lays out every page and moment with it");
+  ok(/const lay = groupLayout\(w\.group, vw, zoom, sc\)/.test(SRC) && /p\.group = \{ words:/.test(fs.readFileSync(path.join(root, "scripts/sfx/sfx-plan.mjs"), "utf8")) && /if \( grp\.page \) return plans\.layout\(grp,/.test(SRC) && /for \( const w of grp\.words \) w\.group = grp;/.test(SRC) && /SEAT\.seatLayout\(items, \{ view: vw, panels: ui, pins, tokens: sharedTokens\(vw\), zoom, up \}\)/.test(SRC) && /const up = \[\.\.\.alive\]\.filter\(\(r\) => r\.box && r\.grp !== grp\)/.test(SRC), "the runtime lays out every page and moment with it");
 });
 
 /* ---------------------------------------------------------------- SEAT2 */

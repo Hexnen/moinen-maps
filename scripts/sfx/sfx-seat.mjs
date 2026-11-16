@@ -219,9 +219,22 @@ export function seatFit({ box, reach = null, view, panels = [], zoom = 1, cap = 
  *          box's cap), min (cap), full (cap), small (cap), life: [t0, t1] | null, ride, cover, ink: [kx, ky] (its ink's share of its box) }]
  * -> Map(key -> { cap, k (cap / u), px, py (pivot), f, dx, dy, box, rules, clean, side })   map a table point q: px + (q.x - px) * f + dx
  */
-export function seatLayout(items, { view, panels = [], pins = [], tokens = [], zoom = 1, edge = SEAT_EDGE, up = [] } = {}) {
-  const out = new Map();
-  if ( !view ) { for ( const it of items ?? [] ) out.set(it.key, { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }); return out; }
+export function seatLayout(items, ctx = {}) {
+  const lay = seatLayouter(ctx);
+  for ( const it of (items ?? []).slice().sort((a, b) => (a.prio ?? 9) - (b.prio ?? 9)) ) lay.add(it);
+  return lay.out;
+}
+/**
+ * MAPPLAN: the seat layout ONE WORD AT A TIME. seatLayout lays its words out strictly in `prio` order and a word's place depends only on
+ * this seat's view and obstacles and on the words laid out BEFORE it (their envelopes, the main word's share): so the layout of the first
+ * n words of a picture is the layout of the whole picture, cut after n. A caller that knows a page's words one by one (sfx.mjs: a page
+ * planned in slices, each a few ms, instead of one 50 ms task at a firing) adds them as they come, in non-decreasing `prio`, and reads
+ * each word's place as soon as it is laid out; seatLayout itself is this, fed its sorted items (dev/sfx-plan.test.mjs: the same Map).
+ * -> { out (Map key -> place, filled by add), add(item) -> its place, n (words added), last (the last `prio` added) }
+ */
+export function seatLayouter({ view, panels = [], pins = [], tokens = [], zoom = 1, edge = SEAT_EDGE, up = [] } = {}) {
+  const out = new Map(), lay = { out, n: 0, last: -Infinity, add: null };
+  if ( !view ) { lay.add = (it) => { lay.n++; lay.last = it.prio ?? 9; const r = { cap: it.u, k: 1, f: 1, px: 0, py: 0, dx: 0, dy: 0, box: it.box, rules: [], clean: true }; out.set(it.key, r); return r; }; return lay; }
   const m = edge / Math.max(1e-4, zoom), v = { x0: view.x0 + m, y0: view.y0 + m, x1: view.x1 - m, y1: view.y1 - m };
   const vw = Math.max(1, v.x1 - v.x0), vh = Math.max(1, v.y1 - v.y0);
   // (MAPRIDE cost: the standing words count the panels exactly - merged only where the union adds nothing: strips over the gaps covered
@@ -242,7 +255,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
   const mv = (b, d) => ({ x0: b.x0 + d.dx, y0: b.y0 + d.dy, x1: b.x1 + d.dx, y1: b.y1 + d.dy });
   const into = (lo, hi, a, z) => (hi - lo > z - a ? (a + z) / 2 - (lo + hi) / 2 : lo < a ? a - lo : hi > z ? z - hi : 0);
   const inView = (b) => b.x0 >= v.x0 - 1e-6 && b.x1 <= v.x1 + 1e-6 && b.y0 >= v.y0 - 1e-6 && b.y1 <= v.y1 + 1e-6;
-  for ( const it of (items ?? []).slice().sort((a, b) => (a.prio ?? 9) - (b.prio ?? 9)) ) {
+  const one = (it) => {
     const B = it.box, u = it.u > 0 ? it.u : 1, sub = it.sub ?? null;
     const sc = sub ? { x: (sub.x0 + sub.x1) / 2, y: (sub.y0 + sub.y1) / 2 } : { x: (B.x0 + B.x1) / 2, y: (B.y0 + B.y1) / 2 };
     const p = { x: clamp(sc.x, B.x0, B.x1), y: clamp(sc.y, B.y0, B.y1) };
@@ -259,7 +272,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     const seen = sub ? inter(sub, view) > 0 : inter(B2, view) > 0;
     // (off this view: its place and its subject both; a sound heard all over the scene - a close thunder strike - still letters at the
     // view's edge toward it)
-    if ( !it.heard && inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && [...(it.path ?? []), ...(it.sound ? [it.sound] : [])].some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); if ( it.main && mainF === null ) mainF = [OFF_K, OFF_K, OFF_K]; continue; }
+    if ( !it.heard && inter(B2, view) <= 0 && !(sub && inter(sub, view) > 0) && !(it.ride && [...(it.path ?? []), ...(it.sound ? [it.sound] : [])].some((q) => q.x >= view.x0 && q.x <= view.x1 && q.y >= view.y0 && q.y <= view.y1)) ) { out.set(it.key, { cap: it.u, k: 1, f: 1, px: p.x, py: p.y, dx: 0, dy: 0, box: B, rules: ["off"], rule: "off", clean: false }); if ( it.main && mainF === null ) mainF = [OFF_K, OFF_K, OFF_K]; return; }
     const rules = [];
     // (MAPSEATS3, the size this seat draws it at, before its room: a word whose thing this seat does not see stands at the view's edge toward
     // it at OFF_K of its size here - never bigger than on a seat that sees it (ADVM r2 item 4: the player, who could not see the bomb, got a
@@ -330,7 +343,7 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
       }
       out.set(it.key, o);
       for ( const s2 of r.samples ) placed.push(s2);
-      continue;
+      return;
     }
     // (MAPEDGE: this seat's panels may lie on a word's box margin, never on more than PANEL_OK of its INK - ADVM r2 item 6: the thunder's
     // KRA-KA- lead-in stood on the GM's party panel within the old 6 % share; the words up with it keep their SOFT_OK share)
@@ -526,8 +539,9 @@ export function seatLayout(items, { view, panels = [], pins = [], tokens = [], z
     }
     // (the words laid out after it keep off its envelope - the same arrangement at every step)
     placed.push({ box: inkOf(pick.env), life: it.life ?? null });
-  }
-  return out;
+  };
+  lay.add = (it) => { lay.n++; lay.last = it.prio ?? 9; one(it); return out.get(it.key) ?? null; };
+  return lay;
 }
 /**
  * MAPRIDE: how THIS seat draws a word that RIDES a way (a bomb's fall, a shock wave, a meteor, a crack running out, a car), pure. The

@@ -47,6 +47,7 @@ import * as UI from "./sfx-table-ui.mjs";
 import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
 import * as T from "./sfx-table.mjs";
+import * as PLAN from "./sfx-plan.mjs";
 import * as BURN from "./sfx-burn.mjs";
 import * as DIR from "./sfx-direct.mjs";
 import { mapPixels } from "../destruction/source.mjs";
@@ -104,14 +105,30 @@ const onsetSeen = new Set();    // storm switch-on moments whose entrance was de
 const steamSeen = new Set();    // weather keys whose rain-on-fire hiss was decided here
 // MAPSFXSEAT: the table picture (sfx-seat.mjs): the words every seat holds, planned from shared data; and this seat's own log of every
 // lettering call (what it drew, where, how big, when, by which seat rule) for the checks and the two-seat takes
-const ledger = SEAT.makeLedger();
+const tableLedger = SEAT.makeLedger();
+// MAPPLAN: a page's table picture is planned in slices of a few ms (sfx-plan.mjs, `plans` below) instead of one task of 44-75 ms at its
+// firing. The pictures still in flight are finished before anything else reads or writes the ledger (plans.settle), so every reader
+// sees the ledger a page planned at once left, and the words come into it in the same order on every seat.
+const ledger = {
+  get list() { plans.settle(); return tableLedger.list; },
+  add: (e) => { plans.settle(); return tableLedger.add(e); },
+  boxes: (...a) => { plans.settle(); return tableLedger.boxes(...a); },
+  count: (...a) => { plans.settle(); return tableLedger.count(...a); },
+  has: (k) => { plans.settle(); return tableLedger.has(k); },
+  get: (k) => { plans.settle(); return tableLedger.get(k); },
+  prune: (now) => { plans.settle(); tableLedger.prune(now); },
+  clear: () => { plans.clear(); tableLedger.clear(); }
+};
 let seatLog = [];
 let screenUp = [];              // MAPSFXSEAT2: this seat's unlocated words still up ({ box (CSS px), life [t0, t1] shared ms }): a new one keeps off them
 const holdMemo = new Map();     // word + look -> the engine's hold box (a page plans many words in one frame)
 const pageWaits = new Map();    // firing id -> the shared moment its page stops waiting for its strokes
 const KNOCK_CONTACT = 60;       // MAPDIRECT: a knocked word's contact (ms after its start) until its handle tells its own
 const PAGE_WAIT_MS = 4000;      // a page waits this long (shared ms after its firing's moment) for all its fire-layer strokes
-const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
+const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0,
+  // (MAPPLAN: a page's planning in slices - units run, their ms and the longest; the longest slice; the times a word or another reader of
+  // the ledger had to finish a picture at once, and the longest such stretch)
+  planN: 0, planMs: 0, planMax: 0, sliceMax: 0, planForced: 0, planForcedMax: 0 };
 
 /* ---------------------------------------------------------------- settings */
 
@@ -606,12 +623,12 @@ function planPage(rec, tries = 0) {
 /** how long before a page's first word its table and layout are made (ms; an idle moment within it) */
 const PREP_LEAD = 500;
 const idle = (fn) => { try { if ( typeof requestIdleCallback === "function" ) return requestIdleCallback(fn, { timeout: PREP_LEAD - 200 }); } catch { /* below */ } return setTimeout(fn, 0); };
-/** MAPSAME: a page's table and this seat's layout of it for the current view, made ahead (groupLayout keeps it while the view holds) */
+/** MAPSAME: a page's table and this seat's layout of it for the current view, made ahead (groupLayout keeps it while the view holds).
+    MAPPLAN: in slices of a few ms each (sfx-plan.mjs) - one idle task of the whole page was a long frame too. */
 function prepPage(p) {
   try {
     if ( mode() === "off" || !L || !canvas?.ready || !pages.has(p.rec.id) ) return;
-    tablePage(p);
-    if ( p.group?.words?.length ) groupLayout(p.group, mapView(), canvas.stage?.scale?.x || 1, L.prefs?.scale ?? 1);
+    if ( plans.job(p) ) plans.pump();
   } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a page's layout failed`, err); }
 }
 /** MAPSFXSEAT: the ground at a firing's impact from the map's pixels (sfx-seat groundOfPixels: the destruction bake's own rule). */
@@ -625,32 +642,50 @@ function groundAt(rec) {
   } catch { return null; }
 }
 /** MAPSFXSEAT: the TABLE picture of a page, planned once from what every seat shares (sfx-table planPage); a seat then shows each word
-    by the seat rule only (pageWord -> play / playScreen). */
+    by the seat rule only (pageWord -> play / playScreen). (MAPPLAN: all of it at once - what is left of a picture in flight.) */
 function tablePage(p) {
   if ( p.table || !L ) return p.table ?? null;
-  p.table = T.planPage(p, tdeps());
-  // (the page's located words are one picture: a seat lays them out together - sfx-seat seatLayout: each keeps its side of what it letters,
-  // none onto another)
-  p.group = { words: [...(p.table?.values() ?? [])].filter((q) => q && !q.dropped && !q.screenAt && !q.stream && Number.isFinite(q.x) && Number.isFinite(q.y)) };
-  for ( const q of p.group.words ) q.group = p.group;
+  const j = plans.job(p);
+  if ( j ) plans.settleJob(j);
   return p.table;
 }
+/* MAPPLAN (sfx-plan.mjs): a page's table picture and this seat's layout of it are made in slices of a few ms, in idle moments, instead of
+   one task of 44-75 ms at a firing - the same picture, the same places, every word at its instant. This seat's part: */
+const plans = PLAN.makePlans({
+  now: () => performance.now(),
+  idle: (fn, ms) => { try { if ( typeof requestIdleCallback === "function" ) { requestIdleCallback(fn, { timeout: ms }); return; } } catch { /* below */ } setTimeout(() => fn(null), Math.min(ms, 16)); },
+  timer: (key, ms, fn) => later(key, ms, fn),
+  untimer: (key) => { const s = sched.get(key); if ( s ) { clearTimeout(s.id); sched.delete(key); } },
+  // (what every seat shares, as it stands NOW - a picture planned over several slices reads the same clock, steps, tokens and pins)
+  deps: () => PLAN.frozenDeps(tdeps(), { ledger: tableLedger, off: toPerf(0), steps: new Map(SZ.SIZE_GROUPS.map((g) => [g, stepFor(g)])), tokens: sharedTokens(null), pins: sharedPins(null) }),
+  snap: (grp) => laySnap(grp, mapView(), canvas.stage?.scale?.x || 1, L.prefs?.scale ?? 1),
+  stats,
+  warn: (m, err) => console.warn(`${MODULE_ID} | sfx: ${m}`, err)
+});
+
 /** One word of a page, at its moment, on THIS seat: the table's word, shown by the seat rule (its view, its panels, what it may see). */
-function pageWord(p, w) {
+function pageWord(p, w, t) {
   if ( mode() === "off" || !canvas?.ready ) return;
   if ( !L ) { engine(); return; }
-  const tb = tablePage(p);
+  // (MAPPLAN: the page's table picture starts here when no idle moment started it - as before - and this word goes on as soon as its
+  // part of it is planned; what this seat itself decides by - its words up, a storm word's own rule - is read now, as before)
+  const here = { still: p.still ? p.still() : true, up: alive.size };
+  plans.ask(p, p.pg.words.indexOf(w), t, () => pageWordNow(p, w, here), `pgw|${p.rec.id}|${w.key ?? w.role}`);
+}
+function pageWordNow(p, w, here) {
+  if ( mode() === "off" || !canvas?.ready || !L ) return;
+  const tb = p.table ?? p.job?.pl.table;
   if ( mode() === "big" && w.role !== "main" ) return;
   const grp = SZ.groupOfPageWord(w, p.grp);
   if ( stepFor(grp) === 0 ) return;
   const q = tb?.get(w.key);
   if ( !q ) return;
-  const still = p.still ? p.still() : true;
+  const still = here.still;
   if ( still === false || typeof still === "string" ) { seatSkip(q, typeof still === "string" ? still : "gone"); return; }   // (MAPTHUNDER: "yield")
   if ( q.dropped ) { stats.dropped++; lastPlaced.push({ text: q.text, role: w.role, key: w.key, dropped: q.dropped, why: q.why }); trimPlaced(); return; }
   // (this seat's own need: its performance mode keeps fewer words up - never the main word)
   const caps = C.CAPS[perfMode()] ?? C.CAPS.high;
-  if ( w.role !== "main" && alive.size >= caps.alive ) { stats.dropped++; seatSkip(q, "perf"); return; }
+  if ( w.role !== "main" && here.up >= caps.alive ) { stats.dropped++; seatSkip(q, "perf"); return; }
   // (owner's answer 4: a sound whose source this seat cannot see - under the fog, out of vision, a hidden shooter - is shown generally
   // on the screen, never at the hidden place; a flash beyond this seat's view sounds at the edge toward it)
   if ( q.screenAt ) { playScreen(q, q.screenAt); return; }
@@ -659,8 +694,18 @@ function pageWord(p, w) {
   if ( !q.heard && !hereVisible(q.sx ?? q.x, q.sy ?? q.y) ) { playScreen(q); return; }
   if ( w.from && !shooterSeen([w.from.x, w.from.y]) ) { playScreen(q); return; }
   play(q);
+  // (MAPPLAN: the walk over this seat's panels - 5-9 ms - not inside the frame the word starts in: when the walk kept (UI_MS) would be
+  // too old by the word's instant, it is made in an idle moment before it)
+  const wait = q.t - performance.now();
+  if ( wait > 30 && performance.now() + wait - uiCache.t >= UI_MS ) warmUi(wait - 25);
   lastPlaced.push({ text: q.text, role: q.role, voice: q.voice, page: p.rec.id, key: w.key, box: q.box, ...(q.fitK !== undefined ? { fitK: q.fitK } : {}), clean: FIT.isClean(q.pen) });
   trimPlaced();
+}
+/** this seat's panels read again in an idle moment within `ms` */
+function warmUi(ms) {
+  const g0 = gen, run = () => { if ( g0 === gen && canvas?.ready && mode() !== "off" ) { try { uiBoxes(true); } catch { /* at the word */ } } };
+  try { if ( typeof requestIdleCallback === "function" ) { requestIdleCallback(run, { timeout: Math.max(1, ms) }); return; } } catch { /* below */ }
+  setTimeout(run, Math.max(0, ms));
 }
 const trimPlaced = () => { if ( lastPlaced.length > 24 ) lastPlaced = lastPlaced.slice(-24); };
 /** Can this client see the scene point (x, y)? The GM always; a player under the fog of war or out of vision does not. */
@@ -1069,9 +1114,9 @@ function sharedPins(v) {
   return out;
 }
 /** The interface panels over the canvas on this client (Foundry's and any module's), in scene px. */
-function uiBoxes() {
+function uiBoxes(force = false) {
   const now = performance.now();
-  if ( now - uiCache.t < UI_MS ) return uiCache.boxes;
+  if ( !force && now - uiCache.t < UI_MS ) return uiCache.boxes;
   const t0 = now, board = canvas.app?.view ?? document.getElementById("board");
   const rect = board?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
   let rects = [];
@@ -1210,9 +1255,13 @@ function seatView(zoom, sc) {
   return { vw: Math.max(320, innerWidth - (sb && sb.left > innerWidth * 0.5 ? sb.width : 0)), vh: innerHeight, zoom, scale: sc };
 }
 /** the seat layout of a group (a page's or a moment's located words; a word on its own is a group of one), once per view of this seat */
+const layKey = (vw, ui, sc) => (vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${sc}|${innerWidth}x${innerHeight}` : "");
 function groupLayout(grp, vw, zoom, sc) {
   const ui = uiBoxes();
-  const key = vw ? `${Math.round(vw.x0)}|${Math.round(vw.y0)}|${Math.round(vw.x1)}|${Math.round(vw.y1)}|${ui.length}|${sc}|${innerWidth}x${innerHeight}` : "";
+  const key = layKey(vw, ui, sc);
+  // (MAPPLAN: a page's words are laid out one by one, in the layout's own order, each when it is first asked for or in a slice before -
+  // from the one reading of this seat's view and obstacles its layout started with: the same places as the whole page laid out then)
+  if ( grp.page ) return plans.layout(grp, { key, full: () => laySnap(grp, vw, zoom, sc, ui) });
   if ( grp.seat && grp.seatKey === key ) return grp.seat;
   grp.seatKey = key;
   const d = tdeps(), items = T.seatItems(grp.words, d, seatView(zoom, sc));
@@ -1223,6 +1272,12 @@ function groupLayout(grp, vw, zoom, sc) {
   const t0 = performance.now(), r = SEAT.seatLayout(items, { view: vw, panels: ui, pins, tokens: sharedTokens(vw), zoom, up }), ms = performance.now() - t0;
   stats.seatMs = (stats.seatMs ?? 0) + ms; stats.seatN = (stats.seatN ?? 0) + 1; stats.seatMax = Math.max(stats.seatMax ?? 0, ms);
   return (grp.seat = r);
+}
+/** MAPPLAN: this seat read ONCE for a page group's layout (what the whole layout read: its view, panels, pins, tokens, the words up) */
+function laySnap(grp, vw, zoom, sc, ui = uiBoxes()) {
+  const pins = [...sharedPins(vw), ...pinBoxes(vw)];
+  const up = [...alive].filter((r) => r.box && r.grp !== grp).map((r) => ({ box: r.box, life: r.life ?? null }));
+  return { key: layKey(vw, ui, sc), ctx: { view: vw, panels: ui, pins, tokens: sharedTokens(vw), zoom, up }, d: { ...tdeps(), ledger: tableLedger }, seat: seatView(zoom, sc) };
 }
 /** MAPSFXSEAT: this seat's log of every lettering call (for the checks and the two-seat takes): the table's word and how this seat drew it */
 function logCall(w, call) {

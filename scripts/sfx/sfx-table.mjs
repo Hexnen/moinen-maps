@@ -173,8 +173,12 @@ export function screenCaps(sizeFor, model, o, plan, { rank = null, shrink = 1, s
 /** MAPSFXSEAT2: the items of the seat layout (sfx-seat seatLayout) for the table words of one page / moment on THIS seat: each word's
     table box and cap, its subject, its sizes on this seat (seatCaps), its life on the table, whether it rides its way */
 export function seatItems(ws, d, seat) {
+  return ws.filter((w) => w && w.text && Number.isFinite(w.x)).map((w, i) => seatItem(w, i, d, seat));
+}
+/** MAPPLAN: one word's item of the seat layout; `i` its place among the located words of its picture (seatItems: the same item) */
+export function seatItem(w, i, d, seat) {
   const sc = seat.scale > 0 ? seat.scale : 1;
-  return ws.filter((w) => w && w.text && Number.isFinite(w.x)).map((w, i) => {
+  {
     const c = seatCaps(w, d, seat), u = w.size > 0 ? w.size : d.grid * 0.5;
     const prio = w.role === "main" ? 0 : w.role === "pre" ? 1 : w.wave || w.voice === "shockwave" ? 2 : 3 + i * 1e-3;
     return { key: w.key ?? `${w.seed}|${w.role}`, w, prio, box: w.box ?? C.boxOf(w), u, sub: w.subject ?? null, sizes: c?.sizes ?? [u * sc], min: c?.min ?? u * sc, full: c?.full ?? 0, small: c?.small ?? 0,
@@ -182,7 +186,7 @@ export function seatItems(ws, d, seat) {
       // (MAPRIDE rideLayout: when a rider leaves (shared ms), the end of its way it is tied to - a fall its end over the impact, a wave or
       // a crack its start at the blast - and whether it may turn round that start - a shock wave leaves every way)
       ...((w.path?.length ?? 0) > 1 ? { stop: Number.isFinite(w.stopAt) && Number.isFinite(w.t) ? (w.ts ?? 0) + (w.stopAt - w.t) + (Number(w.exitMs) || 0) : null, anchor: w.role === "pre" ? "end" : "start", turn: w.voice === "shockwave" || w.kind === "shockwave" } : {}) };
-  });
+  }
 }
 /** MAPSFXSEAT2: the share of a word's box (FIT.wordBox: its hold box with room for its entrance and outline) its INK covers - the hold
     picture and the ink rim the engine draws under a world word (RIMUNDER 1.9.12, about INK_RIM cap heights round it): what may not lie on
@@ -337,32 +341,82 @@ export function planMoment(due, d0, recent = []) {
  * holds, timed on the shared clock. -> Map(word key -> the placed word | { screenAt } | { dropped, why })
  */
 export function planPage(p, d0) {
+  const pl = pagePlanner(p, d0);
+  while ( pl.step() ) { /* every unit, at once */ }
+  return pl.table;
+}
+/**
+ * MAPPLAN: the table picture of a page, planned ONE UNIT AT A TIME (planPage runs them all at once: the same picture). Live 2026-11-16 a
+ * bomb's whole page was planned inside one timer task of 44-75 ms at its firing (a fresh engine settle a word, two measures a word, the
+ * main word's side) - a long frame on every seat at each bomb. The units, in the order planPage always did the work:
+ *   a word of the page (in page order: written, sized, measured, placed, into the ledger) - the main word's SIDE is a unit of its own -,
+ *   then each placed word drawn at its group's step (restep) and its ledger entry.
+ * A caller that needs a word before the whole page is planned (sfx.mjs: the first word of a bomb's page is due a tenth of a second after
+ * its record) plans up to it (`upTo`) and draws it at its step early (`early`: restep reads only the word itself; its ledger entry is
+ * still written at the end, in the same order, so every later word is placed against the same ledger as before). The picture is the
+ * same as planPage's as long as nothing else reads or writes the ledger between the units and `d0` answers the same throughout - the
+ * caller's part (sfx.mjs settles a page in flight before anything else touches the ledger, and freezes the deps at its start).
+ * -> { table (Map, filled as units run), words (the page's), planned (page words done), done, step() -> more?, upTo(i) (plan the page
+ *      words up to index i, at once), early(q) (restep a placed word now), isPlaced(q) }
+ */
+export function pagePlanner(p, d0) {
   const table = new Map(), G = d0.grid, d = atStep2(d0);
   const words = p.pg.words, main = words.find((q) => q.role === "main") ?? words[0];
-  if ( !main ) return table;
+  const pl = { table, words, planned: 0, done: false, units: 0, step: () => false, upTo() {}, early() {}, isPlaced: (q) => !!(q?.box && !q.screenAt && !q.dropped) };
+  if ( !main ) { pl.done = true; pl.planned = words.length; return pl; }
   // (the reference view: centred on the page's main sound, at the zoom that holds its subject)
   const c = { x: main.x, y: main.y }, zr = main.r ?? G * 0.5, z = SEAT.refZoom(G, zr), vw = SEAT.refView(c, z);
   const env = { c, z, zr, vw, used: new Set(), mainBox: null, pins: d.pins?.(vw) ?? [] };
   p.texts ??= new Set();
-  for ( const w of words ) {
+  let i = 0, pend = null, vals = null, j = 0;
+  const stepped = new Set();
+  // one word of the page; -> a second unit still to run for it (the main word's side), or null
+  const word = (w) => {
     const sd = `${d.sceneId}|${w.seed}`;
     const wo = { ...w.wo, material: PG.materialFor(w.wo, p.ground) };
     if ( wo.material == null ) delete wo.material;
     // the word is written BEFORE any spot is picked (every seat writes the same words in the same order, whatever it shows), and never
     // repeats a word of its own page: one bomb's debris words were seen saying the same thing twice (EFFECTS1)
-    let word;
-    try { word = PG.unrepeated((s) => d.L.word(w.kind, { ...wo, seed: s, lang: d.lang }), sd, p.texts); }
-    catch ( err ) { d.warn?.(`no word for ${w.kind}`, err); continue; }
-    if ( !word?.text ) continue;
-    p.texts.add(word.text);
-    const q = pageWordPlan(p, w, word, sd, env, d);
-    if ( w.role === "main" && q?.box && !q.screenAt ) { mainSide(q, d0); d.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: true }); }
-    table.set(w.key, q);
-    if ( w.role === "main" && q?.box ) env.mainBox = q.box;
-  }
-  // (MAPSAME: placed at step 2's sizes, drawn at the group's own step - each word scaled about its point nearest the thing)
-  for ( const q of table.values() ) if ( q?.box && !q.screenAt && !q.dropped ) { restep(q, d0); d0.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: q.role === "main" }); }
-  return table;
+    let wd;
+    try { wd = PG.unrepeated((s) => d.L.word(w.kind, { ...wo, seed: s, lang: d.lang }), sd, p.texts); }
+    catch ( err ) { d.warn?.(`no word for ${w.kind}`, err); return null; }
+    if ( !wd?.text ) return null;
+    p.texts.add(wd.text);
+    const q = pageWordPlan(p, w, wd, sd, env, d);
+    const rest = (side) => {
+      if ( side ) { mainSide(q, d0); d.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: true }); }
+      table.set(w.key, q);
+      if ( w.role === "main" && q?.box ) env.mainBox = q.box;
+    };
+    if ( w.role === "main" && q?.box && !q.screenAt ) return () => rest(true);
+    rest(false);
+    return null;
+  };
+  const unitA = () => {
+    if ( pend ) { const f = pend; pend = null; f(); pl.planned = i; return; }
+    pend = word(words[i++]);
+    if ( !pend ) pl.planned = i;
+  };
+  const restepOnce = (q) => { if ( stepped.has(q) ) return false; stepped.add(q); restep(q, d0); return true; };
+  pl.upTo = (k) => { while ( !pl.done && (pend || i < words.length) && pl.planned <= k ) { unitA(); pl.units++; } };
+  pl.early = (q) => { if ( pl.isPlaced(q) ) restepOnce(q); };
+  pl.step = () => {
+    if ( pl.done ) return false;
+    pl.units++;
+    if ( pend || i < words.length ) { unitA(); return true; }
+    // (MAPSAME: placed at step 2's sizes, drawn at the group's own step - each word scaled about its point nearest the thing)
+    vals ??= [...table.values()];
+    while ( j < vals.length ) {
+      const q = vals[j++];
+      if ( !pl.isPlaced(q) ) continue;
+      const worked = restepOnce(q);
+      d0.ledger.add({ key: q.key, page: p.rec.id, box: lifeBox(q), t0: q.ts, t1: q.ts + lifeMs(q), main: q.role === "main" });
+      if ( worked && j < vals.length ) return true;
+    }
+    pl.done = true;
+    return false;
+  };
+  return pl;
 }
 /** MAPSAME: the deps a table picture is PLACED with - the size step of every group at step 2 (0 stays 0): the table's places, the words it
     keeps and drops and the sides they stand on are the same whatever step the table plays at; each word is then drawn at its step's own

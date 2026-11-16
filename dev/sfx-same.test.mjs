@@ -291,8 +291,8 @@ for ( const S of ['gm', 'p1'] ) { const r = mainRows.filter((q) => q.S === S); o
 {
   const src = fs.readFileSync(path.join(root, "scripts/sfx/sfx.mjs"), "utf8");
   const prep = src.slice(src.indexOf("function prepPage(p) {"), src.indexOf("function prepPage(p) {") + 500);
-  ok(src.includes("later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));") && prep.includes("tablePage(p);") && prep.includes("groupLayout(p.group, mapView(),"),
-    "a page's table and this seat's layout are made in an idle moment before its first word (prepPage)");
+  ok(src.includes("later(`pg|${rec.id}|prep`, first - PREP_LEAD - performance.now(), () => idle(() => prepPage(p)));") && prep.includes("if ( plans.job(p) ) plans.pump();") && /snap: \(grp\) => laySnap\(grp, mapView\(\),/.test(src),
+    "a page's table and this seat's layout are made in idle moments before its first word (prepPage; MAPPLAN: in slices, dev/sfx-plan.test.mjs)");
 }
 // ---- a fire whose source is off this seat's view: lettered only when its run's whole block is off it too (live 2026-11-15 the second
 // of two fires lettered its run in from the player's view edge, cut by it)
