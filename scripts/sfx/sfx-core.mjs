@@ -15,11 +15,14 @@
                letters, kept visible), t (ms, when it sounds), tPre? (ms: when its anticipation starts, before t), m? (0..1 loudness;
                else from r), ms? (how long the sound lasts), obj? (a stroke id: the areas of one stroke join; a fire's word is checked
                against its stroke when it plays), gate? (a fire stroke id: the word waits until its flames are on screen),
-               from? ({x, y}), colors?, path? ([{x, y, ms}]: a sound that travels: a car, a drag; a gun's walk) }
+               from? ({x, y}), colors?, path? ([{x, y, ms}]: a sound that travels: a car, a drag; a gun's walk),
+               way? ({ux, uy}: MAPDIRECT, the way the thing that sounds was thrown - sfx-direct), wind? ([wx, wy]: a rising word drifts downwind) }
    A CLUSTER: events of one moment (JOIN_MS) close together read as ONE sound: one MAIN word (the loudest voice) and a few smaller
                SATELLITES at its edges, staggered; a big cave-in cracks first (its PRE word, at the anticipation's start).
    PLACEMENT: beside what it letters (never on it if it can sit at its edge), off tokens, off this client's interface panels
                (sidebar, bars, the module's and other modules' panels: their screen rectangles), off other words, inside the view. */
+
+import * as D from "./sfx-direct.mjs";
 
 export const JOIN_MS = 500;          // events this close in time can join one cluster
 export const SAME_OBJ_MS = 1500;     // ... the areas of one stroke join even when further apart in time
@@ -187,7 +190,8 @@ export function brushFalls(e, grid = 100, k = 1) {
   const t0 = e.voice === "cavein" ? 900 : 450, dt = e.voice === "cavein" ? 420 : 330;
   for ( let i = 0; i < n; i++ ) {
     const a = Math.PI * (0.2 + 0.6 * h01(`${sidOf(e)}|fall${i}`)) + (i ? Math.PI * 0.85 : 0);
-    out.push({ key: `${e.key}|fall${i}`, sid: `${sidOf(e)}|fall${i}`, obj: e.obj, voice: "debris", phase: true, mat: e.mat,
+    // (MAPDIRECT: thrown OUT of the blast - its word is knocked the way the piece flew, from the blast's centre)
+    out.push({ key: `${e.key}|fall${i}`, sid: `${sidOf(e)}|fall${i}`, obj: e.obj, voice: "debris", phase: true, mat: e.mat, way: D.unitWay(Math.cos(a) * e.r * 0.9, Math.sin(a) * e.r * 0.75),
       x: e.x + Math.cos(a) * e.r * 0.9, y: e.y + Math.sin(a) * e.r * 0.75, r: e.r * (i ? 0.25 : 0.35), t: e.t + (t0 + dt * i) * k, m: i ? 0.25 : 0.42, ms: 700 });
   }
   return out;
@@ -317,7 +321,9 @@ export function muzzleEvent(it, { t0 = 0, grid = 100, muzzleOf, flight, key, sid
   // back from the aim, they stacked on the shooter - and not along the rounds' way onto the impact words)
   const ax = shots[0].hx - shots[0].x, ay = shots[0].hy - shots[0].y, al = Math.hypot(ax, ay) || 1;
   const [px, py] = -ax < 0 || (ax === 0 && ay > 0) ? [ay, -ax] : [-ay, ax];   // (the one of the two that points up the screen)
-  const dir = Math.round((Math.atan2(py, px) * 180) / Math.PI);
+  // (MAPDIRECT: the syllables fly ALONG the aim, slanted to that screen-up side - sfx-direct streamDir: square to the aim they told
+  // nothing of where the gun fired; they still start beside the barrel, off the token and off the rounds' own line)
+  const dir = D.streamDir(ax, ay) ?? Math.round((Math.atan2(py, px) * 180) / Math.PI);
   // (EFFECTS1: live the syllables touched the top of the shooter's token - the barrel is AT its edge: they start beside the barrel,
   // off the token by MUZZLE_CLEAR of a square on the screen-up side of the aim)
   const pl = Math.hypot(px, py) || 1, fr = Number.isFinite(it.fr) ? it.fr : grid * 0.38;
@@ -356,7 +362,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
         for ( let i = 0; i < n; i++ ) {
           const a = Math.PI * (0.15 + 0.7 * h01(`${st.id}|deb${i}`)) + (i ? Math.PI : 0);
           const q = land[i] ?? { x: p[0] + Math.cos(a) * r * 1.05, y: p[1] + Math.sin(a) * r * 0.9, ms: 420 + 260 * i };
-          push({ key: `${st.id}|debris${i}`, voice: "debris", phase: true, x: q.x, y: q.y, r: r * 0.4, t: st.q + Math.max(DEBRIS_MIN_MS + 200 * i, q.ms), m: m * 0.5, ms: 800 });
+          push({ key: `${st.id}|debris${i}`, voice: "debris", phase: true, way: D.wayOf(p, q, grid * 0.25), x: q.x, y: q.y, r: r * 0.4, t: st.q + Math.max(DEBRIS_MIN_MS + 200 * i, q.ms), m: m * 0.5, ms: 800 });
         }
       }
     }
@@ -398,7 +404,7 @@ export function strokeEvents(st, prev, from, to, ctx) {
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
     const c = pathCentre(p);
     push({ key: `${st.id}|out|${st.o}`, voice: "out", x: c.x, y: c.y, r: st.r ?? 50, t: Math.max(st.o, from), ms: Math.max(1200, ctx.outMs ?? 3500),
-      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box, colors: colors ?? [...OUT_ASH], rank: OUT_RANK });
+      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box, colors: colors ?? [...OUT_ASH], rank: OUT_RANK, wind: D.windOf(st) });
   }
   return out;
 }
@@ -520,7 +526,7 @@ export function planCluster(g, o = {}) {
       h01(seed + "|pr") * 16 - 8, main.colors, o, { area: g.span * 0.3, subject: g.box }));
   }
   const mw = spec("main", main.voice, loud, main.ms ?? VOICES[main.voice]?.ms ?? 600, centre, main.t, seed, main.from ?? null,
-    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp, level: main.level });
+    (h01(seed + "|rot") - 0.5) * 10, main.colors, o, { area: single ? main.r : Math.max(main.r, g.span * 0.75), subject: g.box, mat: main.mat, kp: main.kp, level: main.level, way: main.way ?? null, wind: main.wind ?? null });
   // a gun's rounds rattle along their walk (the engine's stream of its sound kind, one syllable a round) instead of one word
   if ( VOICES[main.voice]?.stream && main.path?.length ) mw.stream = { walk: main.path, t0: main.t0 ?? main.t, ...(Number.isFinite(main.dir) ? { dir: main.dir } : {}) };
   // a thing that travels: its word rides its path
@@ -556,7 +562,9 @@ export function planCluster(g, o = {}) {
     // (a satellite sounds when its own thing happens - debris as it lands, a wave as it rolls - else just after the main word)
     const ts = e.t > main.t + 50 ? e.t : Math.max(e.t, main.t) + 160 + i * 140;
     const sw = spec("sec", v, clamp(0.15 + 0.7 * m2, 0, 0.7), e.ms ?? VOICES[v]?.ms ?? 600, e.path?.length > 1 ? e.path[0] : at, ts, sd, centre,
-      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null, mat: e.mat ?? main.mat, kp: v === e.voice ? e.kp : null });
+      Math.sign(dx || 1) * (5 + 9 * h01(sd + "|rot")), e.colors, o, { area: e.r * 0.7, subject: e.box ?? null, mat: e.mat ?? main.mat, kp: v === e.voice ? e.kp : null,
+        // (MAPDIRECT: debris of the main sound is thrown OUT from its centre - the word is knocked that way; a member that knows its own way keeps it)
+        way: e.path?.length > 1 ? null : e.way ?? (v === "debris" ? D.unitWay(dx, dy, grid * 0.25) : null), wind: e.wind ?? null });
     if ( e.path?.length > 1 ) sw.path = e.path;
     words.push(sw);
   });
@@ -571,7 +579,9 @@ function spec(role, voice, loud, ms, at, t, seed, from, rotation, colors, o, ext
   if ( role !== "main" ) delete stage.push;
   return { role, voice, kind: kindOf(voice, o.known, extra.mat ?? null, extra.kp ?? null), mat: extra.mat ?? null, emat: engineMatOf(voice, extra.mat ?? null), loud, ms: Math.round(ms), x: at.x, y: at.y, t, seed, from: from ?? null, rotation, colors: colors ?? null,
     magnitude: engineMag(loud, voice) * (role === "sec" ? 0.85 : 1), area: Math.round(engineArea(extra.area ?? grid * 0.5, voice, grid)),
-    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift, ...(Number.isFinite(extra.level) ? { level: extra.level } : {}) };
+    stage, cover: V.cover ?? 0.25, subject: extra.subject ?? null, drift: !!V.drift, ...(Number.isFinite(extra.level) ? { level: extra.level } : {}),
+    // (MAPDIRECT: debris of a moment keeps its look - it already grows away from its blast, `from` - and is knocked the way it was thrown)
+    ...(extra.way ? { way: extra.way, flat: true } : {}), ...(extra.wind ? { wind: extra.wind } : {}) };
 }
 
 /** A gun's rattle: the beats (ms from its first round) of its stream's syllables - 3 to 8, spread evenly over its walk. */

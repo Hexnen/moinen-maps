@@ -17,6 +17,7 @@ import * as EV from "./sfx-events.mjs";
 import * as SZ from "./sfx-size.mjs";
 import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
+import * as D from "./sfx-direct.mjs";
 
 /** the engine's tick (24 a second): its timeline's pictures last whole ticks */
 const TICK_MS = 1000 / 24;
@@ -26,6 +27,12 @@ export const DRIFT = [0.15, 0.9];
 /** a fire's catch word sounds this long after the fire's shared moment (a seat on time shows its flames by then; question MAPSFXSEAT-2) */
 export const CATCH_SHOW_MS = 400;
 
+/** MAPDIRECT: where a rising word drifts to, in grid squares from its place ([dx, dy], dy < 0 = up): downwind of its fire's wind (`w.wind`) */
+export const driftOf = (w) => D.driftTo(DRIFT, w?.wind ?? null);
+/** MAPDIRECT: is this word knocked along a way (it has one and does not ride, drift or stream)? */
+export const knocked = (w) => !!w?.way && Number.isFinite(w.way.ux) && Number.isFinite(w.way.uy) && !w.path && !w.drift && !w.stream;
+/** MAPDIRECT: the knock of a word (sfx-direct KNOCK): a main word's or a smaller word's */
+export const knockOf = (w) => (w.role === "main" ? D.KNOCK.main : D.KNOCK.sec);
 export const grpOf = (w) => w.grp ?? SZ.groupOfVoice(w.voice);
 export const moveBox = (b, dx, dy) => ({ x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy });
 export const unionBox = (a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) });
@@ -37,6 +44,8 @@ export function lifeBox(w) {
   let b = w.box ?? C.boxOf(w);
   if ( w.voice === "cavein" ) b = { ...b, y1: b.y1 + (b.y1 - b.y0) * 0.5 };
   if ( w.path?.length > 1 ) for ( const q of w.path ) b = unionBox(b, C.boxOf(w, q.x, q.y));
+  // (MAPDIRECT: a knocked word slides on along its way while it stands: the table keeps that room free of the words that come after it)
+  if ( knocked(w) && w.size > 0 ) { const s = knockOf(w).drift * w.size; b = unionBox(b, moveBox(b, w.way.ux * s, w.way.uy * s)); }
   return b;
 }
 
@@ -53,12 +62,17 @@ export function baseOpts(w, d) {
     ...(Number.isFinite(w.rank) ? { size: EV.rankSize(w.rank, SEAT.REF_VH / z, w.shrink ?? 1), ceilK: 1 } : {}),
     ...(w.from ? { from: w.from } : {}), ...(w.colors ? { colors: w.colors } : {}), ...(d.layer ?? {}) };
   for ( const k of ["in", "holdKind", "out", "on", "push", "glow"] ) if ( st[k] !== undefined ) o[k] = st[k];
+  // MAPDIRECT: a word with a WAY grows and leans along it and its own sideways motions go that way (sfx-direct lookOf: an ANGLE, the same
+  // on every seat; the word is measured and placed with it); its knock is the seat's (sfx.mjs seatCall). A rider or a drifter keeps its own way.
+  // (a piece thrown out of a blast - `flat` - keeps the look it had: its footprint on the table is unchanged, only its knock is new)
+  if ( knocked(w) && !w.flat ) Object.assign(o, D.lookOf(w.way, w.rotation ?? 0, w.role === "main" ? D.LEAN.main : D.LEAN.sec));
   // what was hit makes the sound: its material (the engine's look follows it); the word's own character stays, only its material changes
   if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };
   // the word lasts as long as its sound (a fire going out hisses while its flames die; a crack is a snap)
   if ( w.ms >= 900 ) o.hold = Math.round(Math.min(4500, Math.max(600, w.ms * 0.7)));
   // steam drifts up off what was put out
-  if ( w.drift ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * DRIFT[0], y: w.y - G * DRIFT[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
+  // (MAPDIRECT: downwind - the wind of the fire it rises off, sfx-direct driftTo; still air: straight up as before)
+  if ( w.drift ) o.path = { from: { x: w.x, y: w.y }, to: { x: w.x + G * driftOf(w)[0], y: w.y + G * driftOf(w)[1] }, duration: Math.round(w.ms * 1.1), ease: "out", orient: "none" };
   // a thing that travels: its word rides along with it
   if ( w.path ) { o.path = { points: w.path.map((q) => ({ x: q.x, y: q.y })), duration: Math.max(400, w.path.at(-1).ms), ease: "linear", orient: w.orient ?? "lean", smooth: "line" }; o.hold = Math.max(o.hold ?? 0, Math.round(w.path.at(-1).ms)); }
   return o;
@@ -241,7 +255,7 @@ export function measure(w, d) {
     // (and its exit: a rider stopped early - the wave at its rim - plays its exit from the stop, still legible about half of it: live
     // the debris word laid out 250 ms after the wave's stop was lettered onto it)
     w.exitMs = md?.exitMs ?? 0;
-    if ( w.drift ) { w.rise = d.grid * DRIFT[1]; w.riseX = d.grid * DRIFT[0]; }
+    if ( w.drift ) { const dr = driftOf(w); w.rise = Math.max(0, -d.grid * dr[1]); w.riseX = d.grid * dr[0]; }
   } catch { /* the estimate stands */ }
 }
 /** The engine's word for a spec (its vocabulary), different from the other words of the same moment. */
@@ -445,6 +459,8 @@ export function soundAt(w, impact = null) {
   if ( r ) { const q = w.role === "pre" ? r.at(-1) : r[0]; if ( Number.isFinite(q?.x) ) return { sx: q.x, sy: q.y }; }
   return { sx: w.x, sy: w.y };
 }
+/** MAPDIRECT: a page word's way - its own, or the way a piece was thrown (`thrown`: the impact) to where it is lettered */
+const wayFor = (w, G) => w.way ?? (w.thrown ? D.wayOf(w.thrown, w, G * 0.25) : null);
 /** One word of a page on the TABLE: its spot (a landing or a fire the reference view holds), its size, its box, its way, its place. */
 function pageWordPlan(p, w0, word, sd, env, d) {
   const G = d.grid, { vw, z, zr } = env;
@@ -471,6 +487,8 @@ function pageWordPlan(p, w0, word, sd, env, d) {
     rank: w.rank, shrink: w.shrink ?? 1,
     magnitude: PG.pageMag(w, p.rec.size), area: Math.round(Math.max(G * 0.15, Math.min(r, G * 3))), rotation: (C.h01(w.seed + "|rot") - 0.5) * 10, stage: w.stage ?? {},
     cover: w.role === "main" ? 0.3 : 0.25, subject: w.box ?? { x0: w.x - r, y0: w.y - r, x1: w.x + r, y1: w.y + r }, drift: !!w.drift, ...(w.from ? { from: w.from } : {}),
+    // (MAPDIRECT: its way - its own, or for a piece thrown out of the blast from the impact to the landing lettered here; its fire's wind)
+    ...(wayFor(w, G) ? { way: wayFor(w, G), ...(w.thrown ? { flat: true } : {}) } : {}), ...(w.wind ? { wind: w.wind } : {}),
     ...(w.role === "main" && w.side ? { around: C.besideOf(w.side) } : {}), ...(w.ride ? { path: w.ride } : {}) };
   if ( w.screen ) return { ...spec, screenAt: w.screen };
   spec.alive = d.ledger.count(spec.ts, spec.ts + lifeMs(spec));
@@ -511,7 +529,7 @@ function pageWordPlan(p, w0, word, sd, env, d) {
   for ( let dt = 0; dt <= (w0.cands ? PG.FALL_WAIT_MS : 0) && !placed.length; dt += 250 ) {
     for ( const s of spots ) {
       const s2 = s === spots[0] && dt === 0 ? spec : { ...spec, x: s.x, y: s.y, t: spec.t + dt, ts: spec.ts + dt,
-        ...(s === spots[0] ? {} : { subject: { x0: s.x - r, y0: s.y - r, x1: s.x + r, y1: s.y + r }, sx: s.x, sy: s.y }) };
+        ...(s === spots[0] ? {} : { subject: { x0: s.x - r, y0: s.y - r, x1: s.x + r, y1: s.y + r }, sx: s.x, sy: s.y, ...(w.thrown ? { way: D.wayOf(w.thrown, s, G * 0.25) ?? undefined } : {}) }) };
       placed = placeFit([s2], ctxAt(s2.ts), d);
       if ( placed.length ) { if ( s !== spots[0] ) env.used.add(`${Math.round(s.x)},${Math.round(s.y)}`); break; }
     }

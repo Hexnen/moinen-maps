@@ -73,7 +73,8 @@ group("F2", () => {
   const steam = { role: "main", voice: "out", x: 2600, y: 400, bw: 300, bh: 80, rise: 90 * 2, t: 0, subject: { x0: 2580, y0: 380, x1: 2620, y1: 420 }, cover: 0.4 };
   const ps = C.place([steam], { view: { x0: 0, y0: 0, x1: 3200, y1: 1800 }, ui, tokens: [] })[0];
   ok(ps && ps.box.y0 <= ps.y - 40 - 180 + 1 && ui.every((b) => ov(ps.box, b) === 0), "F2 a word that rises (steam) keeps its whole way up off the panels");
-  ok(/w\.rise = d\.grid \* DRIFT\[1\]/.test(sfx), "F2 the runtime gives steam its rise");
+  // (MAPDIRECT: the rise is still DRIFT[1] in still air, now read through driftOf - downwind when its fire has a wind; dev/sfx-direct.test.mjs TABLE)
+  ok(/const dr = driftOf\(w\); w\.rise = Math\.max\(0, -d\.grid \* dr\[1\]\)/.test(sfx) && /driftOf = \(w\) => D\.driftTo\(DRIFT,/.test(sfx), "F2 the runtime gives steam its rise");
   ok(C.CEIL_K.main < 1 && C.CEIL_K.sec < C.CEIL_K.main && /ceilK: C\.CEIL_K\[w\.role\]/.test(sfx), "F2 the map's words take a share of the engine's size ceiling (a main word leaves room around it)");
   ok(sizeFor({ space: "world", grid: 100, zoom: 1, vw: 1600, vh: 900, area: 900, magnitude: 1.5, aspect: 6, ceilK: C.CEIL_K.main }).px * 6 < 1600 * 0.45, "F2 ... the biggest main word stays under about two fifths of the width");
   ok(/el\.id === "pause"/.test(sfx), "F2 the game-paused banner is not a panel (it would push every word off the middle)");
@@ -283,7 +284,9 @@ group("SHOT", () => {
     return { x: ux * off, y: uy * off, L: d - off }; }, flight: fl, key: "m1", sid: "m1" });
   // (EFFECTS1: beside the barrel, pushed clear of the shooter token - live the syllables touched its top)
   ok(me.voice === "muzzle" && Math.abs(Math.hypot(me.x, me.y) - (50 + 100 * C.MUZZLE_CLEAR)) < 1 && me.t === 10000 + 500 - fl(1600 - 42.5), "SHOT the report sounds beside the barrel, clear of the shooter, when the first round leaves (hit time minus flight)");
-  ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && Math.abs(Math.cos(me.dir * Math.PI / 180)) < 0.05 && Math.sin(me.dir * Math.PI / 180) < 0, "SHOT a syllable per round; the report flies off square to the aim, screen-up (not back over the shooter, not onto the impacts)");
+  ok(me.path.length === 3 && me.path[0].ms === 0 && me.path[2].ms > me.path[1].ms && // (MAPDIRECT: the report told nothing of where the gun fired while it flew off square to the aim; it now flies ALONG the aim, slanted to
+    // the same screen-up side - still not back over the shooter, and off the rounds' own line onto the impacts: at least 25 deg off it)
+    Math.cos(me.dir * Math.PI / 180) > 0.7 && Math.sin(me.dir * Math.PI / 180) < -0.42, "SHOT a syllable per round; the report flies along the aim, slanted screen-up (not back over the shooter, not straight onto the impacts)");
   const w = C.planCluster(C.cluster([me], G)[0], { grid: G, known: KINDS })[0];
   // (engine 1.7.0 WORD2 has the guns' own kinds - pistol, rifle, gunfire, minigun - in place of one "gunshot": the firing's rounds pick one)
   ok(KINDS.has(w.kind) && /^(pistol|rifle|gunfire|minigun)$/.test(w.kind) && w.kind === C.kindOf("muzzle", KINDS, null, C.gunKinds(me.path)) && w.stream && w.stream.dir === me.dir && w.stream.t0 === me.t0,
@@ -298,7 +301,7 @@ group("SHOT", () => {
   ok(hit.voice === "gunhit" && C.kindOf(hit.voice, KINDS, hit.mat) === "impact" && hit.mat === "stone" && free.voice === "gun", "SHOT where the shooter's rounds land: the impact by what they hit; a gun with no shooter rattles");
   ok(!C.isEcho(C.cluster([me], G)[0], [{ x: me.x + 300, y: me.y, reach: 2000, t: me.t + 20, prio: 7, voice: "gunhit" }], G), "SHOT the report is never swallowed as an echo of its impacts (live: it was)");
   ok(C.planCluster(C.cluster([free], G)[0], { grid: G, known: KINDS })[0].kind === C.kindOf("gun", KINDS, null, C.gunKinds(walk)), "SHOT a gun with no shooter rattles in the gun kind of its own walk");
-  ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shot = !!walk && hasShooter\(walk/.test(sfx) && /const dir = Number\.isFinite\(w\.stream\.dir\) \? w\.stream\.dir : -90/.test(sfx) && /to, dir, beats, startAt: t0/.test(sfx),
+  ok(/Hooks\.on\("moinenMapsPresets", \(kind, data\) => \{ if \( kind === "firing" \) onFiring/.test(sfx) && /shooter = walk \? hasShooter\(walk, pn\) : null, shot = !!shooter/.test(sfx) && /const dir = Number\.isFinite\(w\.stream\.dir\) \? w\.stream\.dir : -90/.test(sfx) && /to, dir, beats, startAt: t0/.test(sfx),
     "SHOT the runtime letters a firing's muzzle and marks its pocks as impacts");
 });
 

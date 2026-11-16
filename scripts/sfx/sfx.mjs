@@ -48,6 +48,7 @@ import * as FIT from "./sfx-fit.mjs";
 import * as SEAT from "./sfx-seat.mjs";
 import * as T from "./sfx-table.mjs";
 import * as BURN from "./sfx-burn.mjs";
+import * as DIR from "./sfx-direct.mjs";
 import { mapPixels } from "../destruction/source.mjs";
 import { buildTimeline } from "../tokens/carry-core.mjs";
 import { hitsOf } from "../tokens/plough-core.mjs";
@@ -108,6 +109,7 @@ let seatLog = [];
 let screenUp = [];              // MAPSFXSEAT2: this seat's unlocated words still up ({ box (CSS px), life [t0, t1] shared ms }): a new one keeps off them
 const holdMemo = new Map();     // word + look -> the engine's hold box (a page plans many words in one frame)
 const pageWaits = new Map();    // firing id -> the shared moment its page stops waiting for its strokes
+const KNOCK_CONTACT = 60;       // MAPDIRECT: a knocked word's contact (ms after its start) until its handle tells its own
 const PAGE_WAIT_MS = 4000;      // a page waits this long (shared ms after its firing's moment) for all its fire-layer strokes
 const stats = { events: 0, clusters: 0, words: 0, dropped: 0, late: 0, stale: 0, ms: 0, uiMs: 0, burns: 0 };
 
@@ -266,9 +268,17 @@ function onEntry(d, g, opts, start) {
     try { const pf = pathTimes(opts.path, k2 * (causeLook(I.cause)?.slow ?? 1)); if ( pf ) ride = C.rideOf(pf, o, ap, 40 * k2); } catch { ride = null; }
   }
   // (rounds fired by a token: its report sounds at the muzzle (onFiring); here, where they land, the impact on what they hit)
-  const shot = !!walk && hasShooter(walk, pn);
+  const shooter = walk ? hasShooter(walk, pn) : null, shot = !!shooter;
   const ev = C.entryEvent(I, o, ap, start, { speed, gun: walk, ride, shot, key: `d|${g.hash}|${Math.round(start)}`, sid: `d|${g.hash}`, objId: g.objId ? `d${g.objId}` : null,
     from: p0 ? { x: o.x + p0[0] * ap, y: o.y + p0[1] * ap } : null });
+  // MAPDIRECT: the rounds' impacts fly the same slant along the aim as the report at the barrel (sfx-direct streamDir: one line from the
+  // shooter through the target and on); a shooter this seat may not see gives no direction here (it would point back at him); a gun
+  // with no shooter on the map: along its own walk (the way the burst sweeps)
+  if ( walk ) {
+    const c = walk[Math.floor(walk.length / 2)], a = walk[0], b = walk.at(-1);
+    const dir = shooter?.from ? (shooter.seen ? DIR.streamDir(c.x - shooter.from[0], c.y - shooter.from[1]) : null) : Math.hypot(b.x - a.x, b.y - a.y) >= grid() ? DIR.streamDir(b.x - a.x, b.y - a.y) : null;
+    if ( Number.isFinite(dir) ) ev.dir = dir;
+  }
   add(ev);
   // (EFFECTS2: a big blast or cave-in throws debris that lands after it, by the ground's material)
   for ( const f of C.brushFalls(ev, grid(), k2 * (causeLook(I.cause)?.slow ?? 1)) ) add(f);
@@ -278,7 +288,7 @@ function onEntry(d, g, opts, start) {
 function hasShooter(walk, now) {
   shooters = shooters.filter((q) => q.t1 > now);
   const g = grid(), w0 = walk[0];
-  return shooters.some((q) => q.pts.some((h) => Math.hypot(h[0] - w0.x, h[1] - w0.y) < g * 0.75));
+  return shooters.find((q) => q.pts.some((h) => Math.hypot(h[0] - w0.x, h[1] - w0.y) < g * 0.75)) ?? null;
 }
 /** Presets: a gun firing from a token on the map (accent "muzzle" with its shooter): its REPORT at the barrel, a syllable per round as
     it leaves (hit time minus flight, presets/accents-core.mjs), and its rounds' pocks letter the IMPACT instead of the rattle. */
@@ -292,7 +302,7 @@ function onFiring(rec) {
   (rec.pending?.accent ?? []).forEach((it, i) => {
     if ( it?.kind !== "muzzle" || !Array.isArray(it.from) || !it.hits?.length ) return;
     const last = Math.max(...it.hits.map((h) => h[2] || 0));
-    shooters.push({ pts: it.hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000 });
+    shooters.push({ pts: it.hits.map((h) => [h[0], h[1]]), t1: t0 + last + 6000, from: [it.from[0], it.from[1]], seen: shooterSeen(it.from, it.fr) });
     reported = true;
     const e = C.muzzleEvent(it, { t0, grid: G, muzzleOf: A.muzzleOf, flight, key: `m|${rec.id}|${i}`, sid: `m|${rec.id}|${i}` });
     if ( !e ) return;
@@ -967,7 +977,8 @@ function startBurn(p, live, idx = null) {
         // (the block this seat gave the run - burnRooms: the engine keeps the run inside it as one block - and its phrases to its width;
         // MAPBURN: the width of the roar's block - a fire grows into it, the score letters a long word smaller before the engine squeezes it)
         room: () => { const b = burns.get(p.key); return b ? (last.room = b.off?.[i]?.room ?? null) : last.room; }, maxWidth: SEAT.RUN.mw * k,
-        seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: -90, size,
+        // (MAPDIRECT: its sparks and its trailing tail leave DOWNWIND - the wind of its biggest stroke, shared: sfx-direct plumeDeg; still air: up)
+        seed: `${seed}|${i}`, lang: lang(), area: Math.min(p.r, G * 1.2), dir: DIR.plumeDeg(DIR.windOf(p.st)), size,
         // (MAPBURN: no glow where the word stands over the scene's lighting - there it is not darkened, and the glow was a soft orange box
         // behind the letters that outlived them (ADVM r2 item 8); the quiet mode's words solid on the heat ramp, not hollow)
         ...(p.colors ? { colors: p.colors } : live ? {} : { colors: [BURN.RUNGS[2].face] }), glow: BURN.glowFor(layerOpts().layer, "auto"), reduced: red, ...(live ? {} : { mode: "ambient", hollow: false }), ...layerOpts(),
@@ -1164,7 +1175,27 @@ function seatCall(w) {
   oo.pushable = false;
   // (reduced motion on this seat: a drifting or travelling word stands where the table's starts - as before, now as this seat's need)
   if ( oo.reduced && oo.path ) delete oo.path;
-  return { o: oo, fit: { ...f, k: oo.size && o.size ? oo.size / o.size : 1 }, box: f.box, table: { size: o.size, at } };
+  // MAPDIRECT: a word with a way is KNOCKED along it after its contact (sfx-direct): a moving place on the word's own start clock - the
+  // table's instant, in cap heights as this seat draws it, so every seat shows one pose at one instant; this seat only shortens it where
+  // its view, its panels, the pins, the tokens, the words up or the thing it letters are in the way. Reduced motion: none.
+  let knock = null;
+  if ( T.knocked(w) && !oo.reduced && !oo.path && f.box && f.cap > 0 && Number.isFinite(oo.at?.x) ) {
+    const K = T.knockOf(w), ui = uiBoxes();
+    const blocks = [...ui, ...sharedPins(vw), ...pinBoxes(vw), ...sharedTokens(vw), ...[...alive].filter((r) => r.box).map((r) => r.box)];
+    const fit = DIR.knockFit(f.box, f.cap, w.way, K, { view: vw, blocks, edge: ui, wall: w.subject ?? null });
+    const base = oo.at, cap = f.cap;
+    knock = { K, fit, way: w.way, h: null };
+    const at = () => {
+      const h = knock.h, c = h && Number.isFinite(h.contactAt) ? h.contactAt - w.t : KNOCK_CONTACT;
+      const he = h && Number.isFinite(h.entMs) && Number.isFinite(h.holdMs) ? (h.exitAt ?? h.entMs + h.holdMs) : c + (w.holdMs || 900);
+      const q = DIR.knockAt(w.way, performance.now() - w.t, { K, contact: c, holdEnd: he, fit });
+      return { x: base.x + q.x * cap, y: base.y + q.y * cap };
+    };
+    // (a place that is a function still reads as a point - the seat log, the harnesses: moinen-letters lesson DIRECT 2)
+    at.x = base.x; at.y = base.y;
+    oo.at = at;
+  }
+  return { o: oo, knock, fit: { ...f, k: oo.size && o.size ? oo.size / o.size : 1 }, box: f.box, table: { size: o.size, at } };
 }
 /** this seat's window for the size model (the engine's own: the usable width leaves an open sidebar out) */
 function seatView(zoom, sc) {
@@ -1193,7 +1224,10 @@ function logCall(w, call) {
     ts: Math.round(w.ts ?? toShared(w.t)), size: r(call.table?.size), at: P(call.table?.at), drawn: r(call.o?.size), seatAt: P(call.o?.at),
     rule: call.fit?.rule ?? "ok", rules: call.fit?.rules ?? [], k: r(call.fit?.k ?? 1), cap: r(call.fit?.cap), clean: call.fit?.clean ?? null,
     box: call.box ? [r(call.box.x0), r(call.box.y0), r(call.box.x1), r(call.box.y1)] : null, played: Math.round(toShared(performance.now())),
-    layer: call.o?.layer ?? null, lang: lang() });
+    layer: call.o?.layer ?? null, lang: lang(),
+    // (MAPDIRECT: the word's way, the look it gave, this seat's shares of its knock; a stream's flight direction)
+    ...(w.way ? { way: [w.way.ux, w.way.uy], from: Number.isFinite(call.o?.from) ? call.o.from : null, rot: r(call.o?.rotation), knock: call.knock ? [call.knock.fit.kb, call.knock.fit.kf, call.knock.fit.ko] : null } : {}),
+    ...(Number.isFinite(call.dir) ? { dir: call.dir } : {}) });
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }
 /** a table word this seat does not draw, by one of its own needs (logged like a call) */
@@ -1216,6 +1250,7 @@ function play(w) {
     } catch ( err ) { console.warn(`${MODULE_ID} | sfx: a word did not play`, err); return; }
     if ( !h ) return;
     stats.words++;
+    if ( call?.knock ) call.knock.h = h;
     if ( call ) logCall(w, call);
     // (a travelling PRE word - a bomb's fall, a rocket's flight - is gone before the main word's flash frame: SPEC-EFFECTS 4.4)
     if ( Number.isFinite(w.stopAt) ) { const g1 = gen; setTimeout(() => { if ( g1 === gen ) { try { h.stop(); } catch {} } }, Math.max(0, w.stopAt - performance.now())); }
@@ -1266,7 +1301,7 @@ function playStream(w) {
     ...(w.colors ? { colors: w.colors } : {}), loud: (i) => 0.7 + 0.3 * Math.sin(i * 1.7), reduced: reducedMotion(), ...layerOpts(),
     ...step, ...(k !== 1 ? { scale: k } : {}) });
   // (logged like a word - api.sfx.log(): the two-seat takes compare what each seat drew)
-  if ( h ) logCall({ ...w, text: w.text ?? w.kind }, { o: { size: unit * k, at: first.at, layer: layerOpts().layer ?? null }, fit: { rule: first.rule, rules: [first.rule], k, cap: unit * k }, box: null, table: { size: unit, at: at() }, space: "stream" });
+  if ( h ) logCall({ ...w, text: w.text ?? w.kind }, { o: { size: unit * k, at: first.at, layer: layerOpts().layer ?? null }, fit: { rule: first.rule, rules: [first.rule], k, cap: unit * k }, box: null, table: { size: unit, at: at() }, space: "stream", dir });
   return h;
 }
 /** SFXSIZE: a stream's options at its group's size step ({} at today's size): the engine's stream takes no `scale`, so its syllable

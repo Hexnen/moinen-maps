@@ -16,6 +16,7 @@
    fireless blast KROOM / KRUUM (concussion), a cave-in BTHOOM (sfx-core). */
 
 import { hashStr } from "./sfx-core.mjs";
+import * as DIR from "./sfx-direct.mjs";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const h01 = (s) => hashStr(s) / 4294967296;
@@ -127,9 +128,19 @@ export function firingPage(rec, ctx = {}) {
   // above (SPEC-EFFECTS P1 b); a fireless blast or a landing: the side the event did not come from
   const wd = Number(burst?.wd), ws = Number(burst?.ws) || 0;
   const away = Array.isArray(rec.dir) && (rec.dir[0] || rec.dir[1]) ? -Math.sign(rec.dir[0] || 1) : 0;
+  // MAPDIRECT: the way the event CAME IN (shared: the firing's record) - a rocket's flight from its tube, else the firing's own direction
+  // (a meteor's descent, a falling bomb's slant, a grenade's throw, a hero's dive); a strike from the sky and a blast set off in place
+  // have none. The main word leans and grows along it and is knocked on that way after its contact (sfx-direct); it stands on the FAR
+  // side of the impact (the sound bursts out past it, the way the thing was going) unless the wind names its side.
+  const way = strike ? null : rocket && Array.isArray(rocket.to) && Array.isArray(rocket.m) ? DIR.wayOf(rocket.m, rocket.to, grid * 0.25)
+    : Array.isArray(rec.dir) && (meteor || fall || land || bounce || rocket) ? DIR.unitWay(Number(rec.dir[0]), Number(rec.dir[1]), 0.05)
+    // (a thing thrown or dropped by a token on the map with no second point of its gesture: from the thrower to where it lands)
+    : Array.isArray(rec.gesture?.from) && (fall || land || bounce) ? DIR.wayOf(rec.gesture.from, at, grid * 0.25) : null;
+  out.way = way;
+  const far = way && Math.abs(way.ux) > 0.2 ? Math.sign(way.ux) : 0;
   const side = burst && ws > 0.05 && Number.isFinite(wd) && Math.abs(Math.cos((wd * Math.PI) / 180)) > 0.2 ? -Math.sign(Math.cos((wd * Math.PI) / 180))
-    : away || (h01(`${seed}|side`) < 0.5 ? -1 : 1);
-  W({ key: "main", role: "main", kind: main.kind, wo: { loud: main.loud, ...(main.long ? { long: main.long } : {}), ...(main.prefix ? { prefix: true } : {}) },
+    : far || away || (h01(`${seed}|side`) < 0.5 ? -1 : 1);
+  W({ key: "main", role: "main", ...(way ? { way } : {}), kind: main.kind, wo: { loud: main.loud, ...(main.long ? { long: main.long } : {}), ...(main.prefix ? { prefix: true } : {}) },
     t: main.t, x: at.x, y: at.y, r: main.r, box, rank: main.rank, side, ms: main.kind === "boom" || main.kind === "thunder" ? 1100 : 800,
     stage: { in: "slam", push: true, glow: burst ? "auto" : undefined } });
 
@@ -153,7 +164,9 @@ export function firingPage(rec, ctx = {}) {
       const dx = rocket.to[0] - rocket.m[0], dy = rocket.to[1] - rocket.m[1], L = Math.hypot(dx, dy) || 1;
       const rx = rocket.m[0] - (dx / L) * grid * 0.7, ry = rocket.m[1] - (dy / L) * grid * 0.7;
       W({ key: "pre|launch", role: "pre", kind: "whump", wo: { loud: 0.45 }, t: T0 + launch, x: rx, y: ry, r: grid * 0.4, rank: 2, ms: 500,
-        box: { x0: rx - grid * 0.3, y0: ry - grid * 0.3, x1: rx + grid * 0.3, y1: ry + grid * 0.3 }, stage: { in: "pop" }, from: { x: rocket.m[0], y: rocket.m[1] } });
+        box: { x0: rx - grid * 0.3, y0: ry - grid * 0.3, x1: rx + grid * 0.3, y1: ry + grid * 0.3 }, stage: { in: "pop" }, from: { x: rocket.m[0], y: rocket.m[1] },
+        // (MAPDIRECT: the backblast goes BACK, against the flight)
+        way: DIR.unitWay(-dx, -dy) });
     }
     // the flight: riding behind the rocket along its way (from the view edge without a shooter), gone before the impact
     const t1 = -PRE_GAP - 10, t0 = Math.min(t1 - 120, launch + (rocket.shot ? 60 : 0));
@@ -186,7 +199,7 @@ export function firingPage(rec, ctx = {}) {
     // a grenade's bounce: two ticks where it hops (repeat is right: the same small knock twice)
     const b0 = Number(bounce.at) || -500, dur = Number(bounce.dur) || 500;
     [0, 0.55].forEach((f, i) => W({ key: `pre|bounce${i}`, role: "pre", kind: "impact", wo: { loud: 0.2 + 0.05 * i, material: "@ground" }, t: T0 + b0 + dur * f,
-      x: at.x - (i ? 0.35 : 0.8) * grid * (rec.dir?.[0] ?? 0.7), y: at.y - (i ? 0.35 : 0.8) * grid * (rec.dir?.[1] ?? 0.7) - grid * 0.35, r: grid * 0.2, rank: 1, ms: 300, stage: { in: "pop" } }));
+      x: at.x - (i ? 0.35 : 0.8) * grid * (way?.ux ?? rec.dir?.[0] ?? 0.7), y: at.y - (i ? 0.35 : 0.8) * grid * (way?.uy ?? rec.dir?.[1] ?? 0.7) - grid * 0.35, r: grid * 0.2, rank: 1, ms: 300, stage: { in: "pop" } }));
   }
   if ( strike ) {
     // the charge building over the spot: three ticks, each longer (SPEC-EFFECTS P5)
@@ -229,8 +242,8 @@ export function firingPage(rec, ctx = {}) {
     pick.forEach((q, i) => falls.push({ ...q, pieces: PIECES[Math.min(2, i + (n === 2 ? 1 : 0))], kind: "debris" }));
   } else if ( burst ) {
     // a grenade: its shrapnel flies on past the blast (far side from the throw), then a little grit comes down
-    const d = Array.isArray(rec.dir) ? rec.dir : [1, 0], L = Math.hypot(d[0], d[1]) || 1;
-    W({ key: "shrapnel", role: "fall", kind: "whizz", wo: { loud: 0.35 }, t: main.t + 150, x: at.x + (d[0] / L) * main.r * 1.6, y: at.y + (d[1] / L) * main.r * 1.6 - grid * 0.2,
+    const d = way ? [way.ux, way.uy] : Array.isArray(rec.dir) ? rec.dir : [1, 0], L = Math.hypot(d[0], d[1]) || 1;
+    W({ key: "shrapnel", role: "fall", kind: "whizz", way: DIR.unitWay(d[0], d[1]), wo: { loud: 0.35 }, t: main.t + 150, x: at.x + (d[0] / L) * main.r * 1.6, y: at.y + (d[1] / L) * main.r * 1.6 - grid * 0.2,
       r: grid * 0.3, rank: 2, ms: 350, stage: { in: "zip" } });
     falls.push({ x: at.x - (d[0] / L) * main.r * 1.3, y: at.y + main.r * 0.9, ms: 520, pieces: "small", kind: "debris" });
   }
@@ -240,7 +253,9 @@ export function firingPage(rec, ctx = {}) {
     t: (tPrev = main.t + Math.max(380 + 160 * i, q.ms, tPrev - main.t + FALL_GAP)), x: q.x, y: q.y, r: grid * (q.pieces === "large" ? 0.5 : q.pieces === "medium" ? 0.38 : 0.28),
     // (EFFECTS2: sized by rank as a share of the view (sfx-events rankSize), so a gentle step down keeps the last one readable - the
     // old 0.85 x 0.88^i on the engine's magnitude put the meteor's last ejecta words under the legible floor; the first stays under the wave)
-    rank: q.pieces === "small" ? 1 : 2, shrink: Math.max(0.75, 0.85 * Math.pow(0.94, i)), ms: 700, stage: { in: "pop", out: "fall" }, cands: landCands }));
+    // (MAPDIRECT: a piece is thrown OUT of the blast: its word is knocked the way it flew - from the impact to the landing this seat's
+    // table letters, sfx-table pageWordPlan)
+    rank: q.pieces === "small" ? 1 : 2, shrink: Math.max(0.75, 0.85 * Math.pow(0.94, i)), ms: 700, stage: { in: "pop", out: "fall" }, cands: landCands, thrown: { x: at.x, y: at.y } }));
   if ( land ) {
     // the landing's cracks: ONE word for all the rays, riding out along one of them (the R run = the ray's time)
     const a = Math.PI * (side < 0 ? 0.25 : 0.75), ux = Math.cos(a), uy = Math.sin(a), r0 = main.r * 0.8, r1 = main.r * 2.6;
@@ -292,7 +307,7 @@ export function arrangeOuts(fires, { seed = "", grid = 100 } = {}) {
     const last = i === pick.length - 1 && pick.length > 1, p = s.p ?? [0, 0], c = centre(p);
     const sd = (i % 2 ? 1 : -1) * (h01(`${seed}|outside`) < 0.5 ? 1 : -1);
     return { role: "out", id: s.id, o: Number(s.o), kind: "fire", wo: { stage: "out", loud: clamp(0.32 - 0.05 * i, 0.15, 0.32), long: last ? 1 : clamp(0.45 + 0.12 * i, 0.4, 0.8) },
-      t: Number(s.o), x: c.x + sd * grid * 0.35, y: c.y - grid * 0.2, r: s.r ?? grid * 0.3, rank: 1, shrink: Math.pow(0.9, i), ms: last ? 2600 : 1600, drift: true, side: sd,
+      t: Number(s.o), x: c.x + sd * grid * 0.35, y: c.y - grid * 0.2, r: s.r ?? grid * 0.3, rank: 1, shrink: Math.pow(0.9, i), ms: last ? 2600 : 1600, drift: true, side: sd, wind: DIR.windOf(s),
       stage: { in: "pop", out: "dissolve" } };
   });
 }

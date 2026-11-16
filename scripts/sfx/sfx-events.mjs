@@ -12,6 +12,7 @@
    Words hold no text here: a sound KIND and its word options (the engine's vocabulary writes them), a moment, a place, a rank. */
 
 import { hashStr } from "./sfx-core.mjs";
+import * as DIR from "./sfx-direct.mjs";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const h01 = (s) => hashStr(s) / 4294967296;
@@ -59,7 +60,7 @@ export function ploughPage({ hits = [], front = null, D = 0, k = 1, start = 0, d
   const out = [];
   // 1. the BITE: the first token is hit - one short hard knock where it is struck, popped in, gone soon (it is only the start)
   const c = { x: first.p[0], y: first.p[1] }, b = side(c, 0.9);
-  out.push({ role: "bite", key: "bite", kind: "punch", wo: { loud: 0.45 }, t: tBite, x: b.x, y: b.y, rank: 2, ms: 380, at: c,
+  out.push({ role: "bite", key: "bite", kind: "punch", wo: { loud: 0.45 }, t: tBite, x: b.x, y: b.y, rank: 2, ms: 380, at: c, way: DIR.unitWay(ux, uy),
     stage: { in: "slam", out: "shards" }, seed: `${seed}|bite` });
   // 2. the GRIND: the pile building up as it is shoved along - one long scraping word riding beside the head, louder and longer the
   //    more tokens it pushes and the longer it runs (the R run is the run's time)
@@ -76,7 +77,7 @@ export function ploughPage({ hits = [], front = null, D = 0, k = 1, start = 0, d
   }
   // 3. the STOP: the pile slams to rest - the biggest word, slammed in with a shove, lasting while the dust settles
   const e = headAt(D), s = side(e, 1.05);
-  out.push({ role: "stop", key: "stop", kind: "crash", wo: { loud: clamp(0.6 + 0.1 * n, 0.65, 1), ...(n >= 3 ? { prefix: true } : {}) }, t: tEnd, x: s.x, y: s.y, at: e,
+  out.push({ role: "stop", key: "stop", kind: "crash", wo: { loud: clamp(0.6 + 0.1 * n, 0.65, 1), ...(n >= 3 ? { prefix: true } : {}) }, t: tEnd, x: s.x, y: s.y, at: e, way: DIR.unitWay(ux, uy),
     rank: n >= 3 ? 5 : 4, ms: 1100, stage: { in: "slam", push: true, holdKind: "rattle", out: "fall" }, seed: `${seed}|stop` });
   return out;
 }
@@ -175,7 +176,7 @@ export function steamOnsets(keys, steamAt) {
 export function steamWord(p, t, steam = 0.5, seed = "") {
   const q = p.points?.[0] ?? null; if ( !q ) return null;
   return { role: "main", key: "steam", kind: "hiss", wo: { loud: clamp(0.3 + 0.35 * steam, 0.3, 0.65), long: 0.85 }, t, x: q.x, y: q.y, r: p.r ?? 50,
-    rank: 2, ms: 1800, drift: true, stage: { in: "pop", holdKind: "boil", out: "dissolve" }, seed: `${seed}|steam|${p.key}|${t}` };
+    rank: 2, ms: 1800, drift: true, wind: DIR.windOf(p.st), stage: { in: "pop", holdKind: "boil", out: "dissolve" }, seed: `${seed}|steam|${p.key}|${t}` };
 }
 
 /**
