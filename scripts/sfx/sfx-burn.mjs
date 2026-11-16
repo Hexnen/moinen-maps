@@ -282,6 +282,9 @@ export function rimSpot(q, shape, { hw, hh, dir = -90, cover = COVER } = {}) {
     it - a word's entrance, its lean and (stepped motion) its drawn exit reach 12-17 sizes across, dev/sfx-burnscore.test.mjs LINE
     holds its ink inside; the block is smaller than a run's was because the fire's size is */
 export const BLOCK = 1;
+/** by motion type: smooth words keep inside a smaller block (a stepped word's drawn exit reaches furthest) - a smaller block finds a
+    clean room on a crowded seat more often, so a line is left out on one seat less often */
+export const blockOf = (motion) => (motion === "stepped" ? BLOCK : 0.8);
 /** the half sizes of a line's word (in sizes of the fire's biggest word) the rim is found with: a usual word (five or six letters) and its caps with their rim */
 export const WORD_BOX = { hw: 3, hh: 0.9 };
 /**

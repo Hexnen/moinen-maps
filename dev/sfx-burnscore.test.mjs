@@ -126,7 +126,7 @@ async function line({ size = 60, motion = "smooth", heat = 0.72, seed = "score",
 }
 for ( const motion of ["smooth", "stepped"] ) for ( const heat of [0.12, 0.42, 0.72] ) {
   const size = 60, r = await line({ size, motion, heat, seed: `line-${motion}-${heat}` });
-  const B = SEAT.runReserve(AT, r.k * BURN.BLOCK, motion);
+  const B = SEAT.runReserve(AT, r.k * BURN.blockOf(motion), motion);
   const outBy = Math.max(...r.out.map(({ ext: e }) => Math.max(B.x0 - e.x0, e.x1 - B.x1, B.y0 - e.y0, e.y1 - B.y1)));
   const wide = Math.max(...r.out.map(({ ext: e }) => e.x1 - e.x0)) / r.k, tall = Math.max(...r.out.map(({ ext: e }) => e.y1 - e.y0)) / r.k;
   ok(outBy <= 2, `LINE ${motion} heat ${heat}: every word stays inside the block the seat keeps for it (widest ${wide.toFixed(2)} x tallest ${tall.toFixed(2)} of its size; out by ${outBy.toFixed(1)})`);

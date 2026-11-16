@@ -949,18 +949,18 @@ function burnRooms(want) {
       const ts = w.live ? BURN.topScale(BURN.heatOf(p.level(now)).top) : 1, vh = globalThis.innerHeight || 900;
       const seatK = (kk) => (w.live ? BURN.seatSize(kk, { zoom: z, vh, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) : kk);
       // (MAPBURN2: a line is one word: its block is BLOCK of a run's - `k` the block's unit, `ks` the size of the fire's biggest word here)
-      const k0 = burnSize(p, w.live) * sc * BURN.BLOCK, ks = (seatK(k0 / BURN.BLOCK) * ts), k = ks * BURN.BLOCK;
+      const motion = L?.motionMode?.() === "stepped" ? "stepped" : "smooth", BK = BURN.blockOf(motion);
+      const k0 = burnSize(p, w.live) * sc * BK, ks = (seatK(k0 / BK) * ts), k = ks * BK;
       // (MAPBURN2: and it stands at its fire's RIM, on the side its sparks go - downwind, sfx-direct plumeDeg; still air: up -, as near as
       // it can with at most COVER.fire of the fire under it - sfx-burn rimSpot: before, on the spot, on the flames. The word's box at
       // this seat's size, from the table's spot: `at0`)
       rimAt(p, ks);
       // (smaller on this seat where the table's size has no clean room - down to the legibility floor of its window, never under it -,
       // laid out from the lower steps up so a higher step never letters a run smaller: sfx-seat burnRoom; question MAPRIDE-3)
-      const kMin = Math.min(k, (w.live ? BURN.minSize({ zoom: z, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) * ts : SZ.floorPx(vh, 1, L.sizeModel) / z) * BURN.BLOCK), below = [1, 2, 3].filter((s) => s < st).map((s) => seatK(burnSize(p, w.live, s) * sc) * ts * BURN.BLOCK);
+      const kMin = Math.min(k, (w.live ? BURN.minSize({ zoom: z, capK: capK(), floorPx: SZ.floorPx(vh, 1, L.sizeModel) }) * ts : SZ.floorPx(vh, 1, L.sizeModel) / z) * BK), below = [1, 2, 3].filter((s) => s < st).map((s) => seatK(burnSize(p, w.live, s) * sc) * ts * BK);
       // (a spot off this screen stays where it is: its words are not pulled into view, and it takes no room here)
       const on = w.idx.filter((i) => { const q = p.at(i, now); return q.x > v0.x0 && q.x < v0.x1 && q.y > v0.y0 && q.y < v0.y1; });
       // (MAPSAME: one whose run would still reach into this view, cut at its edge, is not lettered here - sfx-seat offSpot)
-      const motion = L?.motionMode?.() === "stepped" ? "stepped" : "smooth";
       // (MAPEDGE: its run kept to its own block - the block offSpot judged - so a run "out" of this view stays out: with no room the engine let
       // its phrases spread past the block and a fire burning just above the GM's view lettered into it, cut by the top edge - ADVM r2 item 6, A)
       for ( const i of w.idx ) if ( !on.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }

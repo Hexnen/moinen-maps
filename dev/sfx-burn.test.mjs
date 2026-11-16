@@ -132,7 +132,7 @@ for ( const [id, lv] of HEATS ) {
   ok(catchPx <= BEFORE.catchPx * 0.5, `SIZE a fire's catch and flare ${catchPx.toFixed(0)} px at the reference view (live before: ${BEFORE.catchPx} px for a square-wide fire): under half`);
   ok(outPx < catchPx && outPx >= 23.4, `SIZE a fire's going-out hiss stays under its catch (${outPx.toFixed(0)} px)`);
   ok((CORE.match(/rank: FIRE_RANK/g) ?? []).length === 2 && /rank: OUT_RANK, shrink: OUT_SHRINK/.test(CORE), "SIZE the catch, the flare and the hiss are lettered at their rank's exact size");
-  ok(BURN.BLOCK <= 1 && BURN.WIDE * 0.5 <= SEAT.RUN.hw * BURN.BLOCK, `SIZE a line's block is ${BURN.BLOCK} of a run's at the fire's (smaller) size and holds its widest word`);
+  ok(BURN.BLOCK <= 1 && BURN.blockOf("smooth") <= BURN.blockOf("stepped") && BURN.WIDE * 0.5 <= SEAT.RUN.hw * BURN.blockOf("smooth"), `SIZE a line's block is ${BURN.BLOCK} of a run's at the fire's (smaller) size and holds its widest word`);
 }
 
 /* SOURCE */
