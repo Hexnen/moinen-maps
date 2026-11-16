@@ -881,7 +881,10 @@ function burnRooms(want) {
     // player's FOOOOOMF ran under the challenges panel)
     // (and off the words THIS seat drew where they stand here - the seat layout moves them from the table's place: live the player's
     // KA-BOOOOM!! stood where a run then lettered; a run that started first moves off within its next second)
-    const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], hard = [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)], taken = [];
+    const soft = [...ledger.boxes(now, now + 1000), ...[...alive].map((r) => r.box).filter(Boolean)], taken = [];
+    // (MAPCOST: this seat's panels, pins and tokens are read only once a run has a spot in this view - the panel walk visits up to UI_VISIT
+    // page elements, and it ran every second for a fire nobody on this seat was looking at, and with the lettering off)
+    let hard = null;
     const maxShift = Math.max(v.x1 - v.x0, v.y1 - v.y0) * 0.45;
     for ( const [key, w] of want ) {
       const p = w.plan, sc = L?.prefs?.scale ?? 1, arr = [], st = stepFor("fire");
@@ -902,7 +905,8 @@ function burnRooms(want) {
       // (MAPEDGE: its run kept to its own block - the block offSpot judged - so a run "out" of this view stays out: with no room the engine let
       // its phrases spread past the block and a fire burning just above the GM's view lettered into it, cut by the top edge - ADVM r2 item 6, A)
       for ( const i of w.idx ) if ( !on.includes(i) ) { const q = p.at(i, now); arr[i] = { dx: 0, dy: 0, box: null, room: SEAT.runBox(q, k), ok: SEAT.offSpot(q, k, v0, motion) === "out", off: true }; }
-      const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard, soft, taken, maxShift, motion });
+      if ( on.length ) hard ??= [...uiBoxes(), ...pinBoxes(v0), ...tokenBoxes(v0)];
+      const r = SEAT.burnRoom(on.map((i) => p.at(i, now)), { k, kMin, below, v, hard: hard ?? [], soft, taken, maxShift, motion });
       // (`f`: this seat's size for the run as a share of the table's - over 1 far out)
       on.forEach((i, j) => { arr[i] = { ...r[j], f: r[j].k / (k0 * ts) }; if ( r[j].ok ) taken.push(r[j].box); });
       out.set(key, arr);
