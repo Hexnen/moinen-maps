@@ -1177,12 +1177,15 @@ function seatCall(w) {
   if ( oo.reduced && oo.path ) delete oo.path;
   // MAPDIRECT: a word with a way is KNOCKED along it after its contact (sfx-direct): a moving place on the word's own start clock - the
   // table's instant, in cap heights as this seat draws it, so every seat shows one pose at one instant; this seat only shortens it where
-  // its view, its panels, the pins, the tokens, the words up or the thing it letters are in the way. Reduced motion: none.
+  // its view, its panels, the pins, the words up or the thing it letters are in the way. Reduced motion: none.
   let knock = null;
   if ( T.knocked(w) && !oo.reduced && !oo.path && f.box && f.cap > 0 && Number.isFinite(oo.at?.x) ) {
     const K = T.knockOf(w), ui = uiBoxes();
-    const blocks = [...ui, ...sharedPins(vw), ...pinBoxes(vw), ...sharedTokens(vw), ...[...alive].filter((r) => r.box).map((r) => r.box)];
-    const fit = DIR.knockFit(f.box, f.cap, w.way, K, { view: vw, blocks, edge: ui, wall: w.subject ?? null });
+    // (the tokens are no block: a word in a fight stands among them - the seat layout weighs them - and half a cap of slide covers no
+    // more of one than a neighbouring place would; live 2026-11-16: with them a blast's word had no room on either seat)
+    const edge = [...ui, ...sharedPins(vw), ...pinBoxes(vw)];
+    const blocks = [...edge, ...[...alive].filter((r) => r.box).map((r) => r.box)];
+    const fit = DIR.knockFit(f.box, f.cap, w.way, K, { view: vw, blocks, edge, wall: w.subject ?? null });
     const base = oo.at, cap = f.cap;
     knock = { K, fit, way: w.way, h: null };
     const at = () => {
@@ -1226,7 +1229,7 @@ function logCall(w, call) {
     box: call.box ? [r(call.box.x0), r(call.box.y0), r(call.box.x1), r(call.box.y1)] : null, played: Math.round(toShared(performance.now())),
     layer: call.o?.layer ?? null, lang: lang(),
     // (MAPDIRECT: the word's way, the look it gave, this seat's shares of its knock; a stream's flight direction)
-    ...(w.way ? { way: [w.way.ux, w.way.uy], from: Number.isFinite(call.o?.from) ? call.o.from : null, rot: r(call.o?.rotation), knock: call.knock ? [call.knock.fit.kb, call.knock.fit.kf, call.knock.fit.ko] : null } : {}),
+    ...(w.way ? { way: [w.way.ux, w.way.uy], from: Number.isFinite(call.o?.from) ? call.o.from : null, rot: r(call.o?.rotation), knock: call.knock ? [call.knock.fit.kb, call.knock.fit.kv, call.knock.fit.kf, call.knock.fit.ko] : null } : {}),
     ...(Number.isFinite(call.dir) ? { dir: call.dir } : {}) });
   if ( seatLog.length > 600 ) seatLog = seatLog.slice(-400);
 }

@@ -58,14 +58,25 @@ group("PURE", () => {
   // the seat's shares
   const box = { x0: 400, y0: 400, x1: 700, y1: 500 }, view = { x0: 0, y0: 0, x1: 1600, y1: 900 };
   const free = D.knockFit(box, 60, right, D.KNOCK.sec, { view });
-  ok(free.kb === 1 && free.kf === 1 && free.ko === 1, "room on every side: the whole knock");
+  ok(free.kb === 1 && free.kv === 1 && free.kf === 1 && free.ko === 1, "room on every side: the whole knock");
   const panel = { x0: 730, y0: 300, x1: 900, y1: 700 }, pf = D.knockFit(box, 60, right, D.KNOCK.sec, { view, blocks: [panel], edge: [panel] });
-  ok(pf.kf > 0 && pf.kf < 1 && pf.ko === 0 && pf.kb === 1, "a panel ahead shortens the forward part in proportion and stops the throw: " + JSON.stringify(pf));
-  ok(400 + 300 + D.KNOCK.sec.drift * pf.kf * 60 <= panel.x0 + 1 && 700 + Math.max(D.KNOCK.sec.over, D.KNOCK.sec.drift) * pf.kf * 60 <= panel.x0 + 1, "it never reaches the panel");
+  // (live 2026-11-16, a fight's HUD: a seat that lost slide starts the word further back, so it travels as far on every seat)
+  ok(pf.kf > 0 && pf.kf < 1 && pf.ko === 0, "a panel ahead shortens the slide in proportion and stops the throw: " + JSON.stringify(pf));
+  ok(700 + D.KNOCK.sec.over * pf.kv * 60 <= panel.x0 + 1, "it never passes over the panel");
+  const behind = { x0: 250, y0: 300, x1: 380, y1: 700 }, bf = D.knockFit(box, 60, right, D.KNOCK.sec, { view, blocks: [behind], edge: [behind] });
+  ok(bf.kb < 1 && 400 - bf.kb * D.KNOCK.sec.back * 60 >= behind.x1 - 1 && bf.kf === 1, "a panel behind shortens the back: it never starts on the panel: " + JSON.stringify(bf));
+  const word = D.knockFit(box, 60, right, D.KNOCK.sec, { view, blocks: [behind, panel], edge: [] });
+  ok(word.kb > 1 && word.kv === 1 && word.kf < 1, "a WORD up shortens only the slide (the way in passes it): " + JSON.stringify(word));
+  ok(700 + D.KNOCK.sec.drift * pf.kf * 60 <= panel.x0 + 1, "it never comes to stand on the panel");
+  ok(near(pf.kb * D.KNOCK.sec.back, D.KNOCK.sec.back + D.KNOCK.sec.drift * (1 - pf.kf), 0.01), "what the slide lost is added to the back: it travels as far as on a free seat");
+  const wedged = D.knockFit({ x0: 30, y0: 400, x1: 700, y1: 500 }, 60, right, D.KNOCK.sec, { view, blocks: [panel], edge: [panel] });
+  ok(wedged.kb * D.KNOCK.sec.back * 60 <= 31, "... but never back out of the view: " + JSON.stringify(wedged));
   const wall = { x0: 705, y0: 380, x1: 900, y1: 520 }, wf = D.knockFit(box, 60, right, D.KNOCK.sec, { view, wall });
-  ok(wf.kf < 0.1 && wf.kb === 1 && wf.ko < 0.1 + 1 , "never further ONTO the thing it letters: " + JSON.stringify(wf));
+  ok(wf.kf < 0.1 && wf.kb > 1, "it never comes to stand further ONTO the thing it letters (heading for its middle): " + JSON.stringify(wf));
+  const astride = { x0: 300, y0: 380, x1: 500, y1: 520 }, af = D.knockFit(box, 60, right, D.KNOCK.sec, { view, wall: astride });
+  ok(af.kf === 1, "a word astride the thing, heading away from its middle, slides on: " + JSON.stringify(af));
   const edge = D.knockFit({ x0: 1300, y0: 400, x1: 1590, y1: 500 }, 60, right, D.KNOCK.sec, { view });
-  ok(edge.kf < 0.2 && edge.ko < 0.2 && edge.kb === 1, "not past the view's edge: " + JSON.stringify(edge));
+  ok(edge.kf < 0.2 && edge.ko < 0.2 && edge.kv <= 0.5 && edge.kb > 1, "not past the view's edge (slide, overshoot, throw): " + JSON.stringify(edge));
   const past = D.roomAlong({ x0: 1500, y0: 400, x1: 1700, y1: 500 }, 1, 0, 100, { view }); ok(past <= 1, "a word already past an edge is not moved further out");
   ok(D.roomAlong(box, 1, 0, 2000, { view, blocks: [{ x0: 900, y0: 380, x1: 920, y1: 520 }] }) <= 200.5, "it never jumps over a thin panel");
   // a gun
@@ -208,7 +219,7 @@ group("SEATS", () => {
   // the thing it letters
   const wall = { x0: 1300, y0: 900, x1: 1600, y1: 1200 }, wf = D.knockFit(box, cap, way, K, { view, wall });
   let over = 0; const ov = (b) => Math.max(0, Math.min(b.x1, wall.x1) - Math.max(b.x0, wall.x0)) * Math.max(0, Math.min(b.y1, wall.y1) - Math.max(b.y0, wall.y0)), o0 = ov(box);
-  for ( let t = 0; t <= 1400; t += 16 ) { const q = D.knockAt(way, t, { K, contact: 62, holdEnd: 1400, fit: wf }); over = Math.max(over, ov({ x0: box.x0 + q.x * cap, y0: box.y0 + q.y * cap, x1: box.x1 + q.x * cap, y1: box.y1 + q.y * cap }) - o0); }
+  for ( let t = 62 + K.fly + K.settle; t <= 1400; t += 16 ) { const q = D.knockAt(way, t, { K, contact: 62, holdEnd: 1400, fit: wf }); over = Math.max(over, ov({ x0: box.x0 + q.x * cap, y0: box.y0 + q.y * cap, x1: box.x1 + q.x * cap, y1: box.y1 + q.y * cap }) - o0); }
   ok(over <= 1, "while it stands it never covers more of the thing it letters than at its place");
 });
 

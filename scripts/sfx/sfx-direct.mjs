@@ -82,17 +82,18 @@ export const KNOCK = Object.freeze({
 const easeOut3 = (u) => 1 - (1 - u) ** 3, easeIO = (u) => (u < 0.5 ? 2 * u * u : 1 - 2 * (1 - u) * (1 - u));
 /**
  * The knock's distance along the way (cap heights; < 0 = back toward where the event came from) at `t` ms since the word's start.
- * contact = ms from its start to its contact; holdEnd = ms from its start to its exit; fit = { kb, kf, ko } (knockFit: this seat's
- * shares of the back, the forward and the exit throw; 1 = whole).
+ * contact = ms from its start to its contact; holdEnd = ms from its start to its exit; fit = { kb, kv, kf, ko } (knockFit: this seat's
+ * shares of the back, the overshoot, the standing slide and the exit throw; 1 = whole, kb may pass 1 - a seat with no room ahead
+ * starts further back, so the word still travels).
  */
 export function knockS(t, { K = KNOCK.sec, contact = 0, holdEnd = 0, fit = null } = {}) {
-  const kb = fit?.kb ?? 1, kf = fit?.kf ?? 1, ko = fit?.ko ?? 1;
-  const c = Math.max(0, contact), a = c + K.fly, b = a + K.settle, he = Math.max(b, holdEnd), d0 = K.drift * 0.1;
-  const back = -K.back * kb, over = K.over * kf, drift = K.drift * kf;
+  const kb = fit?.kb ?? 1, kf = fit?.kf ?? 1, kv = fit?.kv ?? kf, ko = fit?.ko ?? 1;
+  const c = Math.max(0, contact), a = c + K.fly, b = a + K.settle, he = Math.max(b, holdEnd), d0 = K.drift * 0.1 * kf;
+  const back = -K.back * kb, over = Math.max(K.over * kv, d0), drift = K.drift * kf;
   if ( !Number.isFinite(t) || t <= c ) return back;
   if ( t < a ) return back + (over - back) * easeOut3((t - c) / K.fly);
-  if ( t < b ) return over + (d0 * kf - over) * easeIO((t - a) / K.settle);
-  if ( t < he ) return d0 * kf + (drift - d0 * kf) * (1 - (1 - (t - b) / Math.max(1, he - b)) ** 2);
+  if ( t < b ) return over + (d0 - over) * easeIO((t - a) / K.settle);
+  if ( t < he ) return d0 + (drift - d0) * (1 - (1 - (t - b) / Math.max(1, he - b)) ** 2);
   return drift + K.outD * ko * Math.min(1, (t - he) / K.outMs) ** 2;
 }
 /** where the knocked word stands off its place at t, in cap heights. -> { x, y } */
@@ -119,25 +120,35 @@ export function roomAlong(box, ux, uy, dist, { view = null, blocks = [], wall = 
 }
 /**
  * THIS seat's shares of a knock: `box` the word's box as this seat stands it (the seat layout's), `cap` its cap height there (the same
- * units), `w` the way, `K` the knock; `view`, `blocks` (this seat's panels, pins, the shared tokens, the words up with it), `wall` (the
- * thing it letters: the word never goes further ONTO it than it stands). The back and the standing part (overshoot, slide) keep clear of
- * everything; the exit's throw (the word is leaving) of the view's edge and the panels only (`edge`).
- * -> { kb, kf, ko } each 0..1
+ * units), `w` the way, `K` the knock; `view`, `blocks` (this seat's panels, the pins, the words up with it), `wall` (the thing it
+ * letters), `edge` (the panels and the pins).
+ * - the standing slide (the word is READ there, for its whole hold) keeps clear of every block and goes no further onto the wall when
+ *   it heads for the wall's middle (a word astride its blast sliding on, away from the middle, is leaving it);
+ * - the back and the overshoot are the word's way IN (half a second): they stay inside the view and off `edge` (MAPEDGE: a map word
+ *   is never on a panel - live 2026-11-16, let over them a player's blast word began on a tracker card), but pass the words up;
+ * - a seat with no room ahead starts the word further BACK by what the slide lost (kb > 1), so it travels as far on every seat;
+ * - the exit's throw (the word is leaving) keeps clear of the view's edge and `edge`.
+ * -> { kb, kv, kf, ko }: kv, kf, ko 0..1, kb 0..1 + drift / back
  */
 export function knockFit(box, cap, w, K, { view = null, blocks = [], edge = null, wall = null } = {}) {
-  if ( !box || !w || !(cap > 0) ) return { kb: 0, kf: 0, ko: 0 };
+  if ( !box || !w || !(cap > 0) ) return { kb: 0, kv: 0, kf: 0, ko: 0 };
   const share = (got, want) => (want > 0 ? r3(clamp(got / want, 0, 1)) : 1);
-  const back = K.back * cap, fwd = Math.max(K.over, K.drift) * cap, out = K.outD * cap;
-  const kb = share(roomAlong(box, -w.ux, -w.uy, back, { view, blocks, wall: null }), back);
-  const kf = share(roomAlong(box, w.ux, w.uy, fwd, { view, blocks, wall }), fwd);
+  const fwd = K.drift * cap, over = K.over * cap, out = K.outD * cap;
+  const mid = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const toward = wall ? ((mid(wall)[0] - mid(box)[0]) * w.ux + (mid(wall)[1] - mid(box)[1]) * w.uy > 0) : false;
+  const kf = share(roomAlong(box, w.ux, w.uy, fwd, { view, blocks, wall: toward ? wall : null }), fwd);
+  const kv = share(roomAlong(box, w.ux, w.uy, over, { view, blocks: edge ?? blocks }), over);
+  const back = (K.back + K.drift * (1 - kf)) * cap;
+  const kb = r3(roomAlong(box, -w.ux, -w.uy, back, { view, blocks: edge ?? blocks }) / (K.back * cap));
   const at = move(box, w.ux * K.drift * kf * cap, w.uy * K.drift * kf * cap);
   const ko = share(roomAlong(at, w.ux, w.uy, out, { view, blocks: edge ?? blocks, wall: null }), out);
-  return { kb, kf, ko };
+  return { kb, kv, kf, ko };
 }
 /** the farthest a whole knock takes a word, in cap heights per side of its place (for checks) */
 export function knockReach(w, K = KNOCK.sec) {
   if ( !w ) return { l: 0, r: 0, u: 0, d: 0 };
-  const xs = [-K.back * w.ux, (K.drift + K.outD) * w.ux], ys = [-K.back * w.uy, (K.drift + K.outD) * w.uy];
+  const B = K.back + K.drift;      // (the furthest back: a seat with no room ahead)
+  const xs = [-B * w.ux, (K.drift + K.outD) * w.ux], ys = [-B * w.uy, (K.drift + K.outD) * w.uy];
   return { l: r3(Math.max(0, -Math.min(...xs))), r: r3(Math.max(0, Math.max(...xs))), u: r3(Math.max(0, -Math.min(...ys))), d: r3(Math.max(0, Math.max(...ys))) };
 }
 
