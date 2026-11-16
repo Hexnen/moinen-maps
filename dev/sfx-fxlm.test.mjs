@@ -117,7 +117,9 @@ group("F5", () => {
   ok(plan.points.length >= 1 && plan.points.length <= 3 && C.burnPlan([{ ...st, lv: 1 }], { grid: G }).live === false && plan.live, "F5 a blaze is a live phrase score, a smoulder the quiet ambient sound");
   const out = C.strokeEvents({ ...st, o: 30000 }, st, 29000, 40000, { grid: G, late: 1500, outMs: 3520 }).find((e) => e.voice === "out");
   ok(out.ms === 3520, "F5 the hiss lasts as long as the flames take to die");
-  ok(/L\.sustain\(/.test(sfx) && /reconcileBurn/.test(sfx) && !/AMBIENT_EVERY|ambientEvent/.test(sfx), "F5 the runtime plays the burning as the engine's sustain for as long as the fire burns (no slot timer)");
+  // (MAPBURN2: restated by the owner's ruling of 2026-11-16 - the unbroken run was "too frequent": a fire now speaks in lines on the
+  // shared clock's slots, still for as long as it burns and still without the old per-client ambient timer)
+  ok(/L\.play\(call\.text, call\.opts\)/.test(sfx) && /reconcileBurn/.test(sfx) && /BURN\.lineOf\(a, sl\.turn\)/.test(sfx) && !/AMBIENT_EVERY|ambientEvent/.test(sfx), "F5 the runtime letters the burning for as long as the fire burns, line by line on the shared clock (no per-client ambient timer)");
 });
 
 /* F6: the pre word leads */
@@ -366,7 +368,8 @@ group("WORD2", () => {
   ok(crack(2).emat === "stone" && crack(3).emat === "wood" && crack(7).emat === "metal" && crack(-1).emat === null, "WORD2 what is hit gives the word its material (stone, wood, metal; the kind's own elsewhere)");
   ok(C.planCluster(C.cluster(bomb, G).find((g) => g.main.voice === "boom"), { grid: G, known: KINDS })[0].emat === null, "WORD2 a bomb's boom keeps its own (fire) character");
   ok(sfx.includes("if ( w.emat && o.character ) o.character = { ...o.character, material: w.emat };"), "WORD2 the runtime changes only the material of the word's character");
-  ok(/L\.sustain\(\{[\s\S]*?keepInView: false \}\)/.test(sfx), "WORD2 a burning fire off this screen is not pulled to its edge (engine 1.7.0 keeps world words in view by default)");
+  // (MAPBURN2: restated - the same rule on a line: lineCall sets keepInView false, and a spot off this view is not lettered here at all)
+  ok(/keepInView: false, pushable: false/.test(fs.readFileSync(new URL("../scripts/sfx/sfx-burn.mjs", import.meta.url), "utf8")) && /if \( o\?\.off \) return note\(\{ out: "view" \}\);/.test(sfx), "WORD2 a burning fire off this screen is not pulled to its edge (engine 1.7.0 keeps world words in view by default)");
 });
 
 if ( failed.length ) { console.log(failed.join(" | ")); console.log(`sfx-fxlm: ${failed.length} finding group(s) FAILED`); process.exit(1); }

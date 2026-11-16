@@ -241,6 +241,14 @@ export function fireColors(c) {
 export const OUT_ASH = Object.freeze(["#efe9e1", "#a59b91", "#3a3430"]);
 /** MAPTHUNDER: the rank of a fire's going-out hiss (the smallest story rank, well under its catch) */
 export const OUT_RANK = 1;
+/** MAPBURN2 (the owner, 2026-11-16: the fire words are too big and too frequent): a fire's catch and its flare are lettered at the
+    smallest story rank too - an exact share of the reference view (sfx-events RANK_SHARE[1], 4 %), no longer the engine's natural size
+    for their loudness (live a square-wide fire's catch stood 9-11 % of the view tall); its going-out hiss a notch under them */
+export const FIRE_RANK = 1, OUT_SHRINK = 0.8;
+/** MAPBURN2: and a fire that catches within CATCH_QUIET of another fire's catch in the same area of the map (sfx-burn AREA_VH: one
+    reference view height a side) is not lettered again - a fire spreading stroke by stroke said FWOOOOFF for every stroke */
+export const CATCH_QUIET = 8000;
+/** MAPBURN2: likewise a flare - several strokes of one area raised together flare up in one word (the first id's) */
 /** natural (orange-red-yellow) fire is lettered in the engine's own fire look; only a fire painted in another colour (a blue, a green
     fire) letters in its colour */
 export function ownFireColors(c) {
@@ -394,17 +402,17 @@ export function strokeEvents(st, prev, from, to, ctx) {
   const relit = !prev || (prev.g ?? prev.q) !== lit;
   // the catch: when its flames show here (gate), played late too when the stroke is new here (it reached this client on release)
   if ( relit && (st.o === undefined || st.o > lit + 400) && inWin(lit, prev ? late : ctx.newLate ?? NEW_LATE) )
-    push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, ms: 1400, colors, gate: st.id, box });
+    if ( !ctx.heard?.(st, lit) ) push({ key: `${st.id}|catch|${lit}`, voice: "fire", x: p[0], y: p[1], r: st.r ?? 50, t: Math.max(lit, from), m, ms: 1400, colors, gate: st.id, box, rank: FIRE_RANK });
   // a level raised: the fire flares up (at the ramp's start)
-  if ( prev && st.lt !== undefined && st.lt !== prev.lt && (st.lv ?? 2) > (st.l0 ?? prev.lv ?? 2) + 0.2 && inWin(st.lt) ) {
+  if ( prev && st.lt !== undefined && st.lt !== prev.lt && (st.lv ?? 2) > (st.l0 ?? prev.lv ?? 2) + 0.2 && inWin(st.lt) && !ctx.flared?.(st) ) {
     const c = pathCentre(p);
-    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box, level: st.lv });
+    push({ key: `${st.id}|flare|${st.lt}`, voice: "flare", x: c.x, y: c.y, r: st.r ?? 50, t: st.lt, m: fireM(st.lv, rG), ms: 1300, colors, box, level: st.lv, rank: FIRE_RANK });
   }
   // put out (or a preset's fire whose out time comes): a quiet hiss at its middle, as long as its flames take to die
   if ( st.o !== undefined && (!prev || prev.o !== st.o) && inWin(st.o) ) {
     const c = pathCentre(p);
     push({ key: `${st.id}|out|${st.o}`, voice: "out", x: c.x, y: c.y, r: st.r ?? 50, t: Math.max(st.o, from), ms: Math.max(1200, ctx.outMs ?? 3500),
-      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box, colors: colors ?? [...OUT_ASH], rank: OUT_RANK, wind: D.windOf(st) });
+      m: clamp(0.18 + 0.06 * lv, 0.15, 0.4), box, colors: colors ?? [...OUT_ASH], rank: OUT_RANK, shrink: OUT_SHRINK, wind: D.windOf(st) });
   }
   return out;
 }

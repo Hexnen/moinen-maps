@@ -32,7 +32,7 @@ const lazy = () => { let h = null; return { ...base, hard: { [Symbol.iterator]()
 ok(JSON.stringify(SEAT.burnRoom(spots, { ...base, hard })) === JSON.stringify(SEAT.burnRoom(spots, lazy())) && built === 1, "ROOM the same layout whether the panels list is built ahead or on first need");
 
 /* SOURCE */
-const fn = SRC.slice(SRC.indexOf("function burnRooms(want) {"), SRC.indexOf("function runClock("));
+const fn = SRC.slice(SRC.indexOf("function burnRooms(want) {"), SRC.indexOf("function capK(")  /* MAPBURN2: restated - the run clock is gone with the runs; the slice still ends after burnRooms */);
 ok(fn.length > 500 && (fn.match(/uiBoxes\(\)/g) ?? []).length === 1 && /if \( on\.length \) hard \?\?= \[\.\.\.uiBoxes\(\), \.\.\.pinBoxes\(v0\), \.\.\.tokenBoxes\(v0\)\];/.test(fn),
   "SOURCE burnRooms walks this seat's panels only once a run has a spot in this view");
 ok(/SEAT\.burnRoom\(on\.map\(\(i\) => p\.at\(i, now\)\), \{ k, kMin, below, v, hard: hard \?\? \[\], soft, taken, maxShift, motion \}\)/.test(fn), "SOURCE the run's layout gets the same lists as before");

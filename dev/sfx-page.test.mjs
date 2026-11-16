@@ -137,8 +137,9 @@ group("WIRE", () => {
   ok(/firingPage\(/.test(s), "sfx.mjs plans firing pages");
   ok(/owned/.test(s), "sfx.mjs keeps owned strokes silent");
   // a fire's lasting word never overlaps its own echo (leftover): no "echo" treatment on the burn sustain
-  const bt = /const BURN_TREATMENTS = \[([^\]]*)\]/.exec(s);
-  ok(bt && !/echo/.test(bt[1]) && /treatments: BURN_TREATMENTS/.test(s), "burn sustain: no echo treatment");
+  // (MAPBURN2: restated - no sustain any more; a fire's line is one word and the call that letters it asks for no echo)
+  const lc = /export function lineCall\([\s\S]*?\n\}/.exec(fs.readFileSync(new URL("../scripts/sfx/sfx-burn.mjs", import.meta.url), "utf8"));
+  ok(lc && !/echo/.test(lc[0]) && /BURN\.lineCall\(ph,/.test(s), "burn line: one word, no echo");
   // a PRE ride leaves before the main word; the wave rides the free way, upright
   ok(/spec\.stopAt = d\.toPerf\(mw\.t\) - PG\.PRE_GAP/.test(s), "pre ride stops before the main word");
   ok(/PG\.waveRide\(/.test(s), "the wave rides the free way");
