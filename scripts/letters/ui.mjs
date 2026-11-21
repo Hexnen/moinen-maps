@@ -191,8 +191,8 @@ class Designer extends ApplicationV2 {
     strip.addEventListener("pointerdown", (e) => { strip.setPointerCapture(e.pointerId); this.pause(); this.go(at(e)); const mv = (ev) => this.go(at(ev)); strip.addEventListener("pointermove", mv); strip.addEventListener("pointerup", () => strip.removeEventListener("pointermove", mv), { once: true }); });
     strip.addEventListener("keydown", (e) => {
       const k = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, Home: -1e9, End: 1e9 }[e.key];
-      if ( k == null ) { if ( e.key === " " ) { e.preventDefault(); this.togglePlay(); } return; }
-      e.preventDefault(); this.pause(); this.go(Math.max(0, Math.min(this.cells.length - 1, this.pic + k)));
+      if ( k == null ) { if ( e.key === " " ) { e.preventDefault(); e.stopPropagation(); this.togglePlay(); } return; }
+      e.preventDefault(); e.stopPropagation(); this.pause(); this.go(Math.max(0, Math.min(this.cells.length - 1, this.pic + k)));
     });
     const word = el.querySelector('input[name="text"]');
     word.addEventListener("keydown", (e) => { if ( e.key === "Enter" ) { e.preventDefault(); Designer.#playHere.call(this); } });
