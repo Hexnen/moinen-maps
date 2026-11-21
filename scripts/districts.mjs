@@ -812,8 +812,9 @@ export function previewBrush(draft) {
 export async function clearDistricts() {
   const n = readList().length;
   if ( !n ) return ui.notifications.info(T("District.none"));
+  const scene = canvas.scene;
   const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Tool.districtClear") }, content: `<p>${esc(game.i18n.format("MOINENMAPS.District.clearConfirm", { n }))}</p>` });
-  if ( ok ) await save([]);
+  if ( ok && canvas.scene === scene ) await save([]);   // (only the scene it was asked about: not one the canvas moved to meanwhile)
 }
 
 /* ------------------------------------------------------------------ lifecycle */

@@ -173,8 +173,9 @@ function settingsPanel(host) {
       return;
     }
     if ( act !== "clear" ) return;
+    const scene = canvas.scene;
     const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: Z("clear") }, content: `<p>${esc(Z("clearAsk"))}</p>` });
-    if ( ok ) Zones.clearAll();
+    if ( ok && canvas.scene === scene ) Zones.clearAll();   // (only the scene it was asked about: not one the canvas moved to meanwhile)
   };
   const onToggle = (ev) => { const d = ev.target; if ( d.matches?.(".mm-z-fold") ) { if ( d.open ) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold); } };
   host.addEventListener("change", onChange);

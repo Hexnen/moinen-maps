@@ -225,8 +225,9 @@ class WaterSettings {
     if ( b.dataset.act === "rod-clear" ) { Rods.clearRods(); return this.render(); }
     if ( b.dataset.act === "variation" ) { Water.newVariation(); return; }
     if ( b.dataset.act === "clear" && S ) {
+      const scene = canvas.scene;
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Water.clear") }, content: `<p>${esc(T("Water.clearConfirm"))}</p>`, rejectClose: false });
-      if ( ok ) Water.clearAll();
+      if ( ok && canvas.scene === scene ) Water.clearAll();   // (only the scene it was asked about: not one the canvas moved to meanwhile)
     }
   }
 

@@ -223,8 +223,9 @@ function mountPanel(host) {
       else Fire.setLevels(st.id, { sm: st.k === "smoke" ? st.sm % 3 + 1 : (st.sm + 1) % 4 });
     }
     else if ( b.dataset.act === "clear" ) {
+      const scene = canvas.scene;
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Fire.clear") }, content: `<p>${esc(T("Fire.clearConfirm"))}</p>` }).catch(() => false);
-      if ( ok ) Fire.clear();
+      if ( ok && canvas.scene === scene ) Fire.clear();   // (only the scene it was asked about: not one the canvas moved to meanwhile)
     }
   };
   host.addEventListener("change", onChange); host.addEventListener("click", onClick);

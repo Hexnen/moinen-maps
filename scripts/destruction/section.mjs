@@ -226,8 +226,9 @@ function mountDamage(host) {
     else if ( b.dataset.act === "rebakeOne" ) D.rebakeAll([b.dataset.obj]);
     else if ( Cui.click(b.dataset.act) ) { /* cinematic.mjs */ }
     else if ( b.dataset.act === "clear" ) {
+      const scene = canvas.scene;
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.clear") }, content: `<p>${esc(T("Destr.clearConfirm"))}</p>` });
-      if ( ok ) D.clearAll();
+      if ( ok && canvas.scene === scene ) D.clearAll();   // (only the scene it was asked about: not one the canvas moved to meanwhile)
     }
   };
   const onChange = (ev) => {

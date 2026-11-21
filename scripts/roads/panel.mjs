@@ -147,8 +147,9 @@ export function mountRoadControls(host, sections = ["brush", "traffic", "look"],
     else if ( act === "redo" ) Roads.redoEdit();
     else if ( act === "shuffle" ) Roads.shuffleTraffic();
     else if ( act === "clear" ) {
+      const scene = canvas.scene;
       const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("clear") }, content: `<p>${esc(T("clearConfirm"))}</p>`, rejectClose: false });
-      if ( ok ) Roads.clearRoads();
+      if ( ok && canvas.scene === scene ) Roads.clearRoads();   // (only the scene it was asked about: not one the canvas moved to meanwhile)
     }
   };
   const onInput = (ev) => {
