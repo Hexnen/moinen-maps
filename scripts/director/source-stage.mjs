@@ -731,7 +731,9 @@ function hideChip() { const c = chip; chip = null; c?.remove(); clearInterval(ch
  *  controlled token: Foundry's own Esc releases those first). */
 function onKey(ev) {
   if ( ev.key !== "Escape" || !st.parked || beat || homing || cameraHeld() ) return;
-  if ( escTaken() || canvas.activeLayer?.controlled?.length > 0 ) return;
+  // (controlled objects only for a GM: core's dismiss releases them only for a GM - a player's controlled token stays, core would open
+  // the main menu instead, and the player could never take their view back with Esc)
+  if ( escTaken() || (game.user?.isGM && canvas.activeLayer?.controlled?.length > 0) ) return;
   const a = document.activeElement;
   if ( a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) ) return;
   if ( [...(foundry.applications.instances?.values?.() ?? [])].some((w) => w.hasFrame && w.rendered && !w.minimized) ) return;
