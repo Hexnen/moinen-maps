@@ -832,7 +832,9 @@ Hooks.once("ready", () => {
   Hooks.on("renderSceneNavigation", () => leaderId());
   Hooks.on("updateScene", (sc, ch) => { if ( "active" in (ch ?? {}) ) leaderId(); });
   // Hot Pan & Zoom! switched on mid-shot: the GM's view is the players' now - the take-over lets go of the camera (no return)
-  Hooks.on("updateSetting", (st) => { if ( st?.key === "hot-pan.isActive" && cameraHeld() && cur ) { Screen.stopCamera("hotpan"); cur.taken = true; endTake("taken"); } });
+  // (a world setting: its first switch-on in a world CREATES the Setting document - createSetting, not updateSetting)
+  const hotPan = (st) => { if ( st?.key === "hot-pan.isActive" && cameraHeld() && cur ) { Screen.stopCamera("hotpan"); cur.taken = true; endTake("taken"); } };
+  Hooks.on("createSetting", hotPan); Hooks.on("updateSetting", hotPan);
 });
 // (the shots planned by this leader stay "the last event" for cut to after the queue forgot them)
 Hooks.on(HOOK, (kind, data) => { if ( kind === "shot" && data?.shot ) lastShotEvent = { kind: data.shot.kind, x: data.shot.x, y: data.shot.y, box: data.shot.box, tokens: data.shot.tokens, caption: data.shot.caption, who: data.shot.who }; });

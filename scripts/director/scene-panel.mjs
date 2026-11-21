@@ -2,7 +2,7 @@ import { MODULE_ID } from "../config.mjs";
 import { put } from "../flag-diff.mjs";
 import * as SC from "./scene-core.mjs";
 import { extendSection } from "../workspace/registry.mjs";
-import { esc, T, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
+import { esc, T, optRange, optSelect, optCheck, optHint, isEcho, writeControl, onWorldSetting } from "../workspace/ui.mjs";
 import { settings, testArrival } from "./source-scene.mjs";
 import { killed } from "./director.mjs";
 
@@ -67,13 +67,14 @@ export function renderArrivalPanel(host) {
   };
   host.addEventListener("change", onChange);
   host.addEventListener("click", onClick);
-  const hSet = Hooks.on("updateSetting", (doc) => { if ( doc?.key === `${MODULE_ID}.${SKEY}` ) refresh(); });
+  // (create / update / delete: the first write in a world creates the Setting document, a reset deletes it)
+  const offSet = onWorldSetting([SKEY], () => refresh());
   const hScene = Hooks.on("updateScene", (doc) => { if ( doc.id === canvas?.scene?.id ) refresh(); });
   const hReady = Hooks.on("canvasReady", () => refresh());
   refresh();
   return () => {
     host.removeEventListener("change", onChange); host.removeEventListener("click", onClick);
-    Hooks.off("updateSetting", hSet); Hooks.off("updateScene", hScene); Hooks.off("canvasReady", hReady);
+    offSet(); Hooks.off("updateScene", hScene); Hooks.off("canvasReady", hReady);
     host.innerHTML = "";
   };
 }

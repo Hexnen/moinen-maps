@@ -7,7 +7,7 @@ import { Screen } from "./stage.mjs";
 import { safeRect, freeRect, hitAt, hitsFresh, sliced } from "./overlay.mjs";
 import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
-import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
+import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl, onWorldSetting } from "../workspace/ui.mjs";
 
 /**
  * DIRECTOR SOURCE: TOKEN MOVEMENT AND COMBAT TURNS.
@@ -351,8 +351,9 @@ function renderPanel(hostEl) {
     game.settings.set(MODULE_ID, KEY, next);
   };
   hostEl.addEventListener("change", onChange);
-  const hook = Hooks.on("updateSetting", (s) => { if ( s.key === `${MODULE_ID}.${KEY}` ) { setCache = null; refresh(); } });
-  return () => { hostEl.removeEventListener("change", onChange); Hooks.off("updateSetting", hook); hostEl.innerHTML = ""; };
+  // (create / update / delete: the first write in a world creates the Setting document, a reset deletes it)
+  const off = onWorldSetting([KEY], () => { setCache = null; refresh(); });
+  return () => { hostEl.removeEventListener("change", onChange); off(); hostEl.innerHTML = ""; };
 }
 
 /* ---------------------------------------------------------------- wiring */

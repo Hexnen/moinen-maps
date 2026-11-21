@@ -7,7 +7,7 @@ import { Screen, clientOpts } from "./stage.mjs";
 import { freeRect } from "./overlay.mjs";
 import { restyle } from "./screen.mjs";
 import { extendSection } from "../workspace/registry.mjs";
-import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl } from "../workspace/ui.mjs";
+import { esc, optRange, optSelect, optCheck, optHint, isEcho, writeControl, onWorldSetting } from "../workspace/ui.mjs";
 import { FOLLOW, followOf } from "../zones/board-core.mjs";
 import { chipSpot } from "../zones/room.mjs";
 
@@ -780,8 +780,9 @@ function renderPanel(hostEl) {
     game.settings.set(MODULE_ID, KEY, next);
   };
   hostEl.addEventListener("change", onChange);
-  const hook = Hooks.on("updateSetting", (s) => { if ( s.key === `${MODULE_ID}.${KEY}` ) { setCache = null; refresh(); } });
-  return () => { hostEl.removeEventListener("change", onChange); Hooks.off("updateSetting", hook); hostEl.innerHTML = ""; };
+  // (create / update / delete: the first write in a world creates the Setting document, a reset deletes it)
+  const off = onWorldSetting([KEY], () => { setCache = null; refresh(); });
+  return () => { hostEl.removeEventListener("change", onChange); off(); hostEl.innerHTML = ""; };
 }
 
 /* ---------------------------------------------------------------- wiring */
@@ -801,7 +802,7 @@ Hooks.once("ready", () => {
   Hooks.on("canvasTearDown", onTearDown);
   // (Hot Pan / LockView switched on while parked: the chip and the parked Esc go)
   const held = () => { if ( st.parked || chip ) sync(); };
-  Hooks.on("updateSetting", held); Hooks.on("clientSettingChanged", held); Hooks.on("updateScene", held);
+  Hooks.on("createSetting", held); Hooks.on("updateSetting", held); Hooks.on("clientSettingChanged", held); Hooks.on("updateScene", held);
 });
 extendSection("director", { panels: [{ id: "dirStage", title: "MOINENMAPS.DirStage.title", icon: "fa-solid fa-clapperboard", open: false, mount: (h) => renderPanel(h) }] });
 

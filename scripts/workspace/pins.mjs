@@ -1,5 +1,5 @@
 import { registerSection } from "./registry.mjs";
-import { esc, T, setting, store, onSetting, optHint, optFold } from "./ui.mjs";
+import { esc, T, setting, store, onSetting, onWorldSetting, optHint, optFold } from "./ui.mjs";
 import { typeLabel, IDLE_MODES } from "../config.mjs";
 import { fontFamilies } from "../labels.mjs";
 import { sceneForm, sf } from "./scene-form.mjs";
@@ -37,9 +37,10 @@ function pinsBar(host, ctx) {
   host.addEventListener("click", onClick);
   // the colour, the pin or the presets changed (here, in the palette, by another GM): redraw the bar
   const off = onSetting(["pinColor", "pinType", "pinPreset"], () => draw());
-  const offWorld = Hooks.on("updateSetting", (s) => { if ( s.key === "moinen-maps.pinPresets" ) draw(); });
+  // (a world setting: the first preset saved in a world CREATES its Setting document - createSetting, not updateSetting)
+  const offWorld = onWorldSetting(["pinPresets"], () => draw());
   draw();
-  return () => { off(); Hooks.off("updateSetting", offWorld); host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); };
+  return () => { off(); offWorld(); host.removeEventListener("change", onChange); host.removeEventListener("click", onClick); };
 }
 
 // which folds of the Pin look panel are open (kept while it is drawn again)
