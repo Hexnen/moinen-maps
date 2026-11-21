@@ -538,7 +538,8 @@ Hooks.on("canvasPan", () => { if ( ENTRIES.size ) wake(); });
 Hooks.on("lightingRefresh", () => { attachHalos(); if ( ENTRIES.size ) retarget(); });
 Hooks.on("initializeCanvasEnvironment", () => { if ( ENTRIES.size ) retarget(); });
 Hooks.on("updateScene", (scene) => { if ( scene.id === canvas.scene?.id && ENTRIES.size ) retarget(); });
-Hooks.on("updateSetting", (s) => { if ( s.key === `${MODULE_ID}.respectReducedMotion` ) { for ( const e of ENTRIES.values() ) e.applied = -1; wake(); } });
+// (a CLIENT setting: Foundry says its change with "clientSettingChanged" (key, value), never with the Setting document hooks)
+Hooks.on("clientSettingChanged", (key) => { if ( key === `${MODULE_ID}.respectReducedMotion` ) { for ( const e of ENTRIES.values() ) e.applied = -1; wake(); } });
 
 export const _lightsDbg = () => ({ entries: [...ENTRIES.values()].map((e) => ({ id: e.id, count: e.count, n: e.n, shown: e.shown, visible: e.core.visible })), target, ticking, halo: !!haloLayer?.parent });
 
