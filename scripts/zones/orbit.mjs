@@ -202,8 +202,9 @@ function onUpdateToken(doc, changed) {
   if ( !fm || !iAmTheGM() || !enabled() ) return;
   if ( fm.orbitReq ) return void serve(doc);
   if ( !isOrbit(doc.parent) ) { if ( fm.alt === "orbit" ) guarded(doc, () => sendToOrbit(doc)); return; }
-  if ( "land" in fm && fm.land !== undefined ) return void guarded(doc, () => bringBack(doc, fm.land || null));
-  const alt = "-=alt" in fm ? "ground" : fm.alt;
+  // (v14 reports a removed key as the key itself holding a deletion operator, not as "-=key": only a string or null is a request)
+  if ( "land" in fm && (fm.land === null || typeof fm.land === "string") ) return void guarded(doc, () => bringBack(doc, fm.land || null));
+  const alt = "-=alt" in fm || ("alt" in fm && typeof fm.alt !== "string") ? "ground" : fm.alt;
   if ( alt && alt !== "orbit" ) guarded(doc, () => bringBack(doc, null, alt));
 }
 /** A request flag that is left over (the move failed or did nothing) is cleared, so asking again works. */

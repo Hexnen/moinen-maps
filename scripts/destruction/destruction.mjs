@@ -186,7 +186,7 @@ function onUpdateScene(scene, changed, _options, userId) {
   // only the manifest (and the entries that go with it) changed, while everything is on screen here and nothing waits for a chunk:
   // take them over, no bake pass (an echo of another client's publish must never start one)
   const d = f[Model.FLAG], manifestOnly = d && typeof d === "object" && !(Model.OBJS in f) && !(Store.PATHS in f) && !(`-=${Model.OBJS}` in f) && !(`-=${Store.PATHS}` in f)
-    && Object.keys(d).every((k) => k === "baked" || k === "entries");
+    && Object.keys(d).length > 0 && Object.keys(d).every((k) => k === "baked" || k === "entries");   // (a v14 deletion operator has no keys: not a manifest)
   if ( manifestOnly && S && shownKey && !status.waiting && !status.baking && !status.compat ) {
     const F = scene.flags?.[MODULE_ID]?.[Model.FLAG];
     S.baked = F?.baked ?? S.baked; S.entries = Array.isArray(F?.entries) ? F.entries : S.entries;
