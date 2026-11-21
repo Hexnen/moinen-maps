@@ -522,7 +522,8 @@ export function onDrawToken(token) {
 export function onRefreshToken(token, flags) {
   const d = BY_TOKEN.get(token);
   if ( d && flags && (flags.refreshMesh || flags.refreshPosition || flags.refreshSize || flags.refreshRotation || flags.refreshTransform || flags.refresh || flags.redraw) ) d.refreshed(flags);
-  if ( token.targeted?.size && tokenCfg(token.document).hideNative && tokenCfg(token.document).target && token.target ) token.target.visible = false;
+  // (Token#target is deprecated since v13, removed in v15: the native reticle's arrows are Token#targetArrows)
+  if ( token.targeted?.size && tokenCfg(token.document).hideNative && tokenCfg(token.document).target && token.targetArrows ) token.targetArrows.visible = false;
 }
 
 export function onUpdateToken(doc, changes) {
