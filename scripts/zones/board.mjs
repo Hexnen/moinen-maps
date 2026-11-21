@@ -1012,8 +1012,11 @@ export const boardApi = {
 };
 
 export function registerBoard() {
-  Hooks.once("ready", () => game.socket?.on(CHANNEL, onSocket));
-  Hooks.on("canvasReady", () => { if ( canvas.scene ) emit({ op: "hello" }); });
+  // (at a page load Foundry draws the scene, canvasReady, BEFORE ready: a hello sent then is answered before this client listens and
+  // the answers are lost - the first hello waits for the listener)
+  let listening = false;
+  Hooks.once("ready", () => { game.socket?.on(CHANNEL, onSocket); listening = true; if ( globalThis.canvas?.ready && canvas.scene ) emit({ op: "hello" }); });
+  Hooks.on("canvasReady", () => { if ( listening && canvas.scene ) emit({ op: "hello" }); });
   Hooks.on("canvasTearDown", onTearDown);
   Hooks.on("drawToken", onTokenRefresh);
   Hooks.on("refreshToken", (t) => { onTokenRefresh(t); if ( involved.has(t.id) ) linksSoon(); });

@@ -1380,8 +1380,10 @@ export const interactApi = {
 };
 
 export function registerInteract() {
-  Hooks.once("ready", () => game.socket?.on(CHANNEL, onSocket));
-  Hooks.on("canvasReady", () => { if ( canvas.scene ) emit({ op: "hello" }); redraw(); });
+  // (at a page load canvasReady comes BEFORE ready: the first hello waits for the listener, or the answers to it are lost - board.mjs)
+  let listening = false;
+  Hooks.once("ready", () => { game.socket?.on(CHANNEL, onSocket); listening = true; if ( globalThis.canvas?.ready && canvas.scene ) emit({ op: "hello" }); });
+  Hooks.on("canvasReady", () => { if ( listening && canvas.scene ) emit({ op: "hello" }); redraw(); });
   Hooks.on("canvasTearDown", onTearDown);
   // the zones were redrawn, their look or their marks changed: the highlights follow
   Hooks.on("moinenMapsZones", (kind) => {
