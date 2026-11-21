@@ -270,8 +270,10 @@ function mountLook(host) {
   const offFolds = keepFolds(host, lookFolds);
   const onApply = async (ev) => {
     const b = ev.target.closest?.("[data-act=applyLook]"); if ( !b || !game.user.isGM ) return;
+    const scene = canvas.scene;
     const ok = await foundry.applications.api.DialogV2.confirm({ window: { title: T("Destr.applyLook") }, content: `<p>${esc(T("Destr.applyLookConfirm"))}</p>`, rejectClose: false, modal: true });
-    if ( ok ) ui.notifications.info(game.i18n.format("MOINENMAPS.Destr.applyLookDone", { n: D.applyParams() }));
+    // (only on the scene it was asked about: not on one the canvas moved to meanwhile - the restyle of every stroke cannot be undone)
+    if ( ok && canvas.scene === scene ) ui.notifications.info(game.i18n.format("MOINENMAPS.Destr.applyLookDone", { n: D.applyParams() }));
   };
   host.addEventListener("click", onApply);
   // the carry controls are the client's own settings (not the scene's): stored at once, updated when changed elsewhere (the bar's button)

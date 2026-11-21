@@ -229,11 +229,15 @@ export async function openPinEditor(doc) {
 
 /** Delete every standalone pin of the scene (after a confirmation). */
 export async function clearPins() {
-  const ids = canvas.scene.notes.filter((n) => pinTypeOf(n) && !n.entryId).map((n) => n.id);
+  const scene = canvas.scene;
+  const ids = scene.notes.filter((n) => pinTypeOf(n) && !n.entryId).map((n) => n.id);
   if ( !ids.length ) return ui.notifications.info(T("Clear.none"));
   const ok = await foundry.applications.api.DialogV2.confirm({
     window: { title: T("Tool.clear") }, content: `<p>${esc(game.i18n.format("MOINENMAPS.Clear.confirm", { n: ids.length }))}</p>`
   });
-  if ( ok ) await canvas.scene.deleteEmbeddedDocuments("Note", ids);
+  // (the scene the count was taken on: the canvas may have moved to another scene while the dialog was open - its notes do not have
+  // these ids; and a pin deleted meanwhile, by another GM, is left out so the delete does not fail on it)
+  const left = ids.filter((id) => scene.notes.has(id));
+  if ( ok && left.length ) await scene.deleteEmbeddedDocuments("Note", left);
 }
 
