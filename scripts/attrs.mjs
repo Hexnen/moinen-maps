@@ -118,9 +118,9 @@ export function writeAttrs(districtId, attrs) {
   });
 }
 
-/** Drop store entries of districts that no longer exist on the scene. */
-export function pruneStore(list) {
-  const doc = storeDoc(), sid = canvas.scene?.id, map = doc?.flags?.[MODULE_ID]?.store?.[sid];
+/** Drop store entries of districts that no longer exist on `scene` (default: the viewed one); `list`: its districts as they stand. */
+export function pruneStore(list, scene = canvas.scene) {
+  const doc = storeDoc(), sid = scene?.id, map = sid ? doc?.flags?.[MODULE_ID]?.store?.[sid] : null;
   if ( !map ) return;
   const ids = new Set(list.map((d) => d.id)), gone = Object.keys(map).filter((k) => !ids.has(k));
   if ( gone.length ) { const upd = {}; for ( const k of gone ) addDeletion(upd, `flags.${MODULE_ID}.store.${sid}.${k}`); doc.update(upd); }

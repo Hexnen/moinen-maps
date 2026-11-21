@@ -563,7 +563,9 @@ const save = async (list) => {
   try {
     const r = Object.keys(upd).length ? await scene.update(upd) : null;
     bases.set(list, foundry.utils.deepClone(list));
-    if ( game.user.isGM ) pruneStore(list);
+    // (against the scene this save went to, as it stands now: the canvas may have moved to another scene meanwhile, and another GM's
+    // districts saved in between are on it - pruning the viewed scene by this list would drop that scene's / that GM's GM-only attributes)
+    if ( game.user.isGM ) pruneStore(listOf(scene.flags?.[MODULE_ID]), scene);
     return r;
   }
   finally { if ( pendingList === list ) { pendingList = null; if ( canvas.scene === scene ) sync(false); } }
