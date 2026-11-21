@@ -525,6 +525,8 @@ body.mm-painting-roads #board { cursor: crosshair; }
 .mm-rd-bar .mm-rd-hint { margin: 0; }
 .mm-rd-bar range-picker { width: 9rem; }
 .mm-rd-noheads .mm-wp-sec > h4 { display: none; }
+/* the roads window: its content box clips (moinen-maps-dialog), so the body scrolls when the window is shorter than brush+traffic+look */
+.mm-roads-panel .mm-rd-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 
 /* ------------------------------------------------------------------ destruction (scripts/destruction) */
 body.mm-painting-destruction #board { cursor: crosshair; }
