@@ -413,7 +413,7 @@ check(J(steps) === J([[4, 1], [3, -1]]) && r1.row.outEl.textContent === "4" && a
 let r2 = rowOf(1);
 menuEl().fire("click", r2.target); await tick();
 check(J(togs) === J([true]) && r2.row.attrs["aria-checked"] === "true" && api.menuOpen(), "a toggle tells its new state and keeps the menu open (a state on or off)");
-window.fire("keydown", { key: "1" });
+window.fire("keydown", { key: "1", code: "Digit1" });
 res = await pr;
 check(res.ok && res.id === "end", "a digit picks the plain entries in order");
 pr = api.menu({ zone: "z3", items: [{ label: "Look" }] });

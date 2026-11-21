@@ -853,6 +853,7 @@ export function onCanvasReady() {
     key: (e) => {
       if ( e.key === "Escape" && stroke ) { cancelStroke(); e.preventDefault(); e.stopPropagation(); }
       else if ( brushActive() && !typing(e) && !e.ctrlKey && !e.metaKey && (e.key === "[" || e.key === "]") ) {
+        e.preventDefault(); e.stopPropagation();
         const v = clamp(opt("districtSize") + (e.key === "]" ? 0.1 : -0.1), 0.2, 4);
         game.settings.set(MODULE_ID, "districtSize", Math.round(v * 10) / 10);
       }

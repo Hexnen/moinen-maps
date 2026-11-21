@@ -215,6 +215,7 @@ export function onCanvasReady() {
       if ( (e.ctrlKey || e.metaKey) && (k === "z" || k === "y") ) { e.preventDefault(); e.stopPropagation(); if ( k === "y" || e.shiftKey ) redoStroke(); else undoStroke(); }
       else if ( e.key === "Escape" && stroke ) { cancelStroke(); e.preventDefault(); e.stopPropagation(); }
       else if ( !e.ctrlKey && !e.metaKey && (e.key === "[" || e.key === "]") ) {
+        e.preventDefault(); e.stopPropagation();
         const v = clamp(opt("waterBrush") + (e.key === "]" ? 0.25 : -0.25), 0.25, 8);
         game.settings.set(MODULE_ID, "waterBrush", Math.round(v * 4) / 4);
       }

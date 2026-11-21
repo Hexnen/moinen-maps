@@ -146,9 +146,10 @@ export function onCanvasReady() {
         e.preventDefault(); e.stopPropagation();
         const v = brush().level, up = e.code === "BracketRight", q = up ? Math.floor(v * 4 + 1e-6) / 4 + 0.25 : Math.ceil(v * 4 - 1e-6) / 4 - 0.25;
         game.settings.set(MODULE_ID, "fireLevel", clamp(q, 1, 3));
-      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && mode !== "erase" && /^[123]$/.test(e.key) ) {
+      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && mode !== "erase" && /^Digit[123]$/.test(e.code) ) {
+        // (top-row digits by key position: the numpad stays Foundry's canvas pan)
         e.preventDefault(); e.stopPropagation();
-        game.settings.set(MODULE_ID, mode === "smoke" ? "smokeLevel" : mode === "dust" ? "dustLevel" : "fireLevel", Number(e.key));
+        game.settings.set(MODULE_ID, mode === "smoke" ? "smokeLevel" : mode === "dust" ? "dustLevel" : "fireLevel", Number(e.code.slice(5)));
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey && mode === "fire" && /^Digit[0-3]$/.test(e.code) ) {
         e.preventDefault(); e.stopPropagation();
         game.settings.set(MODULE_ID, "fireSmoke", Number(e.code.slice(5)));

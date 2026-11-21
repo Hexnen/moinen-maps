@@ -138,13 +138,24 @@ export function installPatches() {
       proto[name] = Object.assign(function(...a) { return fn.call(this, orig.bind(this), ...a); }, { __mm: true });
     }
   }
-  // Escape leaves the placing tool (the tool otherwise stays active so several pins can be dropped in a row)
+  // Escape leaves the placing tool (the tool otherwise stays active so several pins can be dropped in a row), but only when nothing
+  // Foundry's own Esc (core "dismiss") would close: an open window, the main menu, a context menu, a tour
   window.addEventListener("keydown", (ev) => {
     if ( ev.key !== "Escape" || !activePinType() ) return;
     if ( document.querySelector("dialog[open], .application.dialog") ) return;
+    if ( escTaken() ) return;
     ev.preventDefault(); ev.stopPropagation();
     useTool("pins", "select");
   }, true);
+}
+
+/** Something Foundry's own Esc would close (the same check as director.mjs escTaken, copied here: importing the director from this
+ *  file would load it before main.mjs's own order). */
+function escTaken() {
+  if ( ui.menu?.rendered || ui.context?.element || foundry.nue?.Tour?.tourInProgress ) return true;
+  if ( Object.values(ui.windows ?? {}).some((a) => a?.rendered) ) return true;
+  for ( const a of foundry.applications?.instances?.values?.() ?? [] ) if ( a.hasFrame && a.rendered ) return true;
+  return false;
 }
 
 /* ---------------------------------------------------------------------------------------------- */

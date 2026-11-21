@@ -727,9 +727,11 @@ function showChip() {
   clearInterval(chipTick); chipTick = setInterval(placeChip, 300);
 }
 function hideChip() { const c = chip; chip = null; c?.remove(); clearInterval(chipTick); chipTick = null; }
-/** Esc while parked: only when nothing else wants it (a focused text field, an open window). */
+/** Esc while parked: only when nothing else wants it (a focused text field, an open window, the main or a context menu, a tour, a
+ *  controlled token: Foundry's own Esc releases those first). */
 function onKey(ev) {
   if ( ev.key !== "Escape" || !st.parked || beat || homing || cameraHeld() ) return;
+  if ( escTaken() || canvas.activeLayer?.controlled?.length > 0 ) return;
   const a = document.activeElement;
   if ( a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) ) return;
   if ( [...(foundry.applications.instances?.values?.() ?? [])].some((w) => w.hasFrame && w.rendered && !w.minimized) ) return;

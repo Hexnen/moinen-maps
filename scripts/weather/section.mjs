@@ -247,17 +247,19 @@ function bar(host, ctx) {
     lensSync(host, "wx");
   };
   render();
-  // KEYS while the section is open (not while typing: a slider's range input does not count as typing): 0-3 the current preset's
-  // strength (0 = its effects off, clouds kept), [ ] nudge the last-touched slider by 0.25
+  // KEYS while the section is open (not while typing: a slider's range input does not count as typing), all with Shift and no other
+  // modifier, matched by physical key (e.code) so bare digits stay Foundry's macros and bare [ ] its send-to-back / bring-to-front:
+  // Shift+0..3 the current preset's strength (0 = its effects off, clouds kept), Shift+[ / Shift+] nudge the last-touched slider by
+  // 0.25. Only these keys are consumed.
   const key = (e) => {
     const tg = e.target;
     if ( tg instanceof HTMLElement && (tg.isContentEditable || /^(textarea|select)$/i.test(tg.tagName) || (tg.tagName === "INPUT" && tg.type !== "range")) ) return;
-    if ( e.ctrlKey || e.metaKey || e.altKey || e.shiftKey ) return;
-    if ( e.key === "[" || e.key === "]" ) { e.preventDefault(); e.stopPropagation(); nudge(e.key === "]" ? 1 : -1); return; }
-    if ( !/^[0-3]$/.test(e.key) ) return;
+    if ( !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey ) return;
+    if ( e.code === "BracketLeft" || e.code === "BracketRight" ) { e.preventDefault(); e.stopPropagation(); nudge(e.code === "BracketRight" ? 1 : -1); return; }
+    if ( !/^Digit[0-3]$/.test(e.code) ) return;
     e.preventDefault(); e.stopPropagation();
     flush();
-    const n = Number(e.key), S = strengths(), driven = M.drivenFx(S.preset, S.target);
+    const n = Number(e.code.slice(5)), S = strengths(), driven = M.drivenFx(S.preset, S.target);
     if ( driven.length ) lastDriven = driven;
     else {
       // (after 0 nothing is driven: 1-3 bring back the effects 0 turned off, at that strength)

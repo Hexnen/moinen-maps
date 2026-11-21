@@ -1545,7 +1545,7 @@
   "MOINENMAPS.Weather.lensOnShort": "obiektyw wł.",
   "MOINENMAPS.Weather.lensOffShort": "obiektyw wył.",
   "MOINENMAPS.Weather.windHint": "Przeciągnij po mapie: wiatr wieje wzdłuż strzałki; 4 pola długości = pełna siła.",
-  "MOINENMAPS.Weather.barHint": "Wybierz gotowy zestaw albo ustaw każdą pogodę jej suwakiem (0 wył., 1 lekko, 2 średnio, 3 mocno). Klawisze 0-3 ustawiają siłę zestawu, [ ] przesuwają ostatni suwak. Każda zmiana przechodzi u wszystkich płynnie w ustawionym czasie.",
+  "MOINENMAPS.Weather.barHint": "Wybierz gotowy zestaw albo ustaw każdą pogodę jej suwakiem (0 wył., 1 lekko, 2 średnio, 3 mocno). Klawisze Shift+0-3 ustawiają siłę zestawu, Shift+[ ] przesuwają ostatni suwak. Każda zmiana przechodzi u wszystkich płynnie w ustawionym czasie.",
   "MOINENMAPS.Weather.fx.rain": "Deszcz",
   "MOINENMAPS.Weather.none": "brak",
   "MOINENMAPS.Weather.coreWarn": "Wbudowana pogoda Foundry też jest włączona w tej scenie (Konfiguracja sceny): dwa systemy pogody naraz.",

@@ -1676,6 +1676,7 @@ Status: planned (the owner ordered all of it on 2026-11-13). Sections that will 
   `I.warm`, `handle.trace`); impact README "The cut-in", "Safety"; `check-figures.mjs` (area rule, cut-in, pink).
 - 2026-11-16: SAKUGATOKEN (1.9.27, `tactics-zones-sakugatoken`): section 14 ruling row (token effects on the token, the token keeps its size, morph); section 21a (the cut-in removed, stickers inside `nearR`, the screen's own effects kept, the morph); impact README "On the token, not on the screen"; `check-figures.mjs` 3b, `check-impact.mjs` (`flashR` / `burstR`).
 - 2026-11-16: SAKUGASTAR (1.9.28, `tactics-zones-sakugastar`): section 14 ruling row («gwiazda za duża»); section 21a (the flash frames' star and window on the token); impact README "The flash frames' star is the token's"; `check-figures.mjs` 3c.
+- 2026-11-21: KEYS (1.9.29, live main): the Designer's picture strip (`ui.mjs`) stops the keys it acts on (Space, arrows, Home, End) from reaching Foundry: v14's KeyboardManager listens on window keydown in the bubble phase and ignores `defaultPrevented`, so `preventDefault` alone still paused the game (GM Space) and panned the canvas (arrows). A focused own widget that acts on a key core also binds must call `stopPropagation`. No drawing, plan or timing changes. `[C]` (node --check, sync --check).
 
 ## 21a. Impact frames: `L.impact`
 Status: IMPACT 1.7.2 on `tactics-zones` (inside 1.8.1); FXI-ENGINE 1.8.2 and FIN-ENGINE 1.9.1 `pending merge` (`tactics-zones-fin-engine` holds both). The reference is

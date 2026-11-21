@@ -288,7 +288,7 @@ const CASES = {
     deleteToken(sc, "t1");
     check(api.menuOpen(), "another token deleted: the menu stays");
     deleteToken(sc, "t2");
-    win.fire("keydown", { key: "1" });
+    win.fire("keydown", { key: "1", code: "Digit1" });
     const got = await Promise.race([mp, tick(20).then(() => "pending")]);
     check(!api.menuOpen() && J(got) === J({ ok: false, reason: "noAnchor" }), "the menu at a token closes when that token is deleted: noAnchor");
     const zm = api.menu({ zone: "z5", items: [{ id: "x", label: "X" }] });
@@ -398,7 +398,7 @@ const CASES = {
     rc(900, 150); await tick(5);
     give({ title: "Zone", items: [{ id: "burn", label: "Set on fire" }], done: (r) => { done = r; } }); await tick(10);
     const up = api.menuOpen();
-    win.fire("keydown", { key: "1" }); await tick(10);
+    win.fire("keydown", { key: "1", code: "Digit1" }); await tick(10);
     check(up && done?.ok === true && done.id === "burn", "(c) on the scene it was asked on, a late spec still opens its menu");
     // a right press that is still down when the scene changes is forgotten
     const ev = { button: 2, clientX: 900, clientY: 150, target: K.view, stopImmediatePropagation() {}, preventDefault() {} };

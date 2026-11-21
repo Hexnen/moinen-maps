@@ -88,9 +88,10 @@ export function reorder(ids, id, beforeId = null) {
 }
 /** A pad's hotkey label (index in the order): "1".."9", "⇧1".."⇧9", "" past 18. */
 export const hotkeyOf = (i) => (i < 9 ? String(i + 1) : i < PAD_KEYS ? `⇧${i - 8}` : "");
-/** The pad index of a digit key (KeyboardEvent.code "Digit1".."Digit9"), Shift for the second nine; -1 if none. */
+/** The pad index of a top-row digit key (KeyboardEvent.code "Digit1".."Digit9"), Shift for the second nine; -1 if none (the numpad
+ *  stays Foundry's canvas pan). */
 export function padOfKey(code, shift) {
-  const m = /^(?:Digit|Numpad)([1-9])$/.exec(String(code)); if ( !m ) return -1;
+  const m = /^Digit([1-9])$/.exec(String(code)); if ( !m ) return -1;
   return Number(m[1]) - 1 + (shift ? 9 : 0);
 }
 

@@ -1545,7 +1545,7 @@
   "MOINENMAPS.Weather.lensOnShort": "lens on",
   "MOINENMAPS.Weather.lensOffShort": "lens off",
   "MOINENMAPS.Weather.windHint": "Drag on the map: the wind blows along the arrow; 4 squares long = full strength.",
-  "MOINENMAPS.Weather.barHint": "Pick a preset or set each weather on its slider (0 off, 1 light, 2 medium, 3 heavy). Keys 0-3 set the preset's strength, [ ] nudge the last slider. Every change ramps for everyone over the time set here.",
+  "MOINENMAPS.Weather.barHint": "Pick a preset or set each weather on its slider (0 off, 1 light, 2 medium, 3 heavy). Keys Shift+0-3 set the preset's strength, Shift+[ ] nudge the last slider. Every change ramps for everyone over the time set here.",
   "MOINENMAPS.Weather.fx.rain": "Rain",
   "MOINENMAPS.Weather.none": "none",
   "MOINENMAPS.Weather.coreWarn": "Foundry's own weather is also on in this scene (Scene Config): two weather systems at once.",

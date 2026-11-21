@@ -323,11 +323,13 @@ export function onCanvasReady() {
       if ( !mode ) return;
       if ( e.key === "Escape" && stroke ) { e.preventDefault(); e.stopPropagation(); endStroke(); }
       else if ( !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "[" || e.key === "]") ) {
+        e.preventDefault(); e.stopPropagation();
         const v = clamp(brush().size + (e.key === "]" ? 0.25 : -0.25), 0.25, 10);
         game.settings.set(MODULE_ID, "destrBrush", Math.round(v * 4) / 4);
-      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && mode === "paint" && /^[123]$/.test(e.key) ) {
+      } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && mode === "paint" && /^Digit[123]$/.test(e.code) ) {
+        // (top-row digits by key position: the numpad stays Foundry's canvas pan; Shift+digit is the cause below)
         e.preventDefault(); e.stopPropagation();
-        game.settings.set(MODULE_ID, "destrLevel", Number(e.key));
+        game.settings.set(MODULE_ID, "destrLevel", Number(e.code.slice(5)));
       } else if ( !e.ctrlKey && !e.metaKey && !e.altKey && mode === "paint" && e.shiftKey && /^Digit[0-9]$/.test(e.code) ) {
         // the cause: Shift+1..9, Shift+0 = the scene default (by key position, whatever the keyboard layout prints)
         e.preventDefault(); e.stopPropagation();

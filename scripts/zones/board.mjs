@@ -743,9 +743,10 @@ export function menu(spec = {}) {
       if ( ev.key === "Escape" ) { ev.preventDefault(); ev.stopPropagation(); closeMenu("cancelled"); return; }
       const a = document.activeElement;
       if ( a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName ?? "")) ) return;
-      if ( /^[1-9]$/.test(ev.key) && !ev.ctrlKey && !ev.altKey && !ev.metaKey ) {
+      // (top-row digits by key position: the numpad stays Foundry's canvas pan)
+      if ( /^Digit[1-9]$/.test(ev.code) && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey ) {
         let k = 0;
-        const it = M.items.find((q) => !q.separator && !q.stepper && !q.toggle && !q.disabled && ++k === Number(ev.key));
+        const it = M.items.find((q) => !q.separator && !q.stepper && !q.toggle && !q.disabled && ++k === Number(ev.code.slice(5)));
         if ( it ) { ev.preventDefault(); ev.stopPropagation(); choose(it); }
       }
     };
