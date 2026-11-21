@@ -564,7 +564,9 @@ async function sweep(dir, accept, { grace, cap, max, left = null }) {
       if ( referenced().out.has(f) ) continue;
       try {
         const res = await picker().upload("data", dir, new File([TOMB], name, { type: "image/png" }), {}, { notify: false });
-        if ( res?.status === "error" ) throw new Error(res.message);
+        // (v14 FilePicker.upload never says "error": a failure is false / undefined / {} - no path. Taken as done, the file was booked
+        // dead and never tried again, and every other file of the batch failed on, each with its own error toast)
+        if ( !res?.path ) throw new Error(res?.message ?? "tombstone upload failed");
         dead.set(f, Date.now()); seen.delete(f); known(dir).delete(id); drop(id); stats.tombstones++;
         done.push(f);
       } catch ( err ) { console.warn(`${MODULE_ID} | GC could not tombstone ${f}`, err); break; }
