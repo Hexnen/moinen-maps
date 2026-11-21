@@ -394,3 +394,17 @@ export function toggleDistrictsPanel(force) {
 }
 export const playersMayList = () => !!sceneConfig(canvas.scene ?? game.scenes.viewed)?.districtListForPlayers;
 void MODULE_ID;
+
+// A player's "Districts" button is built with the scene controls, which Foundry prepares again only when a scene is drawn. The GM
+// switching "players may list districts" on or off mid-session must reach the players at once: the button comes or goes (and the
+// open list closes when it is switched off). (The scene config cache is dropped by config.mjs's own updateScene hook, which runs first.)
+let mayList = null;
+Hooks.on("canvasReady", () => { mayList = game.user?.isGM ? null : playersMayList(); });
+Hooks.on("updateScene", (scene, changed) => {
+  if ( game.user?.isGM || scene.id !== canvas.scene?.id || !changed?.flags?.[MODULE_ID] ) return;
+  const may = playersMayList();
+  if ( may === mayList ) return;
+  mayList = may;
+  ui.controls?.render({ reset: true });
+  if ( !may && panel?.rendered ) panel.close();
+});
