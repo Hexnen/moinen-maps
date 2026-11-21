@@ -67,7 +67,7 @@ function mapOf() {
 /** A coarse copy of the map on the CPU (one texel per 8 art px): the dirt colour under a tornado. */
 let dirtMap = null;
 function dirtAt(geo, ax, ay) {
-  const key = `${canvas.scene?.id}|${canvas.scene?.background?.src}|${geo.ap}|${geo.aw}x${geo.ah}`;
+  const key = `${canvas.scene?.id}|${canvas.level?.background?.src ?? canvas.scene?.firstLevel?.background?.src ?? ""}|${geo.ap}|${geo.aw}x${geo.ah}`;
   if ( dirtMap?.key !== key ) {
     const w = Math.max(1, Math.ceil(geo.aw / 8)), h = Math.max(1, Math.ceil(geo.ah / 8));
     let px = null;

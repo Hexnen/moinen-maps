@@ -70,7 +70,7 @@ export async function ensureOrbitScene() {
     const src = await makeBackground(seed);
     const scene = await Scene.implementation.create({
       name: T("sceneName"), width: COLS * GRID, height: ROWS * GRID, padding: 0, grid: { size: GRID, type: CONST.GRID_TYPES.SQUARE, alpha: 0.06 },
-      tokenVision: false, fog: { exploration: false }, navigation: true,
+      tokenVision: false, fog: { mode: CONST.FOG_EXPLORATION_MODES.DISABLED }, navigation: true,
       ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.LIMITED },
       flags: { [MODULE_ID]: { orbit: { seed, v: 2, layout: layoutOf.get(seed) ?? null } } }
     });

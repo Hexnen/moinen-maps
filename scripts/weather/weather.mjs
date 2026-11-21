@@ -418,7 +418,7 @@ let idleId = 0;
 function cancelIdle() { if ( idleId ) { (globalThis.cancelIdleCallback ?? clearTimeout)(idleId); idleId = 0; } }
 function sources(g) {
   const L = layoutOf(g.aw, g.ah);
-  const bg = canvas.primary?.background?.texture?.baseTexture?.cacheId ?? canvas.scene?.background?.src ?? "";
+  const bg = canvas.primary?.background?.texture?.baseTexture?.cacheId ?? canvas.level?.background?.src ?? canvas.scene?.firstLevel?.background?.src ?? "";
   const ik = `${canvas.scene.id}|${bg}|${g.ap}|${g.aw}x${g.ah}`;
   if ( ik !== infoKey && !idleId ) {
     const job = ++infoJob;
