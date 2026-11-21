@@ -595,8 +595,10 @@ function playTake(shot, ctx, late = 0, sg = null) {
 }
 /** Esc in a text field (chat, a sheet's input): it belongs to the field. */
 export const typing = (ev) => { const el = ev.target; return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName ?? "")) && el.type !== "checkbox" && el.type !== "radio"; };
-/** Something Foundry's own Esc would close (core "dismiss": the menu, a context menu, a tour, open windows): then Esc goes on to it too. */
+/** Something Foundry's own Esc would close (core "dismiss": a drag under way, the menu, a context menu, a tour, open windows): then Esc
+ *  goes on to it too. */
 export function escTaken() {
+  if ( globalThis.canvas?.currentMouseManager ) return true;   // (core's first case: Esc cancels the drag of a token / note in progress)
   if ( ui.menu?.rendered || ui.context?.element || foundry.nue?.Tour?.tourInProgress ) return true;
   if ( Object.values(ui.windows ?? {}).some((a) => a?.rendered) ) return true;
   for ( const a of foundry.applications?.instances?.values?.() ?? [] ) if ( a.hasFrame && a.rendered ) return true;
