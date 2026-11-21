@@ -127,8 +127,10 @@ function schedulePublish(key, bake) {
       await save();                                              // the masks and settings first, so the key means the same to everyone
       if ( my !== life ) return;                                 // left the scene meanwhile
       const baked = await publishBake(scene.id, key, bake);
-      if ( my === life ) S.baked = baked;                        // the upload belongs to that scene even when we have left it
+      // the upload belongs to that scene even when we have left it; the bake counts as published only once the flag is written (set
+      // before the write, a failed write left S.baked matching the key and every retry returned at once: the players baked for ever)
       await scene.update(put({}, `flags.${MODULE_ID}.${Model.FLAG}.baked`, scene.flags?.[MODULE_ID]?.[Model.FLAG]?.baked, baked));
+      if ( my === life && S ) S.baked = baked;
       publishBackoff = 0; publishRetryAt = 0;
       scheduleGc(scene.id);                                      // tiles no manifest names any more go, much later
 
