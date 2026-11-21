@@ -235,8 +235,24 @@ async function idbGetMany(ids) {
   return out;
 }
 
-/** Chunk bytes read ahead from IndexedDB by `prefetch`, waiting for their decode. */
-const preloaded = new Map();
+/**
+ * Chunk bytes read ahead from IndexedDB by `prefetch` / `preread`, waiting for their decode. Capped by bytes, oldest first: an entry
+ * nobody asks for (a LARGE bundle read at canvasInit while its members come one by one, an area near the view never entered, the
+ * scene left) stayed for the whole session, scene after scene. Dropping one costs only a second IndexedDB read when it is asked for.
+ */
+const PRE_BYTES = 64 * 1048576;
+let preBytes = 0;
+const preloaded = {
+  m: new Map(),
+  has(id) { return this.m.has(id); },
+  get(id) { return this.m.get(id); },
+  delete(id) { const b = this.m.get(id); if ( !b ) return false; preBytes -= b.byteLength ?? 0; this.m.delete(id); return true; },
+  set(id, b) {
+    this.delete(id); this.m.set(id, b); preBytes += b?.byteLength ?? 0;
+    while ( this.m.size > 1 && preBytes > PRE_BYTES ) this.delete(this.m.keys().next().value);
+    return this;
+  }
+};
 /** Chunks on their way (one request and one decode per id, whoever asks). */
 const inflight = new Map();
 
@@ -266,7 +282,7 @@ export async function preread(ids) {
  * -> [{ hash, data }] (data null: not in the chunk), or null when the chunk cannot be had.
  */
 export async function atlasesOf(dir, id, pack, { prio = 0 } = {}) {
-  if ( memo.has(id) ) { stats.memHits++; return packAreaAtlases(memo.get(id).v.sprites ?? [], pack); }
+  if ( memo.has(id) ) { stats.memHits++; preloaded.delete(id); return packAreaAtlases(memo.get(id).v.sprites ?? [], pack); }
   // (not through the download queue: a Detonate asks for ~200 at once and the pool takes them in order; the queue's 6 at a time were
   // 6 per gap between two heavy frames, ~1.7 s for the lot)
   let bytes = preloaded.get(id) ?? await idbGet(id);
@@ -304,7 +320,7 @@ export async function rimsOf(dir, id, areas) {
  */
 export async function shellsOf(dir, id, specs, rims = null, square = false) {
   if ( !id ) return null;
-  if ( memo.has(id) ) { stats.memHits++; const sp = memo.get(id).v.sprites ?? []; return { shells: packShellAreas(sp, specs, square), rims: rims?.length ? await rimsHere(sp, rims) : null }; }
+  if ( memo.has(id) ) { stats.memHits++; preloaded.delete(id); const sp = memo.get(id).v.sprites ?? []; return { shells: packShellAreas(sp, specs, square), rims: rims?.length ? await rimsHere(sp, rims) : null }; }
   let bytes = preloaded.get(id) ?? await idbGet(id);
   preloaded.delete(id);
   if ( !bytes ) return null;
@@ -588,4 +604,4 @@ function followGc(sceneId, ms) {
 globalThis.Hooks?.on?.("canvasReady", () => { try { if ( game.user?.isGM && game.users.activeGM?.isSelf && canvas.scene ) scheduleGc(canvas.scene.id); } catch { /* not ready */ } });
 
 /** For the API: the codec worker and the queue (tests). */
-export const debug = () => ({ workers: workers.length, busy: workers.map((s) => s.busy), broken, queue: queue.length, running, memo: memo.size, memoMB: Math.round(memoBytes / 1048576), inflight: inflight.size });
+export const debug = () => ({ workers: workers.length, busy: workers.map((s) => s.busy), broken, queue: queue.length, running, memo: memo.size, memoMB: Math.round(memoBytes / 1048576), preloaded: preloaded.m.size, preMB: Math.round(preBytes / 1048576), inflight: inflight.size });
