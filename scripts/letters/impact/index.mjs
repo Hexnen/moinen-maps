@@ -9,7 +9,7 @@
    only swaps which canvas shows. Nothing of Foundry's is kept changed: the frame punch (a shove of the board element) and the
    hit-stop (the canvas ticker held) are undone at the last drawing, by a watchdog timer too. */
 import { planImpact, safety, frameAt, punchAt, localRadius, pick, modeFor, TICK, LIMITS, FRAMES, FRAME_IDS, KINDS, KIND_IDS, TONES, STEP_AT, SERIES_STEP, SERIES_MAX, INK, PAPER, stepOf, tierOf, TIER_AT, seriesBoost, isFlash, peakOf } from "./plan.mjs";
-import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs, warmBase, artJobs, PAINTERS, nearR } from "./draw.mjs";
+import { paintFrame, backClip, paintFigLayers, frameEnv, warmFigs, warmBase, artJobs, PAINTERS, nearR, deferCtx, paintFigLayersG, warmFigsG, warmBaseG } from "./draw.mjs";
 
 const NS = "moinen-letters", KEY = "impact", MODES = ["full", "local", "off"];
 const MAX_PIX = 2.2e6;        // backing pixels of one drawing (a 4K screen is painted at about 1080p: ink is flat, nobody sees it in 40 ms)
@@ -426,36 +426,78 @@ export function createImpact(L, tools = null) {
   }
 
   /* ---------- one impact ---------- */
-  function paint(h, i) {
-    const f = h.plan.frames[i];
-    if ( !f || f.cv !== undefined ) return;
-    const t0 = now(), e = h.env;
+  /* LEADSTEP (1.9.30): a drawing is painted in steps (draw.mjs deferCtx): the painters' calls written down with the art they need
+     (step 1), played onto the real canvas and rastered (step 2: one go, see draw.mjs why), then each figure layer in a step of its own.
+     f.cv is set only when the whole drawing is done (every caller reads `f.cv !== undefined` as "painted"); a drawing still in steps is
+     f._pg. paint(h, i) finishes it at once (a drawing due now), paintFor(h, i, ms) runs its steps while ~ms last (one step at least).
+     The real canvas gets the same calls in the same order either way: the same pixels. */
+  const pace = { until: Infinity };
+  function* paintG(h, i) {
+    const f = h.plan.frames[i], e = h.env;
     const q = Math.min(globalThis.devicePixelRatio || 1, Math.sqrt(MAX_PIX / (e.W * e.H)));
     const c = f.type === "rest" ? e.makeCanvas(1, 1) : e.makeCanvas(Math.max(1, Math.round(e.W * q)), Math.max(1, Math.round(e.H * q)));
+    f._pc = c;
     const ctx = e.ctx2d(c);
     ctx.setTransform?.(c.width / e.W, 0, 0, c.height / e.H, 0, 0);
     if ( f.type === "rest" ) ctx.setTransform?.(1, 0, 0, 1, 0, 0);
-    try { paintFrame(ctx, e, f); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
+    const rec = deferCtx(ctx);
+    try { paintFrame(rec.ctx, e, f); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
+    yield;
+    try { yield* rec.replayG(); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
     rasterNow(ctx);
     Object.assign(c.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "none" });
-    f.cv = c;
     const clip = backClip(frameEnv(e, f), f);   // IMPACT5: a panel round the cut-in, the same polygon the drawing's ink outlines
+    /* IMPACT4: the figures of this drawing, each on its own canvas that follows its token */
+    let figEls = [];
+    if ( f.type !== "rest" && e.figs?.length ) {
+      yield;
+      try {
+        figEls = (yield* paintFigLayersG(e, f, q, (L0) => flushLayer(L0.canvas))).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); return { el, g: L0.g }; });
+      } catch ( err ) { figEls = []; console.warn("LETR | impact figures failed", err); }
+    }
+    f.cv = c; f._pc = null;
     f.clipPts = clip;
     f.clip = clip ? `polygon(${Array.from({ length: clip.length / 2 }, (_, k) => `${clip[k * 2].toFixed(1)}px ${clip[k * 2 + 1].toFixed(1)}px`).join(",")})` : "";
     h.wrap?.appendChild(c);
-    /* IMPACT4: the figures of this drawing, each on its own canvas that follows its token */
-    try {
-      f.figEls = paintFigLayers(e, f, q).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); h.wrap?.appendChild(el); return { el, g: L0.g }; });
-    } catch ( err ) { f.figEls = []; console.warn("LETR | impact figures failed", err); }
-    for ( const L0 of f.figEls ) rasterNow(L0.el.getContext?.("2d", { willReadFrequently: true }));
-    const ms = now() - t0;
-    stats.painted++; stats.paintMs += ms; if ( ms > stats.paintMax ) stats.paintMax = ms;
-    h.paintMs += ms;
+    f.figEls = figEls;
+    for ( const L0 of figEls ) h.wrap?.appendChild(L0.el);
+    stats.painted++;
   }
+  /* one step of drawing i (at most ~ms, the first step at least) -> true when the drawing is painted */
+  function paintFor(h, i, ms) {
+    const f = h.plan.frames[i];
+    if ( !f || f.cv !== undefined ) return true;
+    const t0 = now();
+    pace.until = t0 + ms;
+    let done = false;
+    try {
+      f._pg ??= paintG(h, i);
+      for ( ;; ) { const r = f._pg.next(); if ( r.done ) { done = true; break; } if ( now() >= pace.until ) break; }
+    } catch ( err ) { console.warn("LETR | impact drawing failed", err); done = true; }
+    finally { pace.until = Infinity; }
+    if ( done ) { f._pg = null; if ( f.cv === undefined ) { f.cv = f._pc ?? null; f._pc = null; f.figEls ??= []; } }
+    const dt = now() - t0;
+    stats.paintMs += dt; h.paintMs += dt; if ( dt > (stats.stepMax ?? 0) ) stats.stepMax = dt; stats.steps = (stats.steps ?? 0) + 1;
+    return done;
+  }
+  function paint(h, i) {
+    const f = h.plan.frames[i];
+    if ( !f || f.cv !== undefined ) return;
+    const t0 = now();
+    paintFor(h, i, Infinity);
+    const ms = now() - t0;
+    if ( ms > stats.paintMax ) stats.paintMax = ms;
+  }
+  /* a drawing left half painted (its impact ended, or a prepared one was played on another view) */
+  function dropPaint(f) { if ( f._pg ) { try { f._pg.return(); } catch {} f._pg = null; } if ( f._pc ) { f._pc.width = 0; f._pc.height = 0; f._pc = null; } }
   /* ENG24 (CALLER5-E3): a 2D canvas only RECORDS what is drawn on it; the browser rasters it in the frame that first shows it (live: 1-6 ms
      the view, 10-28 ms a figure layer of some 40 scaled copies). Reading one pixel rasters it now, where the drawing is painted (ahead,
      between frames), not in the frame that shows it */
   function rasterNow(ctx) { try { ctx?.getImageData?.(0, 0, 1, 1); } catch {} }
+  /* a figure layer (a plain graphics-card 2D canvas, CRITFREEZE) is read back once when drawn, as before. LEADSTEP tried a snapshot
+     instead (createImageBitmap: no wait for the card), live it changed the layers' pixels (the read decides how the layer is rastered),
+     so the read stays; it is the step's main cost (~4 ms of waiting in a lead frame). */
+  function flushLayer(c) { rasterNow(c.getContext?.("2d", { willReadFrequently: true })); }
   function show(h, i) {
     const t0 = now(), f = h.plan.frames[i], old = h.plan.frames[h.idx];
     paint(h, i);
@@ -492,7 +534,7 @@ export function createImpact(L, tools = null) {
     if ( h.dog ) clearTimeout(h.dog);
     try { setPunch(h, null); } catch {}
     setStop(false);
-    for ( const f of h.plan.frames ) { if ( f.cv ) { f.cv.remove?.(); f.cv.width = 0; f.cv.height = 0; f.cv = null; } dropFigs(f); }
+    for ( const f of h.plan.frames ) { if ( f.cv ) { f.cv.remove?.(); f.cv.width = 0; f.cv.height = 0; f.cv = null; } dropFigs(f); dropPaint(f); }
     if ( h.copies ) { for ( const c of h.copies.values() ) { c.filter?.remove?.(); c.cv.width = 0; c.cv.height = 0; } h.copies = null; }
     h.wrap?.remove(); h.wrap = null;
     stats.last = { kind: h.plan.kind, mode: h.plan.mode, frames: h.plan.frames.length, ms: h.plan.ms, paintMs: +h.paintMs.toFixed(2), frameMax: +h.frameMax.toFixed(2), why };
@@ -504,6 +546,9 @@ export function createImpact(L, tools = null) {
      waiting impact (live: five blows of a series called at once painted five full-view drawings in one frame, a 70 ms frame). The next
      drawing of an impact that is PLAYING is always painted. */
   const AHEAD_MS = 6, AHEAD_N = 2, LONG_MS = 50;
+  /* LEADSTEP: painting ahead in the frame loop gives steps AHEAD_STEP ms per display frame over every waiting impact (the rest is painted
+     between frames, feed()); before, a whole drawing (its art, its raster and its figure layers) per frame */
+  const AHEAD_STEP = 1.5;
   /* KEEPBOX (ADVX 6): every seat shows every drawing. On the clock alone a seat at a low frame rate, or one that drops a frame, jumps
      over a one-tick drawing (41.7 ms) that the other seat shows: one seat a star, the other nothing. The drawing that is due is shown,
      but a drawing passed by less than CATCH_MS that this page never showed comes first, for one display frame; only a seat stalled for
@@ -548,7 +593,7 @@ export function createImpact(L, tools = null) {
     if ( el < 0 ) {   // waiting for a shared start: paint ahead, one drawing per frame, inside the frame's shared budget
       const n = h.plan.frames.findIndex((f) => f.cv === undefined);
       const fk = ts ?? Math.floor(now() / 8); if ( fk !== aheadTs ) { aheadTs = fk; aheadUsed = 0; aheadN = 0; }
-      if ( n >= 0 && aheadUsed < AHEAD_MS && aheadN < AHEAD_N ) { const p0 = now(); paint(h, n); aheadUsed += now() - p0; aheadN++; }
+      if ( n >= 0 && aheadUsed < AHEAD_STEP && aheadN < AHEAD_N ) { const p0 = now(); paintFor(h, n, AHEAD_STEP - aheadUsed); aheadUsed += now() - p0; aheadN++; }
     } else {
       const i = nextDrawing(h, Math.max(0, el));
       if ( i < 0 ) { finish(h, h.cutAt != null ? "replaced" : "done"); return; }
@@ -564,8 +609,9 @@ export function createImpact(L, tools = null) {
       followFigs(h);
       if ( h.spec.keep ) applyKeep(h);
       if ( h.plan.frames[i + 1] && h.plan.frames[i + 1].cv === undefined ) paint(h, i + 1);
-      /* IMPACT5: and one more ahead while this frame has time (a drawing painted in the frame it is due in makes that frame long) */
-      if ( now() - t < AHEAD_MS && h.plan.frames[i + 2] && h.plan.frames[i + 2].cv === undefined ) paint(h, i + 2);
+      /* IMPACT5: and one more ahead while this frame has time (a drawing painted in the frame it is due in makes that frame long);
+         LEADSTEP: a step of it, inside what is left of AHEAD_MS */
+      if ( now() - t < AHEAD_MS && h.plan.frames[i + 2] && h.plan.frames[i + 2].cv === undefined ) paintFor(h, i + 2, Math.max(0.5, AHEAD_MS - (now() - t)));
     }
     h.raf = requestAnimationFrame((x) => loop(h, x));
   }
@@ -629,7 +675,7 @@ export function createImpact(L, tools = null) {
       h.env.figs = armed.env.figs;
       plan.frames.forEach((f, i) => { const g = armed.plan.frames[i]; if ( g?.cv && g.type === f.type && g.seed === f.seed && g.fig === f.fig ) { f.cv = g.cv; f.clip = g.clip; f.clipPts = g.clipPts; f.figEls = g.figEls; g.cv = null; g.figEls = null; } });
     }
-    if ( armed ) for ( const g of armed.plan.frames ) { if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; } dropFigs(g); }
+    if ( armed ) { armed.stepping = false; for ( const g of armed.plan.frames ) { if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; } dropFigs(g); dropPaint(g); } }
     h.wrap = document.createElement("div");
     Object.assign(h.wrap.style, { position: "absolute", inset: "0" });
     h.back = document.createElement("div");
@@ -648,7 +694,20 @@ export function createImpact(L, tools = null) {
   /* ENG24: between frames, one piece of work per task: the art jobs first, then the next drawings painted ahead (at most FEED_N ahead of the
      one on screen: each is a full-view canvas). A drawing still unpainted when it is due is painted in its frame, as before */
   const FEED_N = 5, FEED_SOON = 250, FEED_EARLY = 1500, FEED_GAP = 8;
+  /* LEADSTEP: a feed task does at most FEED_STEP ms of work (an art job or a drawing in steps), and while the page has an idle period it
+     works inside it (its deadline: the next frame); the next step comes FEED_GAP later as before */
+  const FEED_STEP = 2.5;
   let feedT = -Infinity;
+  const idleOk = typeof globalThis.requestIdleCallback === "function" && !globalThis.__letrRealST;
+  /* run fn with the step's length in ms: in the page's next idle period (at most FEED_STEP, at least 0.8 ms), or as a plain task */
+  const stepSlot = (fn) => { if ( !idleOk ) { task(() => fn(FEED_STEP)); return; } requestIdleCallback((dl) => fn(dl.didTimeout ? 1 : Math.max(0.8, Math.min(FEED_STEP, dl.timeRemaining() - 0.5))), { timeout: 60 }); };
+  /* one job: a plain function runs whole; a job with .g (LEADSTEP) runs as a generator, one step of at most ms -> true when done */
+  function runJob(h, job, ms) {
+    if ( !job.g ) { job(); return true; }
+    job._it ??= job.g();
+    const until = now() + ms;
+    for ( ;; ) { const r = job._it.next(); if ( r.done ) return true; if ( now() >= until ) return false; }
+  }
   const task = (() => {
     const MC = globalThis.MessageChannel;
     if ( typeof MC !== "function" || globalThis.__letrRealST ) return (fn) => setTimeout(fn, 0);
@@ -656,10 +715,10 @@ export function createImpact(L, tools = null) {
     ch.port1.onmessage = () => { const fn = q.shift(); if ( fn ) fn(); };
     return (fn) => { q.push(fn); ch.port2.postMessage(0); };
   })();
-  function feed(h) {
+  function feed(h, ms = FEED_STEP) {
     if ( !h.alive ) return;
-    const job = h.jobs?.shift();
-    if ( job ) { const t0 = now(); try { job(); } catch {} h.jobMs = (h.jobMs ?? 0) + now() - t0; task(() => feed(h)); return; }
+    const job = h.jobs?.[0];
+    if ( job ) { const t0 = now(); let done = true; try { done = runJob(h, job, ms); } catch {} if ( done ) h.jobs.shift(); h.jobMs = (h.jobMs ?? 0) + now() - t0; if ( done ) task(() => feed(h)); else stepSlot((m) => feed(h, m)); return; }
     /* drawings are painted ahead only for an impact that plays or starts within FEED_SOON (a series called at once waits in the frame
        loop's shared budget, FIN-ENGINE), and one painting per FEED_GAP ms over every impact (a task between frames delays the next frame) */
     const t = now(), fr = h.plan.frames, top = Math.min(fr.length, Math.max(0, h.idx) + 1 + FEED_N);
@@ -668,18 +727,43 @@ export function createImpact(L, tools = null) {
     const next = h.t0 == null || t >= h.t0 - FEED_SOON || (h.t0 - t < FEED_EARLY && [...lives].every((x) => x === h || !x.alive || (x.t0 ?? -Infinity) > h.t0));
     if ( !next ) { setTimeout(() => feed(h), Math.min(200, Math.max(1, h.t0 - FEED_SOON - t + 1))); return; }
     if ( t - feedT < FEED_GAP ) { setTimeout(() => feed(h), FEED_GAP); return; }
-    for ( let j = Math.max(0, h.idx + 1); j < top; j++ ) if ( fr[j].cv === undefined ) { feedT = now(); paint(h, j); feedT = now(); task(() => feed(h)); return; }
+    for ( let j = Math.max(0, h.idx + 1); j < top; j++ ) if ( fr[j].cv === undefined ) {
+      /* LEADSTEP: the first step (the painters' calls written down) runs in a task; every later step in the page's idle period */
+      feedT = now(); paintFor(h, j, ms); feedT = now();
+      stepSlot((m) => feed(h, m)); return;
+    }
     if ( top < fr.length ) setTimeout(() => feed(h), TICK);   // the window moves with the drawing on screen
   }
   /* paint an impact ahead of the blow (the subject's silhouette and every drawing, for the view as it is now); play it with
      prepared.play({ startAt }) or I.play(prepared, { startAt }) */
-  function prepare(spec0 = {}) {
+  /* LEADSTEP: prepare(spec, { steps: true }) paints nothing at the call; a.step(ms) paints on, one step of at most ~ms (the drawings in
+     order), -> true while there is more; a.done; a.cancel() drops what is half painted. Played before it is done, the play takes the
+     drawings already painted and paints the rest itself (the same pixels) */
+  function prepare(spec0 = {}, o = {}) {
     const spec = { ...(spec0 && typeof spec0 === "object" ? spec0 : {}) };
     const P = prefs(), plan = planImpact(spec), sub = subjectOf(spec);
     plan.tableMs = plan.ms;
     safety(plan, P, { osReduced: osReduced(), callerReduced: spec.reduced, callerGentle: spec.gentle, flashLog: flashLog(), now: now(), t0: now(), preview: true });
-    const a = { _armed: true, spec, plan, sub, env: null, play: (o = {}) => play(a, o) };
-    if ( !sub.hidden && plan.frames.length ) { a.env = envOf(spec, plan, sub); const h = { plan, env: a.env, wrap: null, paintMs: 0 }; for ( let i = 0; i < plan.frames.length; i++ ) paint(h, i); a.paintMs = h.paintMs; }
+    const a = { _armed: true, spec, plan, sub, env: null, play: (o2 = {}) => play(a, o2), done: true, step: () => false, cancel() {} };
+    if ( !sub.hidden && plan.frames.length ) {
+      a.env = envOf(spec, plan, sub); const h = { plan, env: a.env, wrap: null, paintMs: 0 };
+      if ( !o?.steps ) { for ( let i = 0; i < plan.frames.length; i++ ) paint(h, i); a.paintMs = h.paintMs; }
+      else {
+        a.done = false; a.stepping = true; a.paintMs = 0;
+        a.step = (ms = FEED_STEP) => {
+          if ( a.done || !a.stepping ) return false;
+          const until = now() + ms;
+          for ( let i = plan.frames.findIndex((f) => f.cv === undefined); i >= 0 && i < plan.frames.length; i++ ) {
+            if ( plan.frames[i].cv !== undefined ) continue;
+            if ( !paintFor(h, i, Math.max(0.3, until - now())) || now() >= until ) break;
+          }
+          a.paintMs = h.paintMs;
+          a.done = plan.frames.every((f) => f.cv !== undefined);
+          return !a.done;
+        };
+        a.cancel = () => { a.stepping = false; a.done = true; for ( const f of plan.frames ) dropPaint(f); };
+      }
+    }
     return a;
   }
   /* the plan this client would show (no flash budget used) */
@@ -694,9 +778,21 @@ export function createImpact(L, tools = null) {
      tokens this seat sees on the scene, one per idle moment (done on canvasReady). Hidden tokens are never read. -> ms spent (at once) */
   const ctxOf = (c) => c.getContext("2d", { willReadFrequently: true }), mk = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
   const warmEnv = (figs) => ({ W: innerWidth, H: innerHeight, tone: TONES.hero, rimTone: "a", redOk: false, figs, makeCanvas: mk, ctx2d: ctxOf });
-  function warm(list) {
-    if ( list == null ) { warmIdle(); return 0; }
+  /* LEADSTEP: a generator as a stepper: step(ms) runs it for at most ~ms (one step at least) -> true while there is more; done; cancel() */
+  function stepper(g) {
+    let done = false, ms = 0;
+    return {
+      step(budget = FEED_STEP) { if ( done ) return false; const t0 = now(), until = t0 + budget; try { for ( ;; ) { const r = g.next(); if ( r.done ) { done = true; break; } if ( now() >= until ) break; } } catch { done = true; } ms += now() - t0; return !done; },
+      get done() { return done; }, get ms() { return ms; },
+      cancel() { if ( !done ) { done = true; try { g.return(); } catch {} } }
+    };
+  }
+  /* I.warm(list, { steps: true }): the same work as I.warm(list) in steps (a stepper: step(ms) -> more?, done, cancel()), for a caller
+     that warms in its own idle moments and must give way at once to a show (nothing it leaves half done is kept or shown) */
+  function warm(list, o = {}) {
+    if ( list == null ) { warmIdle(); return o?.steps ? stepper((function* () {})()) : 0; }
     const figs = (Array.isArray(list) ? list : [list]).map((a) => figOf(a, {}, "also")).filter(Boolean);
+    if ( o?.steps ) return stepper(warmFigsG(warmEnv(figs)));
     try { return warmFigs(warmEnv(figs)); } catch { return 0; }
   }
   let idleQ = [];
@@ -717,15 +813,22 @@ export function createImpact(L, tools = null) {
      -> the pieces of work queued (0: nothing to show on this seat) */
   let forQ = [], forOn = false;
   const forIdle = (fn) => (globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 30)))(fn, { timeout: 250 });
-  function forStep() {
+  /* LEADSTEP: a piece that can run in steps (fn.g) runs inside the idle period it got (at most FEED_STEP ms a step, 1 ms when the idle
+     callback came by its timeout) and goes on in the next one; stats.warmFor counts whole pieces, as before */
+  function forStep(dl) {
     forOn = false;
     while ( forQ.length && !forQ[0].length ) forQ.shift();
-    const fn = forQ[0]?.shift();
+    const fn = forQ[0]?.[0];
     if ( !fn ) return;
     const t0 = now();
-    try { fn(); } catch {}
+    const ms0 = !dl || dl.didTimeout ? 1 : Math.max(0.8, Math.min(FEED_STEP, (dl.timeRemaining?.() ?? FEED_STEP) - 0.5));
+    let done = true;
+    try { done = runJob(null, fn, ms0); } catch { done = true; }
+    if ( done ) forQ[0].shift();
     const ms = now() - t0;
-    stats.warmFor = (stats.warmFor ?? 0) + 1; stats.warmForMs = (stats.warmForMs ?? 0) + ms; if ( ms > (stats.warmForMax ?? 0) ) stats.warmForMax = ms;
+    fn._ms = (fn._ms ?? 0) + ms;
+    if ( ms > (stats.warmForStepMax ?? 0) ) stats.warmForStepMax = ms;
+    if ( done ) { stats.warmFor = (stats.warmFor ?? 0) + 1; stats.warmForMs = (stats.warmForMs ?? 0) + fn._ms; if ( fn._ms > (stats.warmForMax ?? 0) ) stats.warmForMax = fn._ms; }
     if ( forQ.some((q) => q.length) ) { forOn = true; forIdle(forStep); }
   }
   function warmFor(spec0 = {}) {
@@ -735,8 +838,9 @@ export function createImpact(L, tools = null) {
       const plan = planImpact(spec), sub = subjectOf(spec);
       if ( sub.hidden || !plan.frames.length ) return 0;
       const env = envOf(spec, plan, sub);
-      const q = (env.figs ?? []).filter((g) => g?.sil).map((g) => () => warmBase(env, [g]));
-      if ( !q.length ) q.push(() => warmBase(env, []));
+      const piece = (list) => { const j = () => warmBase(env, list); j.g = () => warmBaseG(env, list); return j; };
+      const q = (env.figs ?? []).filter((g) => g?.sil).map((g) => piece([g]));
+      if ( !q.length ) q.push(piece([]));
       q.push(() => { for ( const job of artJobs(env, plan) ) q.push(job); });
       if ( forQ.length > 3 ) forQ.splice(0, forQ.length - 3);   // (a few blows named at once at most: the older ones are made by their play)
       forQ.push(q);

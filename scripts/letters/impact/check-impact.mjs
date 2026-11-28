@@ -369,6 +369,8 @@ export async function run(ok) {
     await (await import("./check-seats.mjs")).run(ok);
     /* 11. IMPACT3: the figures take part (ladders, safety of every new effect, seats, settings, cost) */
     await (await import("./check-figures.mjs")).run(ok);
+    /* 12. LEADSTEP (1.9.30): the work in steps, the same pictures (deferCtx, stepped pixel work, stepped prepare / warm / feed) */
+    await (await import("./check-leadstep.mjs")).run(ok);
   }
 }
 

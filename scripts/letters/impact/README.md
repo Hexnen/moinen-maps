@@ -60,6 +60,10 @@ applied; `I.mode()` stays the table's setting), `I.warm(tokens?)` = work the tok
 full plan's `ms` before this seat's safety): a reduced-motion seat (one still of at most 4 ticks) waits `tableMs`, not its own `ms`, to
 stay in step with the table. `handle.trace` entries also carry `lag` (ms this seat ran behind the drawing's own instant).
 `plan.peakMs` (1.9.1): ms from the impact's start to its strongest drawing.
+1.9.30 LEADSTEP: `I.warm(list, { steps: true })` and `I.prepare(spec, { steps: true })` return steppers for a caller that warms in its
+own idle moments and must give way to a show at once: `step(ms)` works on for about `ms` (one step at least) and returns true while
+there is more, `done`, `cancel()` (nothing half done is kept; a stepped prepare played before it is done takes the drawings already
+painted and paints the rest itself). Without `{ steps: true }` both are exactly as before.
 
 Sizes (1.9.1): the star, the gentle panel and the cracks are sized from the subject as it is ON SCREEN (its picture's radius), with a
 floor of 3 % of the view so a far-zoomed token still gets a legible mark; before, a small token far out got the view-sized floor.
@@ -437,6 +441,31 @@ with four `also` figures, a hidden attacker and a map blast: identical drawings 
 (orange, black, magenta, olive, green) and followed the knock-down's fall. A photosensitive seat (Foundry's photosensitive mode)
 drew every impact `local` while the GM drew `full`. Held colours: a token picture's held twins cost 1-10 ms per 256 px picture the first
 time (a linear->sRGB table and a colour memo; cached per picture and shared); figure layers add one small canvas per figure per drawing.
+
+### LEADSTEP (1.9.30): the work in steps, the raster of a drawing in one
+
+Live (talking-heads intros, cold first play, 165 Hz): a frame over budget about 930 ms before the show in most plays, LETR painting
+one full-view drawing in one task (7.5-12.6 ms), and the warm-up pieces `I.warm` / `I.prepare` running whole (42-50 ms). Now:
+- every pixel walk (the figure's cut-out and flood fill, the inked / posterised / turned / held / negative art, the rim's edge colour,
+  the slice projections) is a generator that yields every 4096 pixels; the medians are an exact bucket selection (`kthG`: the same
+  element a full sort gives, `check-leadstep.mjs`), so the plain functions run the same code (`runSteps`);
+- a drawing is painted in steps: the painters' calls written down with the art they need (`deferCtx`), then played and rastered, then
+  one figure layer per step; `f.cv` is set only when all is done; `paint(h, i)` still finishes a drawing at once when it is due;
+- between frames `feed()` runs ~2.5 ms steps in the page's idle periods; the frame loop's own painting ahead gives ~1.5 ms a frame;
+  `warmFor` pieces run in steps inside their idle callbacks (`stats.warmFor` still counts whole pieces; `warmForStepMax` the step);
+- `I.stats.steps` / `I.stats.stepMax`: the steps and the longest.
+What stays one step: the raster of ONE drawing (all its calls played, one read). A raster in the middle of a drawing changed its pixels in
+Chrome wherever it fell (between a path's strokes, between a rotated figure's blits; a drawing rastered in strips under a clip and one
+rastered on a worker's OffscreenCanvas also differed); of 171 drawings tried, only cuts between top-level pieces kept every pixel, and the
+dearest piece (the black frame's 24 paper-ring blits of a cut-in figure scaled ~3.5x) is one piece of 5-7 ms. So a full-view drawing whose
+raster alone is over a frame (the cut-in black frame: ~8-10 ms on the test machine) still costs that one task; what left it is the art and
+the painters' work (the first step) and the figure layers. Pixel proof (live, lane 1, Omni-Man stand-in + a token + a point, intro / crit /
+hit / blast / ko): the old engine (1.9.29), the new one plain and the new one stepped at 0.3 ms gave the same bytes for every drawing and
+figure layer (FNV over the whole canvas: 15 calls, 171 drawings, 104 figure layers). A figure layer is still read back once when drawn
+(`flushLayer`, a `getImageData` of one pixel): it waits for the GPU (~4 ms in a lead frame) but a snapshot instead (`createImageBitmap`)
+changed the layers' pixels, so the read stays. Live result (cold first plays, Omni-Man, 7 intro variants, GM + player, 3 plays each):
+frames over budget in the lead 23 -> 9 (player 7 -> 0, GM 16 -> 9), the double drops (~18 ms) gone; what is left on the GM seat is that
+one raster + the layer read. Numbers in the talking-heads report `dev/intro-perf-lead-v14.md`.
 
 ## Integration recipes
 

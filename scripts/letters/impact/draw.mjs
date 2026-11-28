@@ -10,6 +10,36 @@ import { PINK, oklchOf } from "../design.mjs";
 import * as G from "./shapes.mjs";
 
 const TAU = Math.PI * 2;
+/* ---------- LEADSTEP (1.9.30): the work done ahead, in small steps ----------
+   The pixel work on a token's picture (cut-out, inked, negative, held twins, posterised) and the painting of a drawing ahead used to run
+   as one piece each: 5-50 ms on a real cut-out portrait, a long frame wherever it landed (the talking-heads intro lead: a drawing painted
+   ahead 930 ms before the show cost 7.5-12.6 ms in one frame; a warm-up piece running when a show was asked for cost 42-50 ms). The heavy
+   functions are now GENERATORS that yield every STEP_PX pixels (and between their parts); the plain functions run them to the end
+   (runSteps), so a stepped run and a plain run do the same arithmetic in the same order: the same pixels. Medians and quantiles are taken
+   by an exact bucket selection (kthG) instead of a full sort: the same element, in steps. */
+export const STEP_PX = 4096;
+const STEP_MASK = STEP_PX - 1;
+export function runSteps(g) { for ( ;; ) { const r = g.next(); if ( r.done ) return r.value; } }
+/* the values at ranks `ks` (0-based, ascending) of v[0..n): exactly what a numeric sort would put there. Buckets of 1/64 over the
+   luminance range 0..256 (a count per bucket, then only the bucket holding the rank is sorted) */
+const KTH_NB = 16384, KTH_K = 64;
+const kbk = (x) => (x > 0 ? Math.min(KTH_NB, Math.floor(x * KTH_K)) : 0);
+export function* kthG(v, n, ks) {
+  if ( !(n > 0) ) return ks.map(() => undefined);
+  const cnt = new Uint32Array(KTH_NB + 1);
+  for ( let i = 0; i < n; i++ ) { cnt[kbk(v[i])]++; if ( !(i & STEP_MASK) ) yield; }
+  const out = [];
+  for ( const k of ks ) {
+    let acc = 0, b = 0;
+    for ( ; b < KTH_NB; b++ ) { if ( acc + cnt[b] > k ) break; acc += cnt[b]; }
+    const sub = new Float64Array(cnt[b]);
+    let m = 0;
+    for ( let i = 0; i < n; i++ ) { if ( kbk(v[i]) === b ) sub[m++] = v[i]; if ( !(i & STEP_MASK) ) yield; }
+    sub.sort();
+    out.push(sub[k - acc]);
+  }
+  return out;
+}
 const path = (ctx, p) => { ctx.moveTo(p[0], p[1]); for ( let i = 2; i < p.length; i += 2 ) ctx.lineTo(p[i], p[i + 1]); ctx.closePath(); };
 function fillPolys(ctx, polys, color, key = null, kw = 0) {
   ctx.beginPath(); for ( const p of polys ) path(ctx, p);
@@ -93,10 +123,11 @@ export const windowStar = (e) => {
    - an ART: the picture inked, hard black and white with ink edges ("bw"), or its negative ("neg").
    Pure helpers (figureMask, inkPixels) work on RGBA arrays; node checks run them on synthetic portraits. */
 const lumOf = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-export function figureMask(d, w, h) {
+export const figureMask = (d, w, h) => runSteps(figureMaskG(d, w, h));
+export function* figureMaskG(d, w, h) {
   const n = w * h, mask = new Uint8Array(n);
   let opaque = 0;
-  for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { mask[i] = 1; opaque++; }
+  for ( let i = 0; i < n; i++ ) { if ( d[i * 4 + 3] > 40 ) { mask[i] = 1; opaque++; } if ( !(i & STEP_MASK) ) yield; }
   if ( !opaque ) return { mask, round: false, kind: "empty" };
   const R = Math.min(w, h) / 2, cx = w / 2, cy = h / 2;
   const at = (x, y) => d[(Math.round(y) * w + Math.round(x)) * 4 + 3] > 40;
@@ -125,8 +156,10 @@ export function figureMask(d, w, h) {
   for ( const s of samples ) if ( mask[s[3]] && !bg[s[3]] ) { bg[s[3]] = 1; q.push(s[3]); }
   /* the rim itself and everything outside it is background too */
   const rimCut = disc ? R * 0.9 : R * 2;
-  for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) { const i = y * w + x; if ( mask[i] && Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rimCut ) bg[i] = 1; }
+  for ( let y = 0; y < h; y++ ) { for ( let x = 0; x < w; x++ ) { const i = y * w + x; if ( mask[i] && Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rimCut ) bg[i] = 1; } if ( (y & 15) === 15 ) yield; }
+  let pops = 0;
   while ( q.length ) {
+    if ( !(++pops & STEP_MASK) ) yield;
     const i = q.pop(), x = i % w, y = (i - x) / w, ref = [d[i * 4], d[i * 4 + 1], d[i * 4 + 2]];
     for ( const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1] ) {
       if ( j < 0 || bg[j] || !mask[j] ) continue;
@@ -136,6 +169,7 @@ export function figureMask(d, w, h) {
   let fig = 0, inner = 0;
   const out = new Uint8Array(n);
   for ( let i = 0; i < n; i++ ) {
+    if ( !(i & STEP_MASK) ) yield;
     if ( mask[i] && !bg[i] ) { out[i] = 1; fig++; }
     else if ( mask[i] && bg[i] ) { const x = i % w, y = (i - x) / w; if ( Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= rimCut ) inner++; }
   }
@@ -146,16 +180,18 @@ export function figureMask(d, w, h) {
   return { mask: out, round: true, kind: disc ? "disc" : "square", cut: true, share };
 }
 /* the picture inked: ink where it is dark or where an edge runs, paper elsewhere; `neg` swaps them. -> RGBA array */
-export function inkPixels(d, w, h, mask, neg = false) {
+export const inkPixels = (d, w, h, mask, neg = false) => runSteps(inkPixelsG(d, w, h, mask, neg));
+export function* inkPixelsG(d, w, h, mask, neg = false) {
   const n = w * h, L = new Float32Array(n), out = new Uint8ClampedArray(n * 4);
-  const vals = [];
-  for ( let i = 0; i < n; i++ ) { L[i] = lumOf(d, i * 4); if ( mask[i] ) vals.push(L[i]); }
-  vals.sort((a, b) => a - b);
-  const med = vals.length ? vals[vals.length >> 1] : 128;
+  const vals = new Float32Array(n);
+  let nv = 0;
+  for ( let i = 0; i < n; i++ ) { L[i] = lumOf(d, i * 4); if ( mask[i] ) vals[nv++] = L[i]; if ( !(i & STEP_MASK) ) yield; }
+  const med = nv ? (yield* kthG(vals, nv, [nv >> 1]))[0] : 128;
   const dark = Math.min(med * 0.78, 150);
   const ink = [0x0b, 0x0b, 0x10], paper = [0xff, 0xfd, 0xf2];
   for ( let y = 0; y < h; y++ ) for ( let x = 0; x < w; x++ ) {
     const i = y * w + x;
+    if ( !(i & STEP_MASK) ) yield;
     if ( !mask[i] ) continue;
     let g = 0;
     if ( x > 0 && y > 0 && x < w - 1 && y < h - 1 ) {
@@ -187,26 +223,41 @@ const skey = (s, k) => `${s.sx},${s.sy},${s.sw},${s.sh}|${k}`;
 /* the figure of this env (cached): { w, h, mask (canvas, alpha = the figure), art: { bw, neg } (canvases) } or a fallback without pixels */
 function figureOf(e) {
   const s = e.sil; if ( !s ) return null;
+  if ( e._tints?.has("fig") ) return e._tints.get("fig");
+  return runSteps(figureOfG(e));
+}
+/* LEADSTEP: figureOf in steps (the read-back, the cut-out, each inked picture); kept in the same caches when done (a figure another
+   caller finished meanwhile is taken as it is) */
+export function* figureOfG(e) {
+  const s = e.sil; if ( !s ) return null;
   e._tints ??= new Map();
   if ( e._tints.has("fig") ) return e._tints.get("fig");
   const sh = sharedOf(s), sk = skey(s, "fig");
-  if ( sh?.has(sk) ) { const f0 = sh.get(sk); e._tints.set("fig", f0); return f0; }
+  const known = () => { if ( e._tints.has("fig") ) return e._tints.get("fig"); if ( sh?.has(sk) ) { const f0 = sh.get(sk); e._tints.set("fig", f0); return f0; } return null; };
+  { const f0 = known(); if ( f0 ) return f0; }
   const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
   const w = Math.max(2, Math.round(s.sw * k)), h = Math.max(2, Math.round(s.sh * k));
-  let fig = { w, h, pixels: false };
+  let fig = { w, h, pixels: false }, img = null, c = null;
   try {
-    const c = e.makeCanvas(w, h), x = ctx2d(e, c);
+    c = e.makeCanvas(w, h); const x = ctx2d(e, c);
     x.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, 0, 0, w, h);
-    const img = typeof x.getImageData === "function" ? x.getImageData(0, 0, w, h) : null;
+    img = typeof x.getImageData === "function" ? x.getImageData(0, 0, w, h) : null;
+  } catch { img = null; c = null; }
+  yield;
+  try {
     if ( img?.data?.length === w * h * 4 ) {
-      const m = figureMask(img.data, w, h);
+      const m = yield* figureMaskG(img.data, w, h);
       const put = (rgba) => { const cv = e.makeCanvas(w, h), cx = ctx2d(e, cv), id = cx.createImageData(w, h); id.data.set(rgba); cx.putImageData(id, 0, 0); return cv; };
       const alpha = new Uint8ClampedArray(w * h * 4);
-      for ( let i = 0; i < w * h; i++ ) if ( m.mask[i] ) { alpha[i * 4] = alpha[i * 4 + 1] = alpha[i * 4 + 2] = 255; alpha[i * 4 + 3] = 255; }
-      fig = { w, h, pixels: true, round: m.round, cut: !!m.cut, mask: put(alpha), art: { bw: put(inkPixels(img.data, w, h, m.mask, false)), neg: put(inkPixels(img.data, w, h, m.mask, true)) } };
+      for ( let i = 0; i < w * h; i++ ) { if ( m.mask[i] ) { alpha[i * 4] = alpha[i * 4 + 1] = alpha[i * 4 + 2] = 255; alpha[i * 4 + 3] = 255; } if ( !(i & STEP_MASK) ) yield; }
+      const mask = put(alpha); yield;
+      const bw = put(yield* inkPixelsG(img.data, w, h, m.mask, false)); yield;
+      const neg = put(yield* inkPixelsG(img.data, w, h, m.mask, true));
+      fig = { w, h, pixels: true, round: m.round, cut: !!m.cut, mask, art: { bw, neg } };
       c.width = 0; c.height = 0;
-    } else fig.src = c;
+    } else if ( c ) fig.src = c;
   } catch { fig = { w, h, pixels: false }; }
+  { const f0 = known(); if ( f0 ) return f0; }
   e._tints.set("fig", fig); sh?.set(sk, fig);
   return fig;
 }
@@ -309,8 +360,10 @@ function ownSil(ctx, e, o) {
 const SAFE_RGB = [0xb0, 0x28, 0x40], SAFE_L = 0.299 * SAFE_RGB[0] + 0.587 * SAFE_RGB[1] + 0.114 * SAFE_RGB[2];
 /* saturated red (R / (R+G+B) >= 0.7, the guard's rule) becomes the deep crimson SAFE_RED at the pixel's own lightness: a figure's
    negative never shows saturated red (a cyan costume inverts to red), whatever its art */
-export function redSafePixels(o) {
+export const redSafePixels = (o) => runSteps(redSafePixelsG(o));
+export function* redSafePixelsG(o) {
   for ( let i = 0; i < o.length; i += 4 ) {
+    if ( !(i & (STEP_MASK << 2)) ) yield;
     const r = o[i], g = o[i + 1], b = o[i + 2], s = r + g + b;
     if ( !(o[i + 3] > 0) || s <= 0 || r / s < 0.7 ) continue;
     const k = Math.min(255 / SAFE_RGB[0], (0.299 * r + 0.587 * g + 0.114 * b) / SAFE_L);
@@ -348,8 +401,10 @@ export function unpinkRgb(r, g, b) {
   UNPINK_PIX.set(key, out);
   return out;
 }
-export function unpinkPixels(o) {
+export const unpinkPixels = (o) => runSteps(unpinkPixelsG(o));
+export function* unpinkPixelsG(o) {
   for ( let i = 0; i < o.length; i += 4 ) {
+    if ( !(i & (STEP_MASK << 2)) ) yield;
     if ( !(o[i + 3] > 0) ) continue;
     const u = unpinkRgb(o[i], o[i + 1], o[i + 2]);
     if ( u ) { o[i] = u[0]; o[i + 1] = u[1]; o[i + 2] = u[2]; }
@@ -357,33 +412,38 @@ export function unpinkPixels(o) {
   return o;
 }
 /* the art's colour negative (alpha kept) */
-export function invPixels(d) {
+export const invPixels = (d) => runSteps(invPixelsG(d));
+export function* invPixelsG(d) {
   const o = new Uint8ClampedArray(d.length);
-  for ( let i = 0; i < d.length; i += 4 ) { o[i] = 255 - d[i]; o[i + 1] = 255 - d[i + 1]; o[i + 2] = 255 - d[i + 2]; o[i + 3] = d[i + 3] > 40 ? 255 : 0; }
-  return unpinkPixels(redSafePixels(o));
+  for ( let i = 0; i < d.length; i += 4 ) { o[i] = 255 - d[i]; o[i + 1] = 255 - d[i + 1]; o[i + 2] = 255 - d[i + 2]; o[i + 3] = d[i + 3] > 40 ? 255 : 0; if ( !(i & (STEP_MASK << 2)) ) yield; }
+  return yield* unpinkPixelsG(yield* redSafePixelsG(o));
 }
 /* the art in its own colours (alpha made hard, red made safe) */
-export function origPixels(d) {
+export const origPixels = (d) => runSteps(origPixelsG(d));
+export function* origPixelsG(d) {
   const o = new Uint8ClampedArray(d);
-  for ( let i = 3; i < o.length; i += 4 ) o[i] = o[i] > 40 ? 255 : 0;
-  return redSafePixels(o);
+  for ( let i = 3; i < o.length; i += 4 ) { o[i] = o[i] > 40 ? 255 : 0; if ( !((i - 3) & (STEP_MASK << 2)) ) yield; }
+  return yield* redSafePixelsG(o);
 }
 /* the art posterised to three flat tones by its own lightness (ink, the accent, paper; the darkest 38 % ink, the next 34 % accent):
    inside a round portrait the cut-away background goes ink, so the head and shoulders stand out */
-export function postPixels(d, w, h, alpha, cut, accent) {
-  const n = w * h, o = new Uint8ClampedArray(n * 4), L = new Float32Array(n), vals = [];
+export const postPixels = (d, w, h, alpha, cut, accent) => runSteps(postPixelsG(d, w, h, alpha, cut, accent));
+export function* postPixelsG(d, w, h, alpha, cut, accent) {
+  const n = w * h, o = new Uint8ClampedArray(n * 4), L = new Float32Array(n), vals = new Float32Array(n);
   const fig = cut ?? alpha;
-  for ( let i = 0; i < n; i++ ) { L[i] = lumOf(d, i * 4); if ( fig[i] ) vals.push(L[i]); }
-  vals.sort((a, b) => a - b);
-  const q = (p) => (vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * p))] : 128);
-  const t1 = q(0.38), t2 = Math.max(t1 + 1, q(0.72));
+  let nv = 0;
+  for ( let i = 0; i < n; i++ ) { L[i] = lumOf(d, i * 4); if ( fig[i] ) vals[nv++] = L[i]; if ( !(i & STEP_MASK) ) yield; }
+  const rk = (p) => Math.min(nv - 1, Math.floor(nv * p));
+  const [v1, v2] = nv ? yield* kthG(vals, nv, [rk(0.38), rk(0.72)]) : [128, 128];
+  const t1 = v1, t2 = Math.max(t1 + 1, v2);
   const ink = [0x0b, 0x0b, 0x10], paper = [0xff, 0xfd, 0xf2];
   for ( let i = 0; i < n; i++ ) {
+    if ( !(i & STEP_MASK) ) yield;
     if ( !alpha[i] ) continue;
     const c = !fig[i] ? ink : L[i] < t1 ? ink : L[i] < t2 ? accent : paper;
     o[i * 4] = c[0]; o[i * 4 + 1] = c[1]; o[i * 4 + 2] = c[2]; o[i * 4 + 3] = 255;
   }
-  return redSafePixels(o);
+  return yield* redSafePixelsG(o);
 }
 const hexRgb = (c) => { const m = /^#([0-9a-f]{6})/i.exec(String(c)); return m ? [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16)) : [255, 212, 0]; };
 
@@ -432,17 +492,19 @@ function rgbOfHsl(h, s, l) {
 /* the art's colours turned, every pixel at its own luminance. mode "n" = the opposite hue, "h" = turned by `turn` (0..1 of a circle),
    "d" = duotone: the darker half of the figure in accent A, the lighter in accent B (rgb arrays), each at its own luminance. Saturation is
    raised (a dull art still shows the turn); a grey pixel stays grey in n / h. -> RGBA */
-export function heldPixels(d, mode, o = {}) {
+export const heldPixels = (d, mode, o = {}) => runSteps(heldPixelsG(d, mode, o));
+export function* heldPixelsG(d, mode, o = {}) {
   const out = new Uint8ClampedArray(d.length), n = d.length / 4;
   let mid = 0.18;
   if ( mode === "d" ) {   // the median luminance of the figure (a histogram of 1024 bins, no sort)
     const hg = new Uint32Array(1025); let cnt = 0;
-    for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { hg[Math.round(relY(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) * 1024)]++; cnt++; }
+    for ( let i = 0; i < n; i++ ) { if ( d[i * 4 + 3] > 40 ) { hg[Math.round(relY(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) * 1024)]++; cnt++; } if ( !(i & STEP_MASK) ) yield; }
     if ( cnt ) { let acc = 0, k = 0; for ( ; k <= 1024; k++ ) { acc += hg[k]; if ( acc > cnt >> 1 ) break; } mid = Math.min(1024, k) / 1024; }
   }
   const A = o.a ?? [255, 212, 0], B = o.b ?? [25, 168, 255], turn = mode === "n" ? 0.5 : (o.turn ?? 0.33);
   const memo = new Map();   // token art repeats its colours: each colour is turned once
   for ( let i = 0; i < n; i++ ) {
+    if ( !(i & STEP_MASK) ) yield;
     const j = i * 4, r = d[j], g = d[j + 1], b = d[j + 2];
     if ( !(d[j + 3] > 40) ) continue;
     const key = (r << 16) | (g << 8) | b, hit = memo.get(key);
@@ -466,34 +528,46 @@ let PIX_UID = 0;
    256 px picture (3-5 x that on a loaded machine). Worked out in the frame that shows the drawing, that frame ran 100-250 ms and the seats
    dropped DIFFERENT drawings. artJobs() walks a plan's drawings without drawing (e._jobs set) and lists the arts still missing as jobs the
    player works off between frames, before they are due. -> the art, or null in that dry walk */
-function need(e, P, key, make) {
+function need(e, P, key, make, makeG = null) {
   if ( !e._jobs ) return make();
   const k = `${P.uid ?? 0}|${key}`;
-  if ( !e._jobs.has(k) ) e._jobs.set(k, make);
+  if ( !e._jobs.has(k) ) { if ( makeG ) make.g = makeG; e._jobs.set(k, make); }   // LEADSTEP: a job that can run in steps (job.g)
   return null;
 }
 function figPix(e, s) {
+  if ( e._figs?.has(s) ) return e._figs.get(s);
+  return runSteps(figPixG(e, s));
+}
+/* LEADSTEP: figPix in steps (the read-back, the alpha, the cut-out, the negative, the own colours, the inked picture) */
+export function* figPixG(e, s) {
   const sh = sharedOf(s), sk = skey(s, "figpix");
   e._figs ??= new Map();
-  if ( e._figs.has(s) ) return e._figs.get(s);
-  if ( sh?.has(sk) ) { const v = sh.get(sk); e._figs.set(s, v); return v; }
+  const known = () => { if ( e._figs.has(s) ) return e._figs.get(s); if ( sh?.has(sk) ) { const v = sh.get(sk); e._figs.set(s, v); return v; } return null; };
+  { const v = known(); if ( v ) return v; }
   const k = Math.min(1, 256 / Math.max(s.sw, s.sh));
   const w = Math.max(2, Math.round(s.sw * k)), h = Math.max(2, Math.round(s.sh * k));
-  let P = { w, h, pixels: false, area: 0.8 };
+  let P = { w, h, pixels: false, area: 0.8 }, img = null, c = null;
   try {
-    const c = e.makeCanvas(w, h), x = ctx2d(e, c);
+    c = e.makeCanvas(w, h); const x = ctx2d(e, c);
     x.drawImage(s.src, s.sx, s.sy, s.sw, s.sh, 0, 0, w, h);
-    const img = typeof x.getImageData === "function" ? x.getImageData(0, 0, w, h) : null;
+    img = typeof x.getImageData === "function" ? x.getImageData(0, 0, w, h) : null;
+  } catch { img = null; }
+  yield;
+  try {
     if ( img?.data?.length === w * h * 4 ) {
       const d = img.data, n = w * h, alpha = new Uint8Array(n);
-      let on = 0; for ( let i = 0; i < n; i++ ) if ( d[i * 4 + 3] > 40 ) { alpha[i] = 1; on++; }
-      const m = figureMask(d, w, h);
+      let on = 0; for ( let i = 0; i < n; i++ ) { if ( d[i * 4 + 3] > 40 ) { alpha[i] = 1; on++; } if ( !(i & STEP_MASK) ) yield; }
+      const m = yield* figureMaskG(d, w, h);
       const put = (rgba) => { const cv = e.makeCanvas(w, h), cx = ctx2d(e, cv), id = cx.createImageData(w, h); id.data.set(rgba); cx.putImageData(id, 0, 0); return cv; };
+      const inv = put(yield* invPixelsG(d)); yield;
+      const orig = put(yield* origPixelsG(d)); yield;
+      const ink = put(yield* inkPixelsG(d, w, h, alpha, false));
       P = { w, h, pixels: true, area: on / n, d, alpha, cut: m.cut ? m.mask : null, kind: m.kind, uid: ++PIX_UID,
-        inv: put(invPixels(d)), orig: put(origPixels(d)), ink: put(inkPixels(d, w, h, alpha, false)), post: new Map(), held: new Map(), proj: new Map(), put };
+        inv, orig, ink, post: new Map(), held: new Map(), proj: new Map(), put };
     }
-    c.width = 0; c.height = 0;
+    if ( c ) { c.width = 0; c.height = 0; }
   } catch { P = { w, h, pixels: false, area: 0.8 }; }
+  { const v = known(); if ( v ) return v; }
   e._figs.set(s, P); sh?.set(sk, P);
   return P;
 }
@@ -502,27 +576,38 @@ function figPix(e, s) {
    showed. warmFigs does the work ahead (at the call, and for the visible tokens while the browser is idle): -> ms spent */
 export function warmFigs(e, list = e.figs) {
   const t0 = globalThis.performance?.now?.() ?? Date.now();
+  runSteps(warmFigsG(e, list));
+  return (globalThis.performance?.now?.() ?? Date.now()) - t0;
+}
+/* LEADSTEP: warmFigs in steps (I.warm(list, { steps: true })): the same pictures, the same caches */
+export function* warmFigsG(e, list = e.figs) {
   for ( const g of list ?? [] ) {
     if ( !g?.sil ) continue;
-    const P = figPix(e, g.sil);
+    const P = yield* figPixG(e, g.sil);
     if ( !P.pixels ) continue;
-    edgeOf(P); heldArt(e, P, "n");
-    postArt(e, P, rimFor(e, P));
+    yield* edgeOfG(P); yield* heldArtG(e, P, "n");
+    yield* postArtG(e, P, rimFor(e, P));
   }
-  return (globalThis.performance?.now?.() ?? Date.now()) - t0;
 }
 /* the posterised art lit by `lit` (cached per lit colour, as before) */
 function postArt(e, P, lit) {
-  if ( !P.post.get(lit) ) P.post.set(lit, P.put(postPixels(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit)))));
+  return P.post.get(lit) || runSteps(postArtG(e, P, lit));
+}
+function* postArtG(e, P, lit) {
+  if ( !P.post.get(lit) ) { const px = yield* postPixelsG(P.d, P.w, P.h, P.alpha, P.cut, hexRgb(safeColor(lit === PAPER || lit === INK ? e.tone.a : lit))); if ( !P.post.get(lit) ) P.post.set(lit, P.put(px)); }
   return P.post.get(lit);
 }
 /* ENG24: the base of every figure (its pictures, its edge colour): the part a drawing's treatment is decided on (figTreat reads the art's
    area), worked out at the call; the rest (held twins, posterised) are artJobs -> ms spent */
 export function warmBase(e, list = e.figs) {
   const t0 = globalThis.performance?.now?.() ?? Date.now();
-  for ( const g of list ?? [] ) { if ( !g?.sil ) continue; const P = figPix(e, g.sil); if ( P.pixels ) edgeOf(P); }
-  if ( e.sil ) figureOf(e);
+  runSteps(warmBaseG(e, list));
   return (globalThis.performance?.now?.() ?? Date.now()) - t0;
+}
+/* LEADSTEP: warmBase in steps (I.play's first job, I.warmFor's pieces) */
+export function* warmBaseG(e, list = e.figs) {
+  for ( const g of list ?? [] ) { if ( !g?.sil ) continue; const P = yield* figPixG(e, g.sil); if ( P.pixels ) yield* edgeOfG(P); }
+  if ( e.sil ) yield* figureOfG(e);
 }
 /* the held art of a figure (IMPACT4), cached per treatment and parameter */
 function heldArt(e, P, t, turn = 0.33) {
@@ -530,7 +615,17 @@ function heldArt(e, P, t, turn = 0.33) {
   const A = hexRgb(safeColor(e.tone.a)), B = hexRgb(safeColor(e.tone.b));
   const key = t === "d" ? `d:${A}:${B}` : t === "h" ? `h:${Math.round(turn * 12)}` : "n";
   const c = P.held.get(key);
-  return c ?? need(e, P, key, () => P.held.get(key) ?? (P.held.set(key, P.put(heldPixels(P.d, t, { a: A, b: B, turn: Math.round(turn * 12) / 12 }))), P.held.get(key)));
+  return c ?? need(e, P, key, () => P.held.get(key) ?? runSteps(heldArtG(e, P, t, turn)), () => heldArtG(e, P, t, turn));
+}
+/* LEADSTEP: the held art in steps (the same picture, kept under the same key) */
+function* heldArtG(e, P, t, turn = 0.33) {
+  if ( !P.pixels ) return null;
+  const A = hexRgb(safeColor(e.tone.a)), B = hexRgb(safeColor(e.tone.b));
+  const key = t === "d" ? `d:${A}:${B}` : t === "h" ? `h:${Math.round(turn * 12)}` : "n";
+  if ( P.held.get(key) ) return P.held.get(key);
+  const px = yield* heldPixelsG(P.d, t, { a: A, b: B, turn: Math.round(turn * 12) / 12 });
+  if ( !P.held.get(key) ) P.held.set(key, P.put(px));
+  return P.held.get(key);
 }
 /* the figure's whole outline (its alpha, not the cut-out) in one flat colour: needs no pixel read */
 function alphaTint(e, s, color) {
@@ -559,14 +654,21 @@ export const rimColor = (e) => { const c = e.rimTone === "b" ? e.tone.b : e.tone
 const lum8 = (v) => 0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2];
 function edgeOf(P) {
   if ( P.edge !== undefined ) return P.edge;
+  return runSteps(edgeOfG(P));
+}
+function* edgeOfG(P) {
+  if ( P.edge !== undefined ) return P.edge;
   let r = 0, g = 0, b = 0, n = 0;
   const A = P.alpha, w = P.w, h = P.h;
-  for ( let y = 1; y < h - 1; y++ ) for ( let x = 1; x < w - 1; x++ ) {
-    const i = y * w + x;
-    if ( !A[i] || (A[i - 1] && A[i + 1] && A[i - w] && A[i + w]) ) continue;
-    for ( const j of [i, i + 1, i - 1, i + w, i - w] ) if ( A[j] ) { r += P.d[j * 4]; g += P.d[j * 4 + 1]; b += P.d[j * 4 + 2]; n++; }
+  for ( let y = 1; y < h - 1; y++ ) {
+    for ( let x = 1; x < w - 1; x++ ) {
+      const i = y * w + x;
+      if ( !A[i] || (A[i - 1] && A[i + 1] && A[i - w] && A[i + w]) ) continue;
+      for ( const j of [i, i + 1, i - 1, i + w, i - w] ) if ( A[j] ) { r += P.d[j * 4]; g += P.d[j * 4 + 1]; b += P.d[j * 4 + 2]; n++; }
+    }
+    if ( (y & 15) === 15 ) yield;
   }
-  P.edge = n ? [r / n, g / n, b / n] : null;
+  if ( P.edge === undefined ) P.edge = n ? [r / n, g / n, b / n] : null;
   return P.edge;
 }
 export function rimFor(e, P) {
@@ -642,16 +744,18 @@ export function figTreat(e, f) {
   return { t, list, each, zs, offs, slices, area: a, flash };
 }
 /* the projections of a figure's pixels on a direction (local units), sorted: the slice's cut line for a share of its area */
+function* projG(P, key) {
+  if ( !P.proj.has(key) ) {
+    const c = Math.cos((key * Math.PI) / 16), s = Math.sin((key * Math.PI) / 16), l = [];
+    for ( let y = 0; y < P.h; y++ ) { for ( let x = 0; x < P.w; x++ ) if ( P.alpha[y * P.w + x] ) l.push(((x + 0.5) / P.w - 0.5) * c + ((y + 0.5) / P.h - 0.5) * s); if ( (y & 15) === 15 ) yield; }
+    const v = Float32Array.from(l); yield;
+    if ( !P.proj.has(key) ) P.proj.set(key, v.sort());
+  }
+  return P.proj.get(key);
+}
 function cutAt(e, P, w, h, ang, share) {
   const key = Math.round(((ang % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 16)) % 32;
-  const list = P.proj.get(key) ?? need(e, P, `proj:${key}`, () => {
-    if ( !P.proj.has(key) ) {
-      const c = Math.cos((key * Math.PI) / 16), s = Math.sin((key * Math.PI) / 16), l = [];
-      for ( let y = 0; y < P.h; y++ ) for ( let x = 0; x < P.w; x++ ) if ( P.alpha[y * P.w + x] ) l.push(((x + 0.5) / P.w - 0.5) * c + ((y + 0.5) / P.h - 0.5) * s);
-      P.proj.set(key, Float32Array.from(l).sort());
-    }
-    return P.proj.get(key);
-  });
+  const list = P.proj.get(key) ?? need(e, P, `proj:${key}`, () => runSteps(projG(P, key)), () => projG(P, key));
   if ( !list?.length ) return null;
   const v = list[Math.max(0, Math.min(list.length - 1, Math.floor(list.length * (1 - share))))];
   return { ang: (key * Math.PI) / 16, at: v };   // the slice = local points whose projection (x / w, y / h, on ang) is above `at`
@@ -718,7 +822,7 @@ function drawFig(ctx, e, f, g, t, R, z = 1, slice = 0) {
   const artOf = (tt) => {
     if ( tt === "i" ) return P.inv;
     if ( tt === "k" ) return P.ink;
-    if ( tt === "p" ) { const a = P.post.get(lit); return a || !P.pixels ? a ?? null : need(e, P, `post:${lit}:${e.tone.a}`, () => postArt(e, P, lit)); }
+    if ( tt === "p" ) { const a = P.post.get(lit); return a || !P.pixels ? a ?? null : need(e, P, `post:${lit}:${e.tone.a}`, () => postArt(e, P, lit), () => postArtG(e, P, lit)); }
     if ( tt === "n" || tt === "d" || tt === "h" ) return heldArt(e, P, tt, turn);
     return P.pixels ? P.orig : null;
   };
@@ -773,17 +877,25 @@ function paintFigs(ctx, e, f) {
 /* IMPACT4: the figures of a drawing each on its own canvas, so the player can move it with its token (a knock-back, a fall, a shake the
    token's own reaction plays during the impact). -> [{ g, canvas, x, y, size (css px) }]; the same seeded draws as paintFigs */
 export function paintFigLayers(e, f, q = 1) {
+  return runSteps(paintFigLayersG(e, f, q));
+}
+/* LEADSTEP: one figure layer per step (`each(layer)` is called as each is drawn: the player rasters it there) */
+export function* paintFigLayersG(e, f, q = 1, each = null) {
   const tr = figTreat(e, f);
   if ( !tr ) return [];
   const R = rng((f.seed ^ 0x5bd1e995) >>> 0), u = unit(e), out = [];
-  tr.list.forEach((g, i) => {
-    if ( e.local && Math.hypot(g.cx - e.cx, g.cy - e.cy) > e.local.r ) { drawFig(skipCtx, e, f, g, tr.each[i], R, 1, 0); return; }   // outside the gentle panel: nothing (the draws keep the seeded order)
+  for ( let i = 0; i < tr.list.length; i++ ) {
+    const g = tr.list[i];
+    if ( e.local && Math.hypot(g.cx - e.cx, g.cy - e.cy) > e.local.r ) { drawFig(skipCtx, e, f, g, tr.each[i], R, 1, 0); continue; }   // outside the gentle panel: nothing (the draws keep the seeded order)
     const zz = tr.zs[i], size = Math.ceil(Math.hypot(g.sil.w, g.sil.h) * zz * 1.12 + u * 0.08 + 8), [dx, dy] = tr.offs[i];
     const c = e.makeCanvas(Math.max(2, Math.round(size * q)), Math.max(2, Math.round(size * q))), x = ctxLayer(e, c);
     x.setTransform?.(q, 0, 0, q, 0, 0);
     drawFig(x, e, f, { ...g, cx: size / 2, cy: size / 2 }, tr.each[i], R, zz, tr.slices[i]);
-    out.push({ g, canvas: c, x: g.cx + dx - size / 2, y: g.cy + dy - size / 2, size, dx, dy });
-  });
+    const L0 = { g, canvas: c, x: g.cx + dx - size / 2, y: g.cy + dy - size / 2, size, dx, dy };
+    out.push(L0);
+    if ( each ) each(L0);
+    yield;
+  }
   return out;
 }
 /* a context that draws nothing (keeps the seeded order of a figure that is not shown) */
@@ -794,7 +906,7 @@ const skipCtx = new Proxy({}, { get: () => () => {} });
    not yet done when its drawing is painted is simply worked out there, as before: the picture is the same either way) */
 export function artJobs(e, plan) {
   const jobs = new Map();
-  if ( e?.sil && !e._tints?.has("fig") ) jobs.set("fig", () => figureOf(e));
+  if ( e?.sil && !e._tints?.has("fig") ) { const j = () => figureOf(e); j.g = () => figureOfG(e); jobs.set("fig", j); }
   e._jobs = jobs;
   try {
     for ( const f of plan?.frames ?? [] ) {
@@ -1127,3 +1239,41 @@ export function paintFrame(ctx, e0, f) {
   return true;
 }
 export const PAINTERS = Object.keys(PAINT);
+
+/* ---------- LEADSTEP (1.9.30): a drawing's calls written down in one step, rastered in the next ----------
+   deferCtx(ctx) gives the painters a stand-in context that only writes the calls down (in order: methods and property sets); replayG()
+   then makes exactly those calls on the real context, all of them, in one go (the player reads one pixel after it: the raster). The real
+   context gets the same calls in the same order with nothing in between: the same pixels. Anything that READS the context (a property,
+   getImageData, measureText, isPointInPath, getTransform) first plays every call written so far, so a painter always reads the real state.
+   Why not a few calls per step: live (Chrome 2D, software canvas) a raster in the middle of a drawing changed its pixels wherever it fell
+   (between a path's strokes, between a rotated figure's blits; also a drawing rastered by strips under a clip, and one rastered on a worker's
+   OffscreenCanvas): of 171 drawings checked only cuts between top-level pieces held, and those did not make the costly piece cheaper (the
+   black frame's 24 paper-ring blits of a cut-in figure: one piece of 5-7 ms). So the raster of one drawing stays one step (impact/README.md
+   "LEADSTEP"); what moved out of it is the art and the painters' own work (the first step) and the figure layers (a step each). */
+const READ_OPS = new Set(["getImageData", "measureText", "isPointInPath", "isPointInStroke", "getTransform", "getLineDash", "getContextAttributes", "isContextLost"]);
+const PURE_OPS = new Set(["createLinearGradient", "createRadialGradient", "createConicGradient", "createPattern", "createImageData"]);
+export const deferStats = { reads: 0 };
+export function deferCtx(ctx) {
+  const ops = [];   // flat: name, args | value, kind (0 call, 1 set)
+  let at = 0;
+  const playAll = () => { for ( ; at < ops.length; at += 3 ) { const k = ops[at]; if ( ops[at + 2] ) ctx[k] = ops[at + 1]; else ctx[k](...ops[at + 1]); } };
+  const fns = new Map();
+  const proxy = new Proxy(ctx, {
+    get(t, k) {
+      const v = t[k];
+      if ( typeof v === "function" ) {
+        if ( PURE_OPS.has(k) ) return v.bind(t);
+        if ( READ_OPS.has(k) ) return (...a) => { deferStats.reads++; playAll(); return v.apply(t, a); };
+        let fn = fns.get(k);
+        if ( !fn ) { fn = (...a) => { ops.push(k, a, 0); }; fns.set(k, fn); }
+        return fn;
+      }
+      if ( ops.length > at ) { deferStats.reads++; playAll(); }
+      return t[k];
+    },
+    set(t, k, v) { ops.push(k, v, 1); return true; }
+  });
+  // eslint-disable-next-line require-yield
+  function* replayG() { playAll(); }
+  return { ctx: proxy, ops, replayG, playAll, get pending() { return (ops.length - at) / 3; } };
+}
