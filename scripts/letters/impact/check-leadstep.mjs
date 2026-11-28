@@ -155,6 +155,46 @@ async function life(ok) {
     ok(I.stats.steps > hh.plan.frames.length, `leadstep life: the drawings were painted in steps (${I.stats.steps} steps)`);
     I.stats.stepMax = Math.max(s0, I.stats.stepMax); }
   E.knobs.fillCost = 0;
+
+  /* GPUPAINT (1.9.31): paint: "gpu" puts the drawings and figure layers on card canvases (a context asked without willReadFrequently),
+     never read back on the page (no getImageData on them), each sent to the card once (createImageBitmap); without the option, or in a
+     browser without createImageBitmap, everything is as in 1.9.30 */
+  await E.tick(1500);
+  { const mk0 = document.createElement, log = new Map();
+    document.createElement = (t) => { const el = mk0(t); if ( t !== "canvas" ) return el; const get0 = el.getContext.bind(el);
+      el.getContext = (kind, attrs) => { const c0 = get0(kind, attrs); let r = log.get(el); if ( !r ) log.set(el, r = { wrf: [], reads: 0 }); r.wrf.push(!!attrs?.willReadFrequently);
+        return new Proxy(c0, { get: (tt, k) => (k === "getImageData" ? (...a) => { r.reads++; return tt.getImageData(...a); } : tt[k]), set: (tt, k, v) => { tt[k] = v; return true; } }); };
+      return el; };
+    let kicks = [];
+    const cib0 = globalThis.createImageBitmap;
+    globalThis.createImageBitmap = (c) => { kicks.push(c); return Promise.resolve({ close() {} }); };
+    const free = (a) => { for ( const g of a.plan.frames ) { if ( g.cv ) { g.cv.width = 0; g.cv.height = 0; g.cv = null; } for ( const L0 of g.figEls ?? [] ) { L0.el.width = 0; L0.el.height = 0; } g.figEls = null; } };
+    const spT = { kind: "crit", magnitude: 1.9, seed: 31, subject: { x: 700, y: 400 } };
+    try {
+      log.clear(); kicks = [];
+      const a = I.prepare(spT), wantSz = sizes(a);
+      const shown = a.plan.frames.filter((f) => f.cv && f.type !== "rest").map((f) => f.cv);
+      ok(kicks.length === 0 && shown.every((c) => log.get(c)?.wrf[0] === true && log.get(c).reads >= 1), `gpupaint: without the option the drawings are software canvases rastered by a read, nothing sent to the card (${kicks.length} kicks)`);
+      free(a);
+      log.clear(); kicks = [];
+      const g = I.prepare({ ...spT, paint: "gpu" });
+      const gs = g.plan.frames.filter((f) => f.cv && f.type !== "rest"), layers = gs.flatMap((f) => (f.figEls ?? []).map((L0) => L0.el));
+      ok(g.env?.gpu === true && sizes(g) === wantSz, `gpupaint: paint "gpu" gives the same drawings (sizes, figure layers, clips)`);
+      ok(gs.every((f) => log.get(f.cv)?.wrf[0] === false && log.get(f.cv).reads === 0), "gpupaint: each drawing is a card canvas, never read back on the page");
+      ok(layers.every((c) => log.get(c)?.reads === 0), `gpupaint: no figure layer is read back (${layers.length} layers)`);
+      ok(kicks.length === gs.length + layers.length && [...gs.map((f) => f.cv), ...layers].every((c) => kicks.includes(c)), `gpupaint: every drawing and layer is sent to the card once (${kicks.length} kicks for ${gs.length} + ${layers.length})`);
+      const gh = g.play(); await E.tick(gh.plan.ms + 300);
+      ok((await gh.finished) === "done" && liveCv() === 0, "gpupaint: a card-painted impact plays and leaves nothing");
+      /* a stepped card prepare: the same drawings */
+      kicks = []; const st2 = I.prepare({ ...spT, paint: "gpu" }, { steps: true }); let n2 = 0; while ( st2.step(0.5) && n2 < 10000 ) n2++;
+      ok(st2.done && sizes(st2) === wantSz && kicks.length === gs.length + layers.length, "gpupaint: stepped, the same drawings and kicks");
+      free(st2);
+      /* a browser without createImageBitmap: the old path */
+      delete globalThis.createImageBitmap; log.clear();
+      const o = I.prepare({ ...spT, paint: "gpu" });
+      ok(o.env?.gpu === false && o.plan.frames.filter((f) => f.cv && f.type !== "rest").every((f) => log.get(f.cv)?.wrf[0] === true), "gpupaint: without createImageBitmap paint \"gpu\" falls back to the software path");
+      free(o);
+    } finally { document.createElement = mk0; if ( cib0 ) globalThis.createImageBitmap = cib0; else delete globalThis.createImageBitmap; } }
 }
 
 if ( import.meta.url === pathToFileURL(process.argv[1] ?? "").href ) {

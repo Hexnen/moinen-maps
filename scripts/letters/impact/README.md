@@ -45,6 +45,7 @@ over), `"off"` (switched off on this client).
 | `also` | (1.9.20) more tokens that take part as figures (the other tokens a crowd blow struck, a thrower): up to 8 figures in all with `subject` and `from`; each one only on a seat that may see it |
 | `figures` | (1.9.20) `false`: no figure is drawn (the new ladders without the tokens taking part); `"rim"`: rims only, the art never changed. Can only lower |
 | `hitstop`, `punch` | `false` turns the hold / the shove off for this call; `punch: 0.5` scales it |
+| `paint` | (1.9.31 GPUPAINT) `"gpu"`: the drawings and figure layers are painted on graphics-card 2D canvases and sent to the card ahead without waiting (a `createImageBitmap` snapshot), never rastered or read back on the page's thread. Same plan, timing, guard and drawings; the pixels differ a little at shape edges (the card's anti-aliasing and filtering), see "GPUPAINT". Omitted (the default) = the software path of 1.9.30, byte for byte. A browser without `createImageBitmap` falls back to the software path |
 | `vision` | `"none"`: show it even when the subject token is not visible to this user (and take a hidden `from` token's direction) |
 | `reduced` | `true`: this caller's own reduced-motion setting. A caller can only LOWER: `true` reduces; `false` (or nothing) leaves the OS reduced-motion switch in charge (1.8.2; before, `false` overruled the OS). Only the client's own Motion setting `full` overrules the OS |
 | `gentle` | `true`: the gentle variant for this call (a module's own "fewer effects" setting): no full-field frame, no hit-stop, everything inside a panel round the subject. Can only lower: `false` never raises a client that is set to `local` (1.8.2) |
@@ -466,6 +467,30 @@ figure layer (FNV over the whole canvas: 15 calls, 171 drawings, 104 figure laye
 changed the layers' pixels, so the read stays. Live result (cold first plays, Omni-Man, 7 intro variants, GM + player, 3 plays each):
 frames over budget in the lead 23 -> 9 (player 7 -> 0, GM 16 -> 9), the double drops (~18 ms) gone; what is left on the GM seat is that
 one raster + the layer read. Numbers in the talking-heads report `dev/intro-perf-lead-v14.md`.
+
+### GPUPAINT (1.9.31): the drawings on the graphics card, opt-in (`paint: "gpu"`)
+
+LEADSTEP left one task over a 165 Hz frame on the GM seat: the software raster of ONE full-view drawing (8-10 ms) plus a figure layer's
+read-back (~4 ms of waiting on the GPU). Neither can be cut without changing pixels, so the owner accepted slightly different pixels
+(2026-11-28) for the callers that ask. With `spec.paint === "gpu"` (and `createImageBitmap` present):
+- `envOf` sets `env.gpu`; a drawing (not `rest`) is painted on a plain 2D context (`ctxLayer`, no `willReadFrequently`), so Chrome keeps it
+  on the card;
+- instead of `rasterNow` (a 1 px read) the drawing is kicked: `gpuKick(c)` takes a `createImageBitmap` snapshot and closes it when it
+  comes; the page's thread only hands the recorded calls over and the card rasters them ahead of the show, nothing waits;
+- figure layers are kicked instead of read (`flushLayer` is not called);
+- an armed hand-over (`prepare` -> `play`) is reused only between the same paint modes; `I.stats.gpuKicks` counts the kicks.
+Same plan, timing, guard, steps and drawings. Without the key everything is the 1.9.30 path byte for byte (maps, plus-ultra splashes and
+pixel-vfx words do not ask, so they do not change). Checks: `check-leadstep.mjs --life` (the default path reads, the gpu path never reads
+or asks `willReadFrequently`, kicks = drawings + layers, same plan sizes, the stepped gpu path, the fallback without `createImageBitmap`).
+
+Measured live (lane 1, RTX 3070 Ti, Omni-Man stand-in, the talking-heads intro's three drawings for all 7 variants, GM seat):
+- pixels: mean |diff| 0.12-0.36 per channel, 0.5-1.15 % of pixels differ by more than 8, 0.19-0.43 % by more than 32; the diff images
+  show only anti-aliased shape edges (the star, the lines, the rim), the figure itself is the same; other kinds tried for the record
+  (crit / hit / ko lines and slams) differ more at edges (mean up to 2.9, up to 9.7 % over 8), which is why it stays opt-in;
+- the longest painting step on the page's thread: 8.6-13.2 ms -> 0.5-0.7 ms;
+- cold first plays (7 variants x GM + player x 3, interleaved A/B): lead frames from LETR's painting (about -800..-1000 ms) 16 of 42
+  plays -> 1 of 42, plays with no lead frame over 9 ms 22 -> 37 of 42; what is left is the talking-heads mount (~-300 ms), not LETR.
+Numbers and media in the talking-heads report `dev/intro-perf-lead-v15.md`.
 
 ## Integration recipes
 

@@ -188,7 +188,11 @@ export function createImpact(L, tools = null) {
          tessellation of thousands of halftone dots to the frame that first shows it: measured as a stall of several hundred ms) */
       makeCanvas: (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; },
       ctx2d: (c) => c.getContext("2d", { willReadFrequently: true }),
-      ctxLayer: (c) => c.getContext("2d") };   // CRITFREEZE: a figure layer is shown, never read (draw.mjs ctxLayer)
+      ctxLayer: (c) => c.getContext("2d"),   // CRITFREEZE: a figure layer is shown, never read (draw.mjs ctxLayer)
+      /* GPUPAINT (1.9.31): a caller that passes paint: "gpu" gets its drawings on graphics-card 2D canvases, sent to the card ahead
+         without waiting (gpuKick), never rastered or read back on the page's thread; the pixels differ a little (the card's filtering
+         and blending), so it is opt-in: every other call paints exactly as before */
+      gpu: spec.paint === "gpu" && typeof globalThis.createImageBitmap === "function" };
     /* where the blow lands: on the struck figure's rim on the side it comes from; the weak steps put it right on the rim (the figure
        stays in sight), a figure struck from nowhere in particular gets its rim spot from the seed */
     /* SAKUGATOKEN (1.9.27): round a struck token the gentle panel is the token's surroundings too (a jagged star reaching 1.12 x its radius) */
@@ -437,14 +441,14 @@ export function createImpact(L, tools = null) {
     const q = Math.min(globalThis.devicePixelRatio || 1, Math.sqrt(MAX_PIX / (e.W * e.H)));
     const c = f.type === "rest" ? e.makeCanvas(1, 1) : e.makeCanvas(Math.max(1, Math.round(e.W * q)), Math.max(1, Math.round(e.H * q)));
     f._pc = c;
-    const ctx = e.ctx2d(c);
+    const ctx = e.gpu && f.type !== "rest" ? e.ctxLayer(c) : e.ctx2d(c);   // GPUPAINT: a card canvas (never read)
     ctx.setTransform?.(c.width / e.W, 0, 0, c.height / e.H, 0, 0);
     if ( f.type === "rest" ) ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     const rec = deferCtx(ctx);
     try { paintFrame(rec.ctx, e, f); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
     yield;
     try { yield* rec.replayG(); } catch ( err ) { console.warn("LETR | impact drawing failed", err); }
-    rasterNow(ctx);
+    if ( e.gpu && f.type !== "rest" ) gpuKick(c); else rasterNow(ctx);
     Object.assign(c.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%", display: "none" });
     const clip = backClip(frameEnv(e, f), f);   // IMPACT5: a panel round the cut-in, the same polygon the drawing's ink outlines
     /* IMPACT4: the figures of this drawing, each on its own canvas that follows its token */
@@ -452,7 +456,7 @@ export function createImpact(L, tools = null) {
     if ( f.type !== "rest" && e.figs?.length ) {
       yield;
       try {
-        figEls = (yield* paintFigLayersG(e, f, q, (L0) => flushLayer(L0.canvas))).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); return { el, g: L0.g }; });
+        figEls = (yield* paintFigLayersG(e, f, q, (L0) => (e.gpu ? gpuKick(L0.canvas) : flushLayer(L0.canvas)))).map((L0) => { const el = L0.canvas; Object.assign(el.style, { position: "absolute", left: `${L0.x.toFixed(1)}px`, top: `${L0.y.toFixed(1)}px`, width: `${L0.size}px`, height: `${L0.size}px`, display: "none", transformOrigin: "50% 50%" }); return { el, g: L0.g }; });
       } catch ( err ) { figEls = []; console.warn("LETR | impact figures failed", err); }
     }
     f.cv = c; f._pc = null;
@@ -498,6 +502,11 @@ export function createImpact(L, tools = null) {
      instead (createImageBitmap: no wait for the card), live it changed the layers' pixels (the read decides how the layer is rastered),
      so the read stays; it is the step's main cost (~4 ms of waiting in a lead frame). */
   function flushLayer(c) { rasterNow(c.getContext?.("2d", { willReadFrequently: true })); }
+  /* GPUPAINT (1.9.31, paint: "gpu"): send a card canvas's drawing to the graphics card now, without waiting for it: a snapshot
+     (createImageBitmap) makes the browser raster the canvas on the card's process ahead of its show; the page's thread only hands the
+     calls over (live, talking-heads intros, 7 variants: the longest painting step 8.6-13.2 ms -> 0.5-0.7 ms; the pixels differ only at
+     anti-aliased shape edges, see impact README "GPUPAINT") */
+  function gpuKick(c) { try { stats.gpuKicks = (stats.gpuKicks ?? 0) + 1; const p = globalThis.createImageBitmap(c); p?.then?.((b) => b?.close?.(), () => {}); } catch {} }
   function show(h, i) {
     const t0 = now(), f = h.plan.frames[i], old = h.plan.frames[h.idx];
     paint(h, i);
@@ -669,7 +678,7 @@ export function createImpact(L, tools = null) {
     h.jobN = h.jobs.length;
     h.trace = [];
     /* drawings painted by prepare() are kept when the view and the frame type are still the same */
-    if ( armed?.env && armed.env.W === h.env.W && armed.env.H === h.env.H && Math.hypot(armed.env.cx - h.env.cx, armed.env.cy - h.env.cy) < 2 && armed.plan.mode === plan.mode ) {
+    if ( armed?.env && armed.env.W === h.env.W && armed.env.H === h.env.H && !!armed.env.gpu === !!h.env.gpu && Math.hypot(armed.env.cx - h.env.cx, armed.env.cy - h.env.cy) < 2 && armed.plan.mode === plan.mode ) {
       h.env._tints = armed.env._tints;
       /* the figures keep the tokens' places at prepare time (they follow from there) */
       h.env.figs = armed.env.figs;
